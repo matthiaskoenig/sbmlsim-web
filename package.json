@@ -7,14 +7,14 @@
   "files": [
     "dist"
   ],
-  "main": "./dist/sbmlsim-web.iife.js",
+  "main": "./dist/sbmlsim-web.umd.cjs",
   "module": "./dist/sbmlsim-web.js",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/sbmlsim-web.js",
-      "require": "./dist/sbmlsim-web.iife.js"
+      "require": "./dist/sbmlsim-web.umd.cjs"
     }
   },
   "scripts": {

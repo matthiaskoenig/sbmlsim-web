@@ -10,22 +10,26 @@ import type {
 } from './contract'
 
 // The bodies below are the ones of the contract document of sbmlsim
-// (`docs/serve.md`), field for field: a field which this library names
-// otherwise, or does not name at all, fails to compile here.
+// (`docs/serve.md`) field for field, with every id of its example replaced by a
+// neutral one: a model, a panel, a knob, a curve and a series are data of a
+// payload and never of this library. TypeScript checks the names of the fields
+// and not their values, so the fixtures stay what they are for, a compile-time
+// diff against the document: a field which this library names otherwise, or
+// does not name at all, fails to compile here.
 
 const declaration: PanelDeclaration = {
   contract: 'panel/1',
   panel: {
-    id: 'renal',
-    title: 'Renal impairment',
-    subtitle: 'hydrochlorothiazide after a single oral dose',
+    id: 'panelA',
+    title: 'Panel A',
+    subtitle: 'the question the panel answers',
     x_label: 'time [hr]',
   },
   axes: [
     {
-      id: 'dose',
-      label: 'dose',
-      target: 'PODOSE_hctz',
+      id: 'knobA',
+      label: 'knob A',
+      target: 'targetA',
       unit: 'mg',
       kind: 'choice',
       min: null,
@@ -38,9 +42,9 @@ const declaration: PanelDeclaration = {
       default: 25.0,
     },
     {
-      id: 'egfr',
-      label: 'renal function',
-      target: 'f_renal_function',
+      id: 'knobB',
+      label: 'knob B',
+      target: 'targetB',
       unit: 'dimensionless',
       kind: 'range',
       min: 0.2,
@@ -51,20 +55,20 @@ const declaration: PanelDeclaration = {
     },
   ],
   curves: [
-    { id: '[Cve_hctz]', label: 'hydrochlorothiazide, plasma', unit: 'uM', scale: 'linear' },
-    { id: 'Aurine_hctz', label: 'hydrochlorothiazide, urine', unit: 'umol', scale: 'linear' },
+    { id: '[curveA]', label: 'curve A', unit: 'uM', scale: 'linear' },
+    { id: 'curveB', label: 'curve B', unit: 'umol', scale: 'linear' },
   ],
   data: [
     {
-      id: 'beermann1976_urine',
-      label: 'Beermann 1976 (5 mg, oral)',
-      curve: 'Aurine_hctz',
-      dataset: 'Beermann1976_Tab1A',
+      id: 'seriesA',
+      label: 'Study A (single dose)',
+      curve: 'curveB',
+      dataset: 'StudyA_Tab1A',
       x: 'time',
       y: 'value',
       yerr: null,
-      sel: { label: 'amount_urine_hctz5po_4' },
-      conversion: '1/(297.7 g/mole)',
+      sel: { label: 'seriesA_rows' },
+      conversion: '1/(100 g/mole)',
       unit: null,
     },
   ],
@@ -73,34 +77,34 @@ const declaration: PanelDeclaration = {
     end: 120.0,
     points: 2,
     x_unit: 'hr',
-    preinit: { BW: 75.0 },
+    preinit: { paramA: 75.0 },
   },
   limits: { end: 10000.0, points: 2000, knobs: 4, grid: 64, curves: 16 },
 }
 
-const request: SimulateRequest = { values: { dose: 25.0 }, grid: { egfr: 3 } }
+const request: SimulateRequest = { values: { knobA: 25.0 }, grid: { knobB: 3 } }
 
 const answer: SimulateResponse = {
   contract: 'panel/1',
   spec_hash: '31f8db7d3d6d14a46ad2a5d1642c36999a6ce89ea1ff9863bb2a97d553642e6d',
   x: [0.0, 1.0, 2.0],
-  dims: [{ id: 'egfr', label: 'renal function', unit: 'dimensionless', values: [0.2, 0.6, 1.0] }],
+  dims: [{ id: 'knobB', label: 'knob B', unit: 'dimensionless', values: [0.2, 0.6, 1.0] }],
   curves: {
-    '[Cve_hctz]': [
+    '[curveA]': [
       [1.727788792509682e-45, 0.4657270384445122, 0.7080096418038107],
       [1.7277887925096822e-45, 0.3916815929135674, 0.5462303310110749],
       [1.727788792509682e-45, 0.34200231622543875, 0.4516395144971838],
     ],
-    Aurine_hctz: [
+    curveB: [
       [1.6234091601443682e-69, 0.5849593608918757, 2.2902077861891277],
       [4.870219778211929e-69, 1.436210578900252, 5.26572987877097],
       [8.117020126691858e-69, 2.0211049712399904, 7.0914377715035295],
     ],
   },
-  units: { x: 'hr', '[Cve_hctz]': 'uM', Aurine_hctz: 'umol' },
+  units: { x: 'hr', '[curveA]': 'uM', curveB: 'umol' },
   provenance: {
-    model: 'hctz',
-    panel: 'renal',
+    model: 'm1',
+    panel: 'panelA',
     model_sha256: 'e47e40b60ff28f8d3a12b0b99d09482ed3cba8e239dcb5cd9cc14cadae48f82c',
     variant: null,
     engine: 'roadrunner',
@@ -115,8 +119,8 @@ const data: PanelDataResponse = {
   contract: 'paneldata/1',
   series: [
     {
-      id: 'beermann1976_urine',
-      label: 'Beermann 1976 (5 mg, oral)',
+      id: 'seriesA',
+      label: 'Study A (single dose)',
       x: [0.0, 12.0, 96.0, 168.0],
       y: [0.0, 10.110849848841115, 13.873026536781996, 13.889821968424588],
       yerr: null,
@@ -129,12 +133,12 @@ const data: PanelDataResponse = {
 
 const app: AppDeclaration = {
   contract: 'app/1',
-  title: 'Hydrochlorothiazide',
-  subtitle: 'a physiologically based model of hydrochlorothiazide',
-  pages: [{ id: 'renal', title: 'Renal impairment', panels: ['renal'] }],
+  title: 'Model A',
+  subtitle: 'what the model is',
+  pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'] }],
   variants: [],
-  citation: 'Koenig et al. (2026)',
-  doi: '10.5281/zenodo.0000000',
+  citation: 'Author et al. (2026)',
+  doi: '10.0000/zenodo.0000000',
   licenses: ['CC BY-SA 4.0'],
 }
 
@@ -152,7 +156,7 @@ describe('the contracts', () => {
     }).not.toThrow()
     expect(declaration.limits.knobs).toBe(4)
     expect(answer.dims[0]?.values).toEqual([0.2, 0.6, 1.0])
-    expect(request.grid).toEqual({ egfr: 3 })
+    expect(request.grid).toEqual({ knobB: 3 })
     expect(app.pages[0]?.panels).toEqual([declaration.panel.id])
   })
 
@@ -168,7 +172,7 @@ describe('the contracts', () => {
 
   it('states no unit as null on both contracts', () => {
     expect(declaration.data[0]?.unit).toBeNull()
-    expect(data.series[0]?.unit).toBe(answer.units.Aurine_hctz)
+    expect(data.series[0]?.unit).toBe(answer.units.curveB)
     expect(data.series[0]?.x_unit).toBe(answer.units.x)
   })
 })
@@ -211,5 +215,25 @@ describe('checkContract', () => {
       expect((error as ContractError).expected).toBe('app/1')
       expect((error as ContractError).message).toContain('app/2')
     }
+  })
+
+  it('says of a contract which is no version what it carries', () => {
+    const messages = [
+      { body: { contract: 2 }, says: 'carries 2 as its contract' },
+      { body: { contract: null }, says: 'carries null as its contract' },
+      { body: { contract: { version: 1 } }, says: 'carries an object as its contract' },
+      { body: {}, says: 'carries no contract' },
+    ]
+    for (const { body, says } of messages) {
+      try {
+        checkContract(body, CONTRACTS.panel)
+        expect.unreachable('a body which is of no version is refused')
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContractError)
+        expect((error as ContractError).message).toContain(says)
+        expect((error as ContractError).message).toContain('panel/1')
+      }
+    }
+    expect(new ContractError(2, CONTRACTS.panel).contract).toBe(2)
   })
 })

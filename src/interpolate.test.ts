@@ -150,4 +150,44 @@ describe('interpolate', () => {
     }
     expect(interpolate(answer, { egfr: 0.25 }).c).toEqual([0.5, 1])
   })
+
+  it('interpolates over three axes multilinearly', () => {
+    // the rows are the points of (a, b, c) in C order, the row of (i, j, k)
+    // being 4 * i + 2 * j + k
+    const g = grid([axis('a', [0, 1]), axis('b', [0, 1]), axis('c', [0, 1])], {
+      v: [[0], [1], [2], [3], [4], [5], [6], [7]],
+    })
+    // the centre of the cube is the mean of its eight corners, 28 / 8
+    expect(interpolate(g, { a: 0.5, b: 0.5, c: 0.5 }).v).toEqual([3.5])
+    // on two of the axes exactly: 0.75 * row(1, 0, 0) + 0.25 * row(1, 0, 1)
+    expect(interpolate(g, { a: 1, b: 0, c: 0.25 }).v).toEqual([4.25])
+  })
+
+  it('reads an axis whose values descend', () => {
+    // a choice knob keeps the order its declaration lists its choices in, so an
+    // axis of the doses 50, 25 and 12.5 arrives in that order
+    const g = grid([axis('dose', [50, 25, 12.5])], { c: [[100], [200], [300]] })
+    expect(interpolate(g, { dose: 50 }).c).toEqual([100])
+    expect(interpolate(g, { dose: 25 }).c).toEqual([200])
+    expect(interpolate(g, { dose: 12.5 }).c).toEqual([300])
+    // half way between the values 50 and 25 is half way between their rows
+    expect(interpolate(g, { dose: 37.5 }).c).toEqual([150])
+    // outside the axis: the nearer of its ends, which is its first row here
+    expect(interpolate(g, { dose: 100 }).c).toEqual([100])
+    expect(interpolate(g, { dose: 0 }).c).toEqual([300])
+  })
+
+  it('reads an axis whose values are in no order', () => {
+    const g = grid([axis('k', [0, 2, 1])], { c: [[0], [20], [10]] })
+    // the first interval which brackets the value is the one which is read:
+    // 1.5 lies in [0, 2] at three quarters, 0.25 * 0 + 0.75 * 20
+    expect(interpolate(g, { k: 1.5 }).c).toEqual([15])
+    // a value no interval brackets reads the nearest point, the value 2 here
+    expect(interpolate(g, { k: 3 }).c).toEqual([20])
+  })
+
+  it('gives NaN for a grid whose axis has no values', () => {
+    const g = grid([axis('k', [])], { c: [[1, 2]] })
+    expect(interpolate(g, { k: 0 }).c).toEqual([NaN, NaN])
+  })
 })

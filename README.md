@@ -20,12 +20,12 @@ A grid is fetched once per figure and not once per movement of a knob: `interpol
 npm ci
 npm run lint       # eslint and prettier
 npm test           # vitest
-npm run build      # dist/sbmlsim-web.js (ESM), dist/sbmlsim-web.iife.js, dist/types
 npm run typecheck  # the whole project, the tests included
+npm run build      # dist/sbmlsim-web.js (ESM), dist/sbmlsim-web.umd.cjs (UMD), dist/types
 npm run format     # write what prettier wants
 ```
 
-Vue is bundled into both builds, so a page which loads `dist/sbmlsim-web.iife.js` in a `<script>` needs nothing else.
+Vue is bundled into both builds, so a host page needs nothing else: it reads `dist/sbmlsim-web.js` with a `<script type="module">` or through a bundler, and `dist/sbmlsim-web.umd.cjs` is the same library for a `require` and for a page which wants the `sbmlsimWeb` global.
 
 ## License
 

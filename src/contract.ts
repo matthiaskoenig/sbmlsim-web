@@ -28,26 +28,67 @@ export type ContractVersion = (typeof CONTRACTS)[keyof typeof CONTRACTS]
 
 /** A payload of a contract version this library does not speak. */
 export class ContractError extends Error {
-  /** The version the payload carries, `undefined` for a body which carries none. */
-  readonly contract: string | undefined
+  /**
+   * The `contract` of the payload as it carries it: a version for a payload
+   * which states one, a value of another type for one which states something
+   * which is no version, `undefined` for one which states none.
+   */
+  readonly contract: unknown
   /** The version which was expected. */
   readonly expected: string
 
   /**
-   * Build the error of a payload of another version.
+   * Build the error of a payload which is not of the expected version.
    *
-   * @param contract the version of the payload, `undefined` for none
+   * @param contract the `contract` of the payload, `undefined` for none
    * @param expected the version which was expected
    */
-  constructor(contract: string | undefined, expected: string) {
-    super(
-      contract === undefined
-        ? `The payload carries no contract and is not of '${expected}'.`
-        : `The payload is of the contract '${contract}' and not of '${expected}'.`,
-    )
+  constructor(contract: unknown, expected: string) {
+    super(ContractError.of(contract, expected))
     this.name = 'ContractError'
     this.contract = contract
     this.expected = expected
+  }
+
+  /**
+   * Get the message of a payload which is not of the expected version.
+   *
+   * @param contract the `contract` of the payload
+   * @param expected the version which was expected
+   * @returns the message, which names what the payload carries and what was
+   *   expected, and says which of the two cases it is
+   */
+  private static of(contract: unknown, expected: string): string {
+    if (contract === undefined) {
+      return `The payload carries no contract and is not of '${expected}'.`
+    }
+    if (typeof contract === 'string') {
+      return `The payload is of the contract '${contract}' and not of '${expected}'.`
+    }
+    return (
+      `The payload carries ${ContractError.shown(contract)} as its contract, which is ` +
+      `no version, and is not of '${expected}'.`
+    )
+  }
+
+  /**
+   * Show the `contract` of a payload which is no version at all.
+   *
+   * @param contract the `contract` of the payload, which is no string
+   * @returns what it carries where that is a value to show, and what kind of
+   *   value it is otherwise
+   */
+  private static shown(contract: unknown): string {
+    switch (typeof contract) {
+      case 'number':
+      case 'boolean':
+      case 'bigint':
+        return String(contract)
+      case 'object':
+        return contract === null ? 'null' : 'an object'
+      default:
+        return `a value of the type ${typeof contract}`
+    }
   }
 }
 
@@ -56,14 +97,15 @@ export class ContractError extends Error {
  *
  * @param body the parsed body of an answer of the endpoint
  * @param expected the version it has to carry, one of `CONTRACTS`
- * @throws ContractError for a body of another version and for one which carries
- *   no version at all, a body which is no object among them
+ * @throws ContractError for a body of another version, for one whose `contract`
+ *   is no version and for one which carries no `contract` at all, a body which
+ *   is no object among them
  */
 export function checkContract(body: unknown, expected: string): void {
   const contract =
     typeof body === 'object' && body !== null && 'contract' in body ? body.contract : undefined
   if (contract !== expected) {
-    throw new ContractError(typeof contract === 'string' ? contract : undefined, expected)
+    throw new ContractError(contract, expected)
   }
 }
 
