@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { plotSvg } from './plot'
+import { plotGeometry, plotSvg } from './plot'
 import type { PlotSpec, Points, Series } from './plot'
 
 // Every id below is a neutral one: a curve, a series and a knob are data of a
@@ -137,6 +137,29 @@ describe('plotSvg', () => {
     expect(occurrences(svg, 'class="marker"')).toBe(3)
     expect(svg.indexOf('class="points"')).toBeLessThan(svg.indexOf('class="curve"'))
     expect(texts(svg)).toContain('Series A')
+  })
+
+  it('leaves a study point beyond the x of the curves out of the figure and its axes', () => {
+    // a study measures what it measured and a panel simulates the horizon it
+    // declares: a point past the curves must stretch neither axis nor draw
+    // anywhere, so the figure is the one of the simulation
+    const inside: Points = { id: 'seriesA', label: 'Series A', x: [0, 1, 2], y: [1, 2, 3] }
+    const beyond: Points = { ...inside, x: [...inside.x, 99], y: [...inside.y, 400] }
+    const drawn = plotSvg(spec(1, { points: [beyond] }))
+    expect(occurrences(drawn, 'class="marker"')).toBe(3)
+    expect(texts(drawn)).not.toContain('99')
+    expect(drawn).toBe(plotSvg(spec(1, { points: [inside] })))
+  })
+
+  it('lends a series the colour of the curve it names and keeps its own id', () => {
+    const svg = plotSvg(
+      spec(2, { points: [{ id: 'seriesA', label: 'Series A', curve: 'curve2', x: [0], y: [1] }] }),
+    )
+    expect(svg).toContain('<g class="points" data-series="seriesA">')
+    const curve = /<path class="curve" data-series="curve2" style="stroke:([^;"]*)/.exec(svg)
+    const marker = /<circle class="marker" style="fill:([^;"]*)/.exec(svg)
+    expect(curve?.[1]).toContain('--sbmlsim-ramp')
+    expect(marker?.[1]).toBe(curve?.[1])
   })
 
   it('draws the study points of a series without an error in the colour of its curve', () => {
@@ -297,5 +320,40 @@ describe('plotSvg', () => {
     expect(svg).toContain('class="background"')
     expect(occurrences(svg, 'class="axis ')).toBe(2)
     expect(occurrences(svg, 'class="tick"')).toBeGreaterThan(3)
+  })
+})
+
+describe('plotGeometry', () => {
+  it('gives the box the figure draws its axes along', () => {
+    const one = spec(1)
+    const geometry = plotGeometry(one)
+    const svg = plotSvg(one)
+    expect(geometry.width).toBe(one.width)
+    expect(geometry.height).toBe(one.height)
+    const lines = [
+      ...svg.matchAll(
+        /<line class="axis-line" x1="([^"]*)" y1="([^"]*)" x2="([^"]*)" y2="([^"]*)"/g,
+      ),
+    ].map((one) => one.slice(1).map(Number))
+    // the x axis runs along the bottom of the box, the y axis along its left
+    expect(lines[0]).toEqual([geometry.box.x0, geometry.box.y1, geometry.box.x1, geometry.box.y1])
+    expect(lines[1]).toEqual([geometry.box.x0, geometry.box.y0, geometry.box.x0, geometry.box.y1])
+    expect(geometry.box.x1).toBeGreaterThan(geometry.box.x0)
+    expect(geometry.box.y1).toBeGreaterThan(geometry.box.y0)
+  })
+
+  it('puts a value where the figure draws it', () => {
+    const one = spec(1)
+    const geometry = plotGeometry(one)
+    const start = /^M([\d.-]+) ([\d.-]+)/.exec(paths(plotSvg(one), 'curve')[0] ?? '')
+    expect(Number(start?.[1])).toBeCloseTo(geometry.xAt(one.x[0] ?? 0), 1)
+    expect(Number(start?.[2])).toBeCloseTo(geometry.yAt(one.series[0]?.values[0] ?? 0), 1)
+  })
+
+  it('says which values its y axis can draw at all', () => {
+    const geometry = plotGeometry(spec(1, { logY: true }))
+    expect(geometry.drawable(1)).toBe(true)
+    expect(geometry.drawable(0)).toBe(false)
+    expect(geometry.drawable(Number.NaN)).toBe(false)
   })
 })

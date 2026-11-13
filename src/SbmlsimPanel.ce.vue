@@ -42,6 +42,39 @@
  * is aborted, and the answer of a request which is no longer the latest one is
  * dropped.
  *
+ * ## The readout is a view of the drawn grid and nothing else
+ *
+ * The crosshair and the readout cost no request and no interpolation of their
+ * own: they read the curves which are already drawn, at the index of the grid
+ * nearest to the cursor, and they show what the figure shows. They are placed
+ * on the layout the renderer drew from (`plotGeometry`), so they sit on the
+ * figure which is there and never on one the element had to guess at, and the
+ * readout never leaves the plot box: it flips to the other side of the
+ * crosshair where it would pass the right edge and is clamped at the top and
+ * the bottom.
+ *
+ * The pointer is a `pointermove`, so a pen and a finger read a panel as a
+ * mouse does, every coordinate is guarded, and a device which never moves a
+ * pointer and an environment which measures nothing simply have no readout.
+ * For a screen reader the whole overlay is decoration (`aria-hidden`): the
+ * figure keeps its `role="img"` and its `<title>`, which is what tells a
+ * reader who does not see it what it shows, and nothing of the figure takes
+ * the focus.
+ *
+ * ## The study data is one fetch for the life of the element
+ *
+ * A panel which declares study data fetches it once, when it is activated, and
+ * draws it under its curves for as long as it lives: the data does not depend
+ * on a knob. The series of `paneldata/1` arrive in the unit the model resolved
+ * for the curve they sit under, so nothing is converted here; a series which is
+ * delivered on a scale of its own - one which declares a unit of its own, and
+ * one whose id is no curve of the panel - is left out, because a figure has one
+ * y axis and drawing a series on another scale would be a figure which lies.
+ *
+ * A failed fetch of the study data is no failure of the panel. The curves are
+ * what a reader asked for, they are there, and the overlay is simply absent: no
+ * line is written, no `sbmlsim-error` is dispatched and nothing is logged.
+ *
  * ## Nothing rejects into the page
  *
  * Every failure - a dead network, a slow endpoint, a refused request, a
@@ -80,13 +113,15 @@ import type {
   CurveScale,
   PanelAxis,
   PanelCurve,
+  PanelDataDeclaration,
+  PanelDataSeries,
   PanelDeclaration,
   SimulateRequest,
   SimulateResponse,
 } from './contract'
 import { interpolate } from './interpolate'
-import { plotSvg } from './plot'
-import type { PlotSpec, Series } from './plot'
+import { plotGeometry, plotSvg, seriesColour } from './plot'
+import type { PlotGeometry, PlotSpec, Points, Series } from './plot'
 
 /** How the controls are placed next to the figure. */
 type LayoutName = 'auto' | 'sidebar' | 'stacked' | 'toolbar'
@@ -96,6 +131,69 @@ type DrawnLayout = Exclude<LayoutName, 'auto'>
 
 /** Which values of the design tokens the element asks for. */
 type ThemeName = 'auto' | 'light' | 'dark'
+
+/** Whether a part of the element a page can switch off is on. */
+type Switch = 'on' | 'off'
+
+/** Where the pointer is, in the pixels of the box the overlay is drawn in. */
+interface PointerState {
+  /** The x of the pointer from the left edge of that box. */
+  x: number
+  /** Its y from the top edge. */
+  y: number
+  /** The left edge of the figure inside that box. */
+  left: number
+  /** Its top edge. */
+  top: number
+  /** The pixels of the drawn figure per pixel of its `viewBox`. */
+  scale: number
+}
+
+/** One row of the readout: a curve, its colour and its value at the cursor. */
+interface ReadoutRow {
+  /** The id of the curve. */
+  id: string
+  /** Its label, the one of the legend. */
+  label: string
+  /** The colour the figure draws it in. */
+  colour: string
+  /** Its value at the cursor with its unit, `NO_VALUE` for a point without one. */
+  value: string
+  /** The pixel its value sits at on the crosshair, `null` for one which is not drawn. */
+  dot: number | null
+}
+
+/** A marker of the readout where the crosshair crosses a curve. */
+interface Dot {
+  /** The id of the curve. */
+  id: string
+  /** Its colour. */
+  colour: string
+  /** The pixel of its value. */
+  at: number
+}
+
+/** The readout at the cursor, placed in the pixels of the box of the overlay. */
+interface Readout {
+  /** The pixel of the crosshair, the x of the grid nearest to the cursor. */
+  line: number
+  /** The top of the crosshair, the top of the plot box. */
+  lineTop: number
+  /** Its height, the height of the plot box. */
+  lineHeight: number
+  /** The left of the box of the readout. */
+  left: number
+  /** Its top. */
+  top: number
+  /** Its width. */
+  width: number
+  /** Its height. */
+  height: number
+  /** The x which is read out, with its unit. */
+  time: string
+  /** One row per curve of the figure, in the order they are drawn. */
+  rows: ReadoutRow[]
+}
 
 /** One curve as it is drawn: the declaration of a curve, resolved against a run. */
 interface DrawnCurve {
@@ -162,6 +260,37 @@ const MOST_HEADING = 6
 const GENERIC_Y = 'value'
 /** The separator of the parts of the provenance footer. */
 const FOOTER_SEPARATOR = ' · '
+/** The pixels between the crosshair and the box of the readout. */
+const READOUT_GAP = 8
+/** The padding inside the box of the readout, in pixels. */
+const READOUT_PAD = 6
+/** The border of that box, which its style declares, in pixels. */
+const READOUT_BORDER = 1
+/** The height of one row of the readout, which its style declares, in pixels. */
+const READOUT_ROW = 15
+/**
+ * The size of the font of the readout in pixels, the small font of the design.
+ *
+ * The box of the readout is placed and never measured, as the figure places its
+ * legend: its room is the characters of its rows at this size and this width,
+ * so a host which sets `--sbmlsim-font-size-small` well away from it gets a box
+ * which is a little wide or a label which is cut with an ellipsis.
+ */
+const READOUT_FONT = 11
+/** The width a character of a label is given, a share of its font size. */
+const READOUT_EM = 0.5
+/** The width a character of a value is given, which is set in the mono font. */
+const READOUT_MONO_EM = 0.62
+/** The pixels the swatch of a row and the gap after it take. */
+const READOUT_SWATCH = 14
+/** The pixels between the label of a row and its value. */
+const READOUT_COLUMN = 8
+/** The smallest box the readout is drawn in, in pixels. */
+const READOUT_MIN = 56
+/** The significant digits a value of the readout is shown with. */
+const READOUT_DIGITS = 4
+/** What a value which is no number is shown as, e.g. a point which did not integrate. */
+const NO_VALUE = '-'
 
 const props = defineProps({
   /** The endpoint of the service, e.g. `https://models.example.org`; empty is the origin of the page. */
@@ -178,6 +307,18 @@ const props = defineProps({
    * attribute stays on the host, where `theme.css` matches it.
    */
   theme: { type: String as PropType<ThemeName>, default: 'auto' },
+  /**
+   * Whether the pointer reads the curves out: `on` (the default) or `off`. A
+   * panel with `hover="off"` draws no crosshair and no readout and listens to
+   * no pointer.
+   */
+  hover: { type: String as PropType<Switch>, default: 'on' },
+  /**
+   * Whether the study data of the panel is fetched and drawn under its curves:
+   * `on` (the default) or `off`. A panel with `data="off"` makes no request for
+   * it, and so does one whose declaration carries none.
+   */
+  data: { type: String as PropType<Switch>, default: 'on' },
   /** The url of a stored answer of a run, drawn when the endpoint does not answer. */
   fallback: { type: String, default: '' },
   /** The milliseconds one request is given before it is stopped. */
@@ -192,6 +333,7 @@ const props = defineProps({
 
 const host = useHost()
 const root = useTemplateRef<HTMLElement>('root')
+const plotted = useTemplateRef<HTMLElement>('plotted')
 
 /** Whether `activate()` has run, which is what makes the element draw anything. */
 const active = ref(false)
@@ -226,6 +368,15 @@ const values = shallowRef<Record<string, number>>({})
  * keep contradicting the control a reader just moved.
  */
 const gridded = ref<string | null>(null)
+/**
+ * The study data of the panel, `null` until it arrived.
+ *
+ * It is read once for the life of the element: it is the data of a study and
+ * depends on no knob, so a panel which has it never asks for it again.
+ */
+const study = shallowRef<PanelDataSeries[] | null>(null)
+/** Where the pointer is, `null` while it is not over the plot box. */
+const pointer = ref<PointerState | null>(null)
 /** Whether the y axis is drawn logarithmically. */
 const logY = ref(false)
 /** The width of the element as it was last measured, 0 before any measurement. */
@@ -314,6 +465,44 @@ function knobsOf(declared: PanelDeclaration | null): PanelAxis[] {
 function curvesOf(declared: PanelDeclaration | null): PanelCurve[] {
   const given: unknown[] = declared?.curves ?? []
   return given.filter((one): one is PanelCurve => carries(one, ['id', 'label']))
+}
+
+/**
+ * Get the study data a declaration states, by the series which can be read.
+ *
+ * @param declared the declaration, `null` until it was read
+ * @returns the declared series, in the order of the declaration
+ */
+function dataOf(declared: PanelDeclaration | null): PanelDataDeclaration[] {
+  const given: unknown[] = declared?.data ?? []
+  return given.filter((one): one is PanelDataDeclaration => carries(one, ['id', 'label']))
+}
+
+/**
+ * Get the series of the study data which carry points to draw.
+ *
+ * @param given what the endpoint answered, `null` until it answered
+ * @returns the series which can be drawn, in the order of the answer
+ */
+function seriesOf(given: PanelDataSeries[] | null): PanelDataSeries[] {
+  const items: unknown[] = given ?? []
+  return items.filter(
+    (one): one is PanelDataSeries =>
+      carries(one, ['id', 'label']) &&
+      Array.isArray((one as PanelDataSeries).x) &&
+      Array.isArray((one as PanelDataSeries).y),
+  )
+}
+
+/**
+ * Get whether two units of a payload are the same unit.
+ *
+ * @param one the unit, `null` for values which carry none
+ * @param other the other one
+ * @returns whether they are the same text, "no unit" being one of them
+ */
+function sameUnit(one: string | null | undefined, other: string | null | undefined): boolean {
+  return (one ?? '') === (other ?? '')
 }
 
 /** The knobs of the panel in the order the declaration states them. */
@@ -430,6 +619,43 @@ const yLabel = computed<string>(() => {
   return only === undefined || only === '' ? GENERIC_Y : only
 })
 
+/**
+ * The study data as it is drawn, empty while there is none to draw.
+ *
+ * A series sits under the curve its declaration names, its own id without one,
+ * and is drawn only where the endpoint delivered it on the scale of that curve:
+ * the contract makes the unit of a series and the unit of its curve the same
+ * text unless the series declares one of its own, so a series which does not
+ * match the curve it sits on is one of another scale, which a figure of one y
+ * axis cannot draw without lying about it.
+ */
+const drawnData = computed<Points[]>(() => {
+  const answer = grid.value
+  if (answer === null || props.data === 'off') {
+    return []
+  }
+  const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
+  const units = new Map(drawnCurves.value.map((one) => [one.id, one.unit]))
+  const drawn: Points[] = []
+  for (const one of seriesOf(study.value)) {
+    const curve = declared.get(one.id)?.curve ?? one.id
+    const unit = units.get(curve)
+    if (unit === undefined || !sameUnit(one.unit, unit)) {
+      continue
+    }
+    if (!sameUnit(one.x_unit, answer.units.x)) {
+      continue
+    }
+    const points: Points = { id: one.id, label: one.label, curve, x: one.x, y: one.y }
+    const errors = one.yerr
+    if (Array.isArray(errors)) {
+      points.yerr = errors.map((value) => (typeof value === 'number' ? value : Number.NaN))
+    }
+    drawn.push(points)
+  }
+  return drawn
+})
+
 /** The figure as it is drawn now, `null` while there is nothing to draw. */
 const plot = computed<PlotSpec | null>(() => {
   const answer = grid.value
@@ -446,7 +672,7 @@ const plot = computed<PlotSpec | null>(() => {
     }
     return one.unit === null || one.unit === '' ? drawn : { ...drawn, unit: one.unit }
   })
-  return {
+  const spec: PlotSpec = {
     x: answer.x,
     xLabel: xLabel.value,
     yLabel: yLabel.value,
@@ -454,6 +680,25 @@ const plot = computed<PlotSpec | null>(() => {
     width: figureWidth.value,
     height: figureHeight.value,
     logY: logY.value,
+  }
+  const points = drawnData.value
+  return points.length > 0 ? { ...spec, points } : spec
+})
+
+/**
+ * The layout of the figure which is drawn, `null` while there is none.
+ *
+ * It is the layout the renderer draws from, so the crosshair and the readout
+ * are placed on the figure which is there; a figure which cannot be laid out is
+ * `null` and not an exception, for the reason `svg` is empty rather than
+ * throwing.
+ */
+const geometry = computed<PlotGeometry | null>(() => {
+  try {
+    const spec = plot.value
+    return spec === null ? null : plotGeometry(spec)
+  } catch {
+    return null
   }
 })
 
@@ -501,6 +746,136 @@ const footer = computed<string>(() => {
   }
   return parts.join(FOOTER_SEPARATOR)
 })
+
+/**
+ * Get the index of the grid nearest to a pixel of the x axis.
+ *
+ * @param xs the x of the figure, the output times of the run
+ * @param drawn the layout of the figure
+ * @param at the pixel, in the coordinates of the figure
+ * @returns the index of the nearest x, `null` for a figure without one
+ */
+function nearestIndex(xs: number[], drawn: PlotGeometry, at: number): number | null {
+  let found: number | null = null
+  let best = Number.POSITIVE_INFINITY
+  for (const [index, value] of xs.entries()) {
+    if (!Number.isFinite(value)) {
+      continue
+    }
+    const distance = Math.abs(drawn.xAt(value) - at)
+    if (distance < best) {
+      best = distance
+      found = index
+    }
+  }
+  return found
+}
+
+/**
+ * Write a value of the readout with its unit.
+ *
+ * @param value the value, `undefined` for a curve which has none here
+ * @param unit its unit, `null` or empty for values which carry none
+ * @returns the value as short text with its unit, `NO_VALUE` for one which is
+ *   no finite number, i.e. a point of the grid which did not integrate
+ */
+function readoutValue(value: number | undefined, unit: string | null): string {
+  if (value === undefined || !Number.isFinite(value)) {
+    return NO_VALUE
+  }
+  const shown = shortNumber(value, READOUT_DIGITS)
+  return unit === null || unit === '' ? shown : `${shown} ${unit}`
+}
+
+/**
+ * Get the room the box of the readout needs.
+ *
+ * @param time the x which is read out, with its unit
+ * @param rows the rows of the readout
+ * @returns the pixels of its widest row with its padding and its border, an
+ *   estimate of its characters and no measurement, as the figure estimates the
+ *   room of its legend
+ */
+function readoutRoom(time: string, rows: ReadoutRow[]): number {
+  const label = READOUT_FONT * READOUT_EM
+  const value = READOUT_FONT * READOUT_MONO_EM
+  let most = time.length * value
+  for (const one of rows) {
+    const text = one.label.length * label + one.value.length * value
+    most = Math.max(most, READOUT_SWATCH + text + READOUT_COLUMN)
+  }
+  return (READOUT_PAD + READOUT_BORDER) * 2 + most
+}
+
+/**
+ * The readout at the cursor, `null` while the pointer is not over the plot box.
+ *
+ * It costs no request and no interpolation of its own: the values are the ones
+ * of the curves which are drawn, at the index of the grid nearest to the
+ * cursor. The box is placed next to the crosshair and never leaves the plot
+ * box: it flips to the other side where it would pass the right edge, and it is
+ * clamped at the top and at the bottom.
+ */
+const readout = computed<Readout | null>(() => {
+  const at = pointer.value
+  const drawn = geometry.value
+  const spec = plot.value
+  if (at === null || drawn === null || spec === null || props.hover === 'off') {
+    return null
+  }
+  const x0 = at.left + drawn.box.x0 * at.scale
+  const x1 = at.left + drawn.box.x1 * at.scale
+  const y0 = at.top + drawn.box.y0 * at.scale
+  const y1 = at.top + drawn.box.y1 * at.scale
+  if (at.x < x0 || at.x > x1 || at.y < y0 || at.y > y1 || !(x1 > x0) || !(y1 > y0)) {
+    return null
+  }
+  const index = nearestIndex(spec.x, drawn, (at.x - at.left) / at.scale)
+  const time = index === null ? undefined : spec.x[index]
+  if (index === null || time === undefined) {
+    return null
+  }
+  const line = at.left + drawn.xAt(time) * at.scale
+  const rows = spec.series.map((one, position): ReadoutRow => {
+    const value = one.values[index]
+    const pixel =
+      value === undefined || !drawn.drawable(value) ? null : at.top + drawn.yAt(value) * at.scale
+    return {
+      id: one.id,
+      label: one.label,
+      colour: seriesColour(position, spec.series.length),
+      value: readoutValue(value, one.unit ?? null),
+      dot: pixel === null || pixel < y0 || pixel > y1 ? null : pixel,
+    }
+  })
+  const shownTime = readoutValue(time, grid.value?.units.x ?? null)
+  const width = Math.min(
+    Math.max(readoutRoom(shownTime, rows), READOUT_MIN),
+    Math.max(READOUT_MIN, x1 - x0),
+  )
+  const rowsHeight = READOUT_ROW * (rows.length + 1) + (READOUT_PAD + READOUT_BORDER) * 2
+  const height = Math.min(rowsHeight, y1 - y0)
+  const after = line + READOUT_GAP
+  const wanted = after + width <= x1 ? after : line - READOUT_GAP - width
+  return {
+    line,
+    lineTop: y0,
+    lineHeight: y1 - y0,
+    left: clamp(wanted, x0, Math.max(x0, x1 - width)),
+    top: clamp(at.y - height / 2, y0, Math.max(y0, y1 - height)),
+    width,
+    height,
+    time: shownTime,
+    rows,
+  }
+})
+
+/** The markers where the crosshair crosses the curves, none without a readout. */
+const dots = computed<Dot[]>(() =>
+  (readout.value?.rows ?? []).flatMap((one) =>
+    one.dot === null ? [] : [{ id: one.id, colour: one.colour, at: one.dot }],
+  ),
+)
 
 /**
  * Get the id of a control of a knob, which its label points at.
@@ -771,6 +1146,32 @@ function schedule(gridId: string | null): void {
 }
 
 /**
+ * Read the study data of the panel, once for the life of the element.
+ *
+ * Its failure is not shown and not announced: the curves are what a reader
+ * asked for, the overlay is a help on top of them, and a panel which cannot
+ * draw it is a panel which draws its curves.
+ *
+ * The request carries no signal of its own. It is one request per element and
+ * it bounds itself with the timeout of the client, so there is nothing a later
+ * movement of a knob could supersede.
+ *
+ * @param declared the declaration of the panel
+ * @returns when the data arrived or failed to
+ */
+async function loadData(declared: PanelDeclaration): Promise<void> {
+  const talking = client
+  if (talking === null || props.data === 'off' || dataOf(declared).length === 0) {
+    return
+  }
+  try {
+    study.value = await attempt(() => talking.data(props.model, props.panel))
+  } catch {
+    // a panel whose study data cannot be read is a panel of its curves alone
+  }
+}
+
+/**
  * Read the declaration of the panel and run its first simulation.
  *
  * @returns when the first figure was drawn or the failure was resolved
@@ -788,7 +1189,7 @@ async function load(): Promise<void> {
     declaration.value = declared
     values.value = Object.fromEntries(knobsOf(declared).map((one) => [one.id, one.default]))
     logY.value = initialLog(declared)
-    await simulate(firstGridded(declared))
+    await Promise.all([simulate(firstGridded(declared)), loadData(declared)])
   } catch (error) {
     fail(error)
   }
@@ -919,6 +1320,57 @@ function onChange(axis: PanelAxis, event: Event): void {
 }
 
 /**
+ * Read where a pointer is, in the pixels of the box the overlay is drawn in.
+ *
+ * Nothing here assumes that there is a pointer, that it carries coordinates or
+ * that anything was measured: a device which only taps, an event without
+ * coordinates and an environment which measures no box all give `null`, which
+ * is a figure without a readout and never an exception.
+ *
+ * @param event the pointer event
+ * @returns where the pointer is, `null` where that cannot be told
+ */
+function pointerState(event: Event): PointerState | null {
+  const { clientX, clientY } = event as Partial<PointerEvent>
+  const spec = plot.value
+  const box = plotted.value
+  const figure = box?.querySelector('svg') ?? null
+  if (typeof clientX !== 'number' || typeof clientY !== 'number' || !Number.isFinite(clientX)) {
+    return null
+  }
+  if (!Number.isFinite(clientY) || spec === null || box === null || figure === null) {
+    return null
+  }
+  const inner = figure.getBoundingClientRect()
+  const outer = box.getBoundingClientRect()
+  const width = Math.round(spec.width)
+  if (!(inner.width > 0) || !(width > 0)) {
+    return null
+  }
+  return {
+    x: clientX - outer.left,
+    y: clientY - outer.top,
+    left: inner.left - outer.left,
+    top: inner.top - outer.top,
+    scale: inner.width / width,
+  }
+}
+
+/**
+ * Take the movement of a pointer over the figure.
+ *
+ * @param event the `pointermove` event
+ */
+function onPointerMove(event: Event): void {
+  pointer.value = props.hover === 'off' ? null : pointerState(event)
+}
+
+/** Take the pointer off the figure, which takes the readout with it. */
+function onPointerLeave(): void {
+  pointer.value = null
+}
+
+/**
  * Take the toggle of the scale of the y axis, which is drawn and never run.
  *
  * @param event the `change` event of the toggle
@@ -964,6 +1416,7 @@ function freeze(): void {
   sequence += 1
   pending.value = false
   frozen.value = true
+  pointer.value = null
   unobserve()
 }
 
@@ -1058,9 +1511,50 @@ defineExpose({ activate, freeze, reset })
         :style="{ minHeight: `${figureHeight}px` }"
         :aria-busy="pending ? 'true' : 'false'"
       >
-        <!-- eslint-disable-next-line vue/no-v-html -- the renderer builds this string itself and escapes every text of it -->
-        <div v-if="svg !== ''" class="figure-svg" v-html="svg"></div>
-        <p v-else class="pending">Loading the panel</p>
+        <div
+          v-if="svg !== ''"
+          ref="plotted"
+          class="plot"
+          @pointermove="onPointerMove($event)"
+          @pointerleave="onPointerLeave()"
+          @pointercancel="onPointerLeave()"
+        >
+          <!-- eslint-disable-next-line vue/no-v-html -- the renderer builds this string itself and escapes every text of it -->
+          <div class="figure-svg" v-html="svg"></div>
+          <div v-if="readout !== null" class="cursor" aria-hidden="true">
+            <div
+              class="crosshair"
+              :style="{
+                left: `${readout.line}px`,
+                top: `${readout.lineTop}px`,
+                height: `${readout.lineHeight}px`,
+              }"
+            ></div>
+            <div
+              v-for="dot of dots"
+              :key="dot.id"
+              class="dot"
+              :style="{ left: `${readout.line}px`, top: `${dot.at}px`, background: dot.colour }"
+            ></div>
+            <div
+              class="readout"
+              :style="{
+                left: `${readout.left}px`,
+                top: `${readout.top}px`,
+                width: `${readout.width}px`,
+                height: `${readout.height}px`,
+              }"
+            >
+              <p class="readout-time">{{ readout.time }}</p>
+              <p v-for="row of readout.rows" :key="row.id" class="readout-row">
+                <span class="readout-swatch" :style="{ background: row.colour }"></span>
+                <span class="readout-label">{{ row.label }}</span>
+                <span class="readout-value">{{ row.value }}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+        <p v-else-if="errorMessage === ''" class="pending">Loading the panel</p>
       </div>
     </div>
     <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
@@ -1298,6 +1792,85 @@ defineExpose({ activate, freeze, reset })
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+/*
+ * The box the figure and the overlay of the cursor share. The overlay is laid
+ * out in its pixels and takes no pointer event of its own, so the readout
+ * never stands between the pointer and the figure it reads out.
+ */
+.plot {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.cursor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.crosshair {
+  position: absolute;
+  width: 0;
+  border-left: 1px dashed var(--_fg-soft);
+}
+
+.dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -4px 0 0 -4px;
+  border: 1px solid var(--_bg-card);
+  border-radius: 50%;
+}
+
+.readout {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid var(--_line);
+  border-radius: 6px;
+  background: var(--_bg-card);
+  box-shadow: var(--_shadow);
+  color: var(--_fg);
+  font-size: var(--_font-size-small);
+  line-height: 15px;
+}
+
+.readout-time {
+  margin: 0;
+  color: var(--_fg-soft);
+  font-family: var(--_font-mono);
+  white-space: nowrap;
+}
+
+.readout-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+
+.readout-swatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.readout-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.readout-value {
+  margin-left: auto;
+  font-family: var(--_font-mono);
+  white-space: nowrap;
 }
 
 .pending {

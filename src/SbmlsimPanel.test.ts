@@ -2,7 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
-import type { PanelAxis, PanelDeclaration, SimulateRequest, SimulateResponse } from './contract'
+import type {
+  PanelAxis,
+  PanelDataDeclaration,
+  PanelDataResponse,
+  PanelDeclaration,
+  SimulateRequest,
+  SimulateResponse,
+} from './contract'
 import { PANEL_TAG, register } from './index'
 
 // The element runs in a dom, which is `happy-dom` for this file alone: every
@@ -83,6 +90,48 @@ function declaration(): PanelDeclaration {
   }
 }
 
+/** The study data the panel declares, drawn under `curveA`. */
+function declaredData(more: Partial<PanelDataDeclaration> = {}): PanelDataDeclaration {
+  return {
+    id: 'seriesA',
+    label: 'Series A',
+    curve: 'curveA',
+    dataset: 'figureA',
+    x: 'time',
+    y: 'value',
+    yerr: 'value_sd',
+    sel: null,
+    conversion: null,
+    unit: null,
+    ...more,
+  }
+}
+
+/** A declaration which carries study data under its first curve. */
+function withData(more: Partial<PanelDataDeclaration> = {}): PanelDeclaration {
+  return { ...declaration(), data: [declaredData(more)] }
+}
+
+/** The study data the endpoint answers, delivered on the scale of its curve. */
+function studyData(more: Partial<PanelDataResponse['series'][0]> = {}): PanelDataResponse {
+  return {
+    contract: 'paneldata/1',
+    series: [
+      {
+        id: 'seriesA',
+        label: 'Series A',
+        x: [0, 1, 2],
+        y: [0.1, 0.9, 1.9],
+        yerr: [0.05, 0.1, null],
+        x_unit: 'h',
+        unit: 'uM',
+        count: null,
+        ...more,
+      },
+    ],
+  }
+}
+
 /** The values of the axis of every grid the stub answers. */
 const AXIS_VALUES = [0.2, 0.6, 1]
 
@@ -137,10 +186,12 @@ type Route = () => Promise<unknown>
 const served: {
   panel: Route
   simulate: (body: SimulateRequest) => Promise<unknown>
+  data: Route
   stored: Route
 } = {
   panel: () => Promise.resolve(declaration()),
   simulate: () => Promise.resolve(run()),
+  data: () => Promise.resolve(studyData()),
   stored: () => Promise.resolve(run('knobB', undefined, 'stored00stored00')),
 }
 
@@ -179,6 +230,11 @@ function simulations(): SimulateRequest[] {
 /** The declarations the element asked for; the route of a run ends in `/simulate`. */
 function declarations(): Call[] {
   return calls.filter((one) => one.url.endsWith('/panels/panelA'))
+}
+
+/** The requests of the study data the element made. */
+function dataCalls(): Call[] {
+  return calls.filter((one) => one.url.endsWith('/data'))
 }
 
 /** Get the shadow root of an element, which every test reads the panel out of. */
@@ -270,6 +326,115 @@ function branded(tokens: Record<string, string>): HTMLElement {
   return container
 }
 
+/** The plot box of a figure, read off the axes the renderer drew. */
+interface Box {
+  /** The pixel of its left edge. */
+  x0: number
+  /** The pixel of its top edge. */
+  y0: number
+  /** The pixel of its right edge. */
+  x1: number
+  /** The pixel of its bottom edge. */
+  y1: number
+}
+
+/** Give an element the box a browser would measure for it; happy-dom measures none. */
+function measures(element: Element, width: number, height: number): void {
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      width,
+      height,
+      x: 0,
+      y: 0,
+    }),
+  })
+}
+
+/**
+ * Measure the figure of the panel and read the plot box out of its axes.
+ *
+ * The axis lines of the renderer are the box: the x axis runs along its bottom
+ * from its left edge to its right one, the y axis along its left edge. Reading
+ * it off the figure instead of recomputing it is what makes the assertions
+ * about the readout assertions about the figure which is drawn.
+ */
+function laidOut(element: PanelElement): Box {
+  const drawn = figure(element)
+  const svg = shadow(element).querySelector('svg')
+  if (svg === null) {
+    throw new Error('the panel has drawn no figure')
+  }
+  const size = {
+    width: Number(svg.getAttribute('width')),
+    height: Number(svg.getAttribute('height')),
+  }
+  measures(part(element, '.plot'), size.width, size.height)
+  measures(svg, size.width, size.height)
+  const lines = [
+    ...drawn.matchAll(
+      /<line class="axis-line" x1="([^"]*)" y1="([^"]*)" x2="([^"]*)" y2="([^"]*)"/g,
+    ),
+  ].map((one) => one.slice(1).map(Number))
+  const [x0 = 0, y1 = 0, x1 = 0] = lines[0] ?? []
+  const [, y0 = 0] = lines[1] ?? []
+  return { x0, y0, x1, y1 }
+}
+
+/** Move a pointer over the figure, as a mouse, a pen and a finger all do. */
+async function hover(element: PanelElement, at: { x: number; y: number } | null): Promise<void> {
+  const event = new Event('pointermove', { bubbles: true })
+  if (at !== null) {
+    Object.assign(event, { clientX: at.x, clientY: at.y })
+  }
+  part(element, '.plot').dispatchEvent(event)
+  await nextTick()
+}
+
+/** Take the pointer off the figure. */
+async function leave(element: PanelElement): Promise<void> {
+  part(element, '.plot').dispatchEvent(new Event('pointerleave', { bubbles: true }))
+  await nextTick()
+}
+
+/** Get the rows of the readout as the pairs of a label and a value. */
+function readoutRows(element: PanelElement): string[][] {
+  return [...shadow(element).querySelectorAll('.readout-row')].map((row) => [
+    row.querySelector('.readout-label')?.textContent.trim() ?? '',
+    row.querySelector('.readout-value')?.textContent.trim() ?? '',
+  ])
+}
+
+/** Get a number of the inline style of an element of the overlay. */
+function styleOf(
+  element: PanelElement,
+  selector: string,
+  name: 'left' | 'top' | 'width' | 'height',
+): number {
+  const found = part(element, selector)
+  const style = found instanceof HTMLElement ? found.style.getPropertyValue(name) : ''
+  return Number.parseFloat(style)
+}
+
+/** Get the box of the readout in the pixels of the figure. */
+function readoutBox(element: PanelElement): {
+  left: number
+  top: number
+  width: number
+  height: number
+} {
+  return {
+    left: styleOf(element, '.readout', 'left'),
+    top: styleOf(element, '.readout', 'top'),
+    width: styleOf(element, '.readout', 'width'),
+    height: styleOf(element, '.readout', 'height'),
+  }
+}
+
 /** Report a width to every observer the element created. */
 async function resizeTo(width: number): Promise<void> {
   for (const one of observers) {
@@ -286,6 +451,7 @@ beforeEach(() => {
   observers = []
   served.panel = () => Promise.resolve(declaration())
   served.simulate = () => Promise.resolve(run())
+  served.data = () => Promise.resolve(studyData())
   served.stored = () => Promise.resolve(run('knobB', undefined, 'stored00stored00'))
   globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const url = String(input)
@@ -294,6 +460,9 @@ beforeEach(() => {
     calls.push({ url, body })
     if (url.endsWith('/simulate')) {
       return served.simulate(body ?? {}).then(json)
+    }
+    if (url.endsWith('/data')) {
+      return served.data().then(json)
     }
     if (url.includes('/panels/')) {
       return served.panel().then(json)
@@ -720,6 +889,17 @@ describe('a failure never reaches the page', () => {
     expect(textOf(element, '.error')).not.toBe('')
   })
 
+  it('shows the error in the place of the loading text when nothing can be drawn', async () => {
+    // a panel which failed without a stored answer has nothing to draw and is
+    // not loading either, so the line of the failure is the only line
+    served.panel = unreachable
+    served.simulate = unreachable
+    const element = await started()
+    expect(textOf(element, '.error')).not.toBe('')
+    expect(shadow(element).querySelector('.pending')).toBeNull()
+    expect(figure(element)).toBe('')
+  })
+
   it('retries a request which failed on the network once and no more', async () => {
     served.panel = unreachable
     await started()
@@ -746,5 +926,181 @@ describe('freeze and activate', () => {
     await nextTick()
     expect(control(element, 'knobA').disabled).toBe(false)
     expect(declarations()).toHaveLength(1)
+  })
+})
+
+describe('the readout at the cursor', () => {
+  it('shows the value of every curve at the cursor time', async () => {
+    const element = await started()
+    const box = laidOut(element)
+    // the limits of an axis carry the same margin on both sides, so the middle
+    // of the plot box is the middle time of the run, which is 1 of its 0, 1, 2
+    await hover(element, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 })
+    expect(readoutRows(element)).toEqual([
+      ['curve A', '1 uM'],
+      ['curve B', '10 umol'],
+    ])
+    expect(textOf(element, '.readout-time')).toBe('1 h')
+    expect(dataCalls()).toHaveLength(0)
+    expect(simulations()).toHaveLength(1)
+  })
+
+  it('places the readout inside the plot near the cursor and never outside it', async () => {
+    const element = await started()
+    const box = laidOut(element)
+    const middle = (box.y0 + box.y1) / 2
+    for (const share of [0, 0.2, 0.5, 0.8, 1]) {
+      laidOut(element)
+      await hover(element, { x: box.x0 + share * (box.x1 - box.x0), y: middle })
+      const one = readoutBox(element)
+      const line = styleOf(element, '.crosshair', 'left')
+      expect(one.width).toBeGreaterThan(0)
+      expect(one.left).toBeGreaterThanOrEqual(box.x0)
+      expect(one.left + one.width).toBeLessThanOrEqual(box.x1 + 1e-6)
+      expect(line).toBeGreaterThanOrEqual(box.x0)
+      expect(line).toBeLessThanOrEqual(box.x1)
+    }
+    for (const y of [box.y0, middle, box.y1]) {
+      laidOut(element)
+      await hover(element, { x: (box.x0 + box.x1) / 2, y })
+      const one = readoutBox(element)
+      expect(one.height).toBeGreaterThan(0)
+      expect(one.top).toBeGreaterThanOrEqual(box.y0)
+      expect(one.top + one.height).toBeLessThanOrEqual(box.y1 + 1e-6)
+    }
+    // at the right edge the box flipped to the other side of the crosshair,
+    // and at the left edge it stayed on its right
+    laidOut(element)
+    await hover(element, { x: box.x1, y: middle })
+    const flipped = readoutBox(element)
+    expect(flipped.left + flipped.width).toBeLessThanOrEqual(styleOf(element, '.crosshair', 'left'))
+    laidOut(element)
+    await hover(element, { x: box.x0, y: middle })
+    expect(readoutBox(element).left).toBeGreaterThan(styleOf(element, '.crosshair', 'left'))
+  })
+
+  it('clears the readout when the cursor leaves the plot', async () => {
+    const element = await started()
+    const box = laidOut(element)
+    const centre = { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 }
+    await hover(element, centre)
+    expect(shadow(element).querySelector('.readout')).not.toBeNull()
+    await leave(element)
+    expect(shadow(element).querySelector('.readout')).toBeNull()
+    // the tick labels under the x axis are outside the plot box
+    laidOut(element)
+    await hover(element, { x: centre.x, y: box.y1 + 10 })
+    expect(shadow(element).querySelector('.readout')).toBeNull()
+    laidOut(element)
+    await hover(element, centre)
+    expect(shadow(element).querySelector('.readout')).not.toBeNull()
+    element.freeze()
+    await nextTick()
+    expect(shadow(element).querySelector('.readout')).toBeNull()
+  })
+
+  it('does not fail on a touch device without a pointer', async () => {
+    const element = await started()
+    laidOut(element)
+    // a pointer event without coordinates, and a figure nothing measured, are
+    // both a figure without a cursor and never an exception
+    await expect(hover(element, null)).resolves.toBeUndefined()
+    expect(shadow(element).querySelector('.readout')).toBeNull()
+    await expect(leave(element)).resolves.toBeUndefined()
+    const unmeasured = await started()
+    await hover(unmeasured, { x: 10, y: 10 })
+    expect(shadow(unmeasured).querySelector('.readout')).toBeNull()
+    expect(figure(unmeasured)).toContain('<svg')
+  })
+
+  it('draws no readout when hover is off', async () => {
+    const element = await started({ hover: 'off' })
+    const box = laidOut(element)
+    await hover(element, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 })
+    expect(shadow(element).querySelector('.readout')).toBeNull()
+    expect(shadow(element).querySelector('.crosshair')).toBeNull()
+  })
+
+  it('keeps the crosshair and the readout out of the accessibility tree', async () => {
+    const element = await started()
+    const box = laidOut(element)
+    await hover(element, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 })
+    expect(part(element, '.cursor').getAttribute('aria-hidden')).toBe('true')
+    expect(figure(element)).toContain('role="img"')
+    expect(figure(element)).toContain('<title>')
+    expect(shadow(element).querySelector('[tabindex]')).toBeNull()
+  })
+})
+
+describe('the study data under the curves', () => {
+  it('fetches the study data once and draws it under the curves', async () => {
+    served.panel = () => Promise.resolve(withData())
+    const element = await started()
+    expect(dataCalls()).toHaveLength(1)
+    const drawn = figure(element)
+    expect(drawn).toContain('class="points" data-series="seriesA"')
+    expect(drawn).toContain('class="marker"')
+    expect(drawn).toContain('class="errorbar"')
+    expect(drawn.indexOf('class="points"')).toBeLessThan(drawn.indexOf('class="curve"'))
+    // the data is read once and the movement of a knob redraws from it
+    move(control(element, 'knobB'), '0.4', 'input')
+    await nextTick()
+    expect(dataCalls()).toHaveLength(1)
+    expect(figure(element)).toContain('class="marker"')
+  })
+
+  it('draws no data and makes no data request when the panel declares none', async () => {
+    const element = await started()
+    expect(dataCalls()).toHaveLength(0)
+    expect(figure(element)).not.toContain('class="points"')
+  })
+
+  it('omits the overlay when data="off"', async () => {
+    served.panel = () => Promise.resolve(withData())
+    const element = await started({ data: 'off' })
+    expect(dataCalls()).toHaveLength(0)
+    expect(figure(element)).not.toContain('class="points"')
+  })
+
+  it('keeps the curves and says nothing when the study data cannot be read', async () => {
+    served.panel = () => Promise.resolve(withData())
+    served.data = unreachable
+    const seen: string[] = []
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    element.addEventListener('sbmlsim-error', (event) => {
+      seen.push((event as CustomEvent<{ kind: string }>).detail.kind)
+    })
+    await element.activate()
+    await nextTick()
+    // nothing the reader asked for failed: the curves stay, the overlay is
+    // absent, no line is written and the page is told nothing
+    expect(figure(element)).toContain('<svg')
+    expect(figure(element)).not.toContain('class="points"')
+    expect(textOf(element, '.error')).toBe('')
+    expect(seen).toEqual([])
+    expect(control(element, 'knobA').disabled).toBe(false)
+  })
+
+  it('leaves out a series which is delivered on a scale of its own', async () => {
+    // a figure has one y axis: a series in another unit than its curve would
+    // be drawn on a scale which is not the one of the axis it sits on
+    served.panel = () => Promise.resolve(withData({ unit: 'nM' }))
+    served.data = () => Promise.resolve(studyData({ unit: 'nM' }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    expect(textOf(element, '.error')).toBe('')
+  })
+
+  it('keeps a study point beyond the simulated time out of the figure', async () => {
+    served.panel = () => Promise.resolve(withData())
+    const beyond = { x: [0, 1, 2, 96], y: [0.1, 0.9, 1.9, 40], yerr: [0.05, 0.1, null, null] }
+    served.data = () => Promise.resolve(studyData(beyond))
+    const outside = await started()
+    served.data = () => Promise.resolve(studyData())
+    const inside = await started()
+    // the run answers the times 0, 1 and 2: a point at 96 would stretch both
+    // axes to cover what is drawn nowhere
+    expect(figure(outside)).toContain('class="marker"')
+    expect(figure(outside)).toBe(figure(inside))
   })
 })

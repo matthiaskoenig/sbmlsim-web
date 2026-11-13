@@ -59,8 +59,8 @@ export {
 } from './client'
 export type { FailureKind } from './client'
 export { interpolate } from './interpolate'
-export { plotSvg } from './plot'
-export type { PlotSpec, Points, Series } from './plot'
+export { plotGeometry, plotSvg, seriesColour } from './plot'
+export type { PlotBox, PlotGeometry, PlotSpec, Points, Series } from './plot'
 
 /** The tag the element is registered under unless a page asks for another one. */
 export const PANEL_TAG = 'sbmlsim-panel'
@@ -69,8 +69,9 @@ export const PANEL_TAG = 'sbmlsim-panel'
  * The class of `<sbmlsim-panel>`, a custom element with a shadow root.
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
- * `fallback` and `timeout` and the methods `activate()`, `freeze()` and
- * `reset()`, and it dispatches `sbmlsim-error` when a request failed.
+ * `hover`, `data`, `fallback`, `timeout` and `heading-level` and the methods
+ * `activate()`, `freeze()` and `reset()`, and it dispatches `sbmlsim-error`
+ * when a request failed.
  */
 export const SbmlsimPanelElement = defineCustomElement(SbmlsimPanel)
 

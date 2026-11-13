@@ -52,12 +52,14 @@ export interface Series {
   values: number[]
 }
 
-/** One series of study data, drawn as markers under the curve of its id. */
+/** One series of study data, drawn as markers under the curve it belongs to. */
 export interface Points {
-  /** The id of the series; the curve of the same id gives it its colour. */
+  /** The id of the series, which it carries into the output as `data-series`. */
   id: string
   /** Its entry in the legend. */
   label: string
+  /** The id of the curve which lends it its colour, its own id without one. */
+  curve?: string
   /** The x of its points, in the x of the figure. */
   x: number[]
   /** The value of its points, on the y of the figure. */
@@ -189,6 +191,46 @@ const ROUNDING = 1e-9
 /** What a label which does not fit its room ends with. */
 const ELLIPSIS = '\u2026'
 
+/**
+ * The plot box of a figure, in the coordinates of its `viewBox`.
+ *
+ * It is what a caller which draws over a figure - a crosshair, a readout, a
+ * marker of its own - needs: the area the curves are drawn in, which nothing
+ * of the figure leaves.
+ */
+export interface PlotBox {
+  /** The pixel of its left edge. */
+  x0: number
+  /** The pixel of its top edge. */
+  y0: number
+  /** The pixel of its right edge. */
+  x1: number
+  /** The pixel of its bottom edge. */
+  y1: number
+}
+
+/**
+ * The geometry of a figure: where its plot box is and where a value lands in it.
+ *
+ * It is the same layout `plotSvg` draws from, so a caller which places anything
+ * over a figure places it on the figure which is there and not on one it had to
+ * guess at.
+ */
+export interface PlotGeometry {
+  /** The width of the figure in pixels, as `plotSvg` draws it. */
+  width: number
+  /** The height of the figure in pixels. */
+  height: number
+  /** The plot box, the area the curves are drawn in. */
+  box: PlotBox
+  /** The pixel of an x, clamped to one length of the box beyond it. */
+  xAt: (value: number) => number
+  /** The pixel of a value on the y axis, clamped the same way. */
+  yAt: (value: number) => number
+  /** Whether a value can be drawn on the y axis at all. */
+  drawable: (value: number) => boolean
+}
+
 /** The lower and the upper limit of an axis. */
 interface Limits {
   /** The lower limit. */
@@ -206,9 +248,9 @@ interface Axis {
   /** Its ticks, in their order. */
   ticks: number[]
   /** Whether a value can be drawn on it at all. */
-  drawable(value: number): boolean
+  drawable: (value: number) => boolean
   /** The pixel of a value, clamped to one length beyond the plot box. */
-  position(value: number): number
+  position: (value: number) => number
 }
 
 /** One entry of a legend: a curve or a series of study data. */
@@ -765,6 +807,73 @@ function pathOf(xs: number[], values: number[], x: Axis, y: Axis): string {
 }
 
 /**
+ * Get the x the curves of a figure cover.
+ *
+ * @param xs the x of the figure, the output times of a run
+ * @returns the smallest and the largest of them, `null` for a figure whose x
+ *   carries no finite number, which covers nothing
+ */
+function curveRange(xs: number[]): Limits | null {
+  let low = Number.POSITIVE_INFINITY
+  let high = Number.NEGATIVE_INFINITY
+  for (const at of xs) {
+    if (Number.isFinite(at)) {
+      low = Math.min(low, at)
+      high = Math.max(high, at)
+    }
+  }
+  return Number.isFinite(low) && Number.isFinite(high) ? { low, high } : null
+}
+
+/**
+ * Cut a series of study data to the x the curves cover.
+ *
+ * A study measures what it measured and a panel simulates the horizon it
+ * declares, so a series reaches past the curves whenever the two disagree. Such
+ * a point is no point of the figure: it would stretch both axes to cover
+ * something which is drawn nowhere, and the figure would be the one of the
+ * study and not the one of the simulation. Its series keeps its legend entry,
+ * because the panel carries the series whatever the horizon is and a legend
+ * which comes and goes with the end of a simulation is worse than one which
+ * names a series the plot box does not reach.
+ *
+ * @param points the series
+ * @param range the x the curves cover, `null` for a figure which covers none
+ * @returns the points inside the range, in their order, with their errors; the
+ *   series as it is where there is no range to cut to
+ */
+function clipPoints(points: Points, range: Limits | null): Points {
+  if (range === null) {
+    return points
+  }
+  const count = Math.min(points.x.length, points.y.length)
+  const xs: number[] = []
+  const values: number[] = []
+  const errors: number[] = []
+  for (let index = 0; index < count; index += 1) {
+    const at = points.x[index]
+    const value = points.y[index]
+    if (at === undefined || value === undefined || !Number.isFinite(at)) {
+      continue
+    }
+    if (at < range.low || at > range.high) {
+      continue
+    }
+    xs.push(at)
+    values.push(value)
+    errors.push(points.yerr?.[index] ?? Number.NaN)
+  }
+  const kept: Points = { id: points.id, label: points.label, x: xs, y: values }
+  if (points.curve !== undefined) {
+    kept.curve = points.curve
+  }
+  if (points.yerr !== undefined) {
+    kept.yerr = errors
+  }
+  return kept
+}
+
+/**
  * Write the error bars of a series of study data.
  *
  * @param points the series
@@ -1060,6 +1169,160 @@ function colourbarGroup(
   )
 }
 
+/** Everything the layout of a figure settles before anything is written. */
+interface Layout {
+  /** The width of the figure in whole pixels. */
+  width: number
+  /** The height of the figure in whole pixels. */
+  height: number
+  /** The plot box. */
+  box: PlotBox
+  /** The x axis. */
+  x: Axis
+  /** The y axis. */
+  y: Axis
+  /** The study data as it is drawn, cut to the x the curves cover. */
+  points: Points[]
+  /** The colour of every series, in its order. */
+  colours: string[]
+  /** The entries of the legend, the curves first and the study data after them. */
+  entries: Entry[]
+  /** Whether the column right of the plot is a colour bar and not a legend. */
+  hasColourbar: boolean
+  /** The pixels a label of the legend has. */
+  legendLabels: number
+  /** The pixels a label of the colour bar has. */
+  barLabelRoom: number
+  /** The colour of the curve of an id, the soft foreground for an unknown one. */
+  colourOf: (id: string) => string
+}
+
+/**
+ * Get the colour of one of the series of a figure.
+ *
+ * @param index the position of the series, from 0
+ * @param count how many series the figure draws
+ * @returns the colour of the ramp at that position, the `var()` of a style
+ */
+export function seriesColour(index: number, count: number): string {
+  return rampColour(count > 1 ? index / (count - 1) : 0)
+}
+
+/**
+ * Lay a figure out: its box, its axes and the room of its column.
+ *
+ * @param spec the figure
+ * @returns the layout `plotSvg` writes and `plotGeometry` hands out
+ */
+function layoutOf(spec: PlotSpec): Layout {
+  const width = size(spec.width)
+  const height = size(spec.height)
+  const series = spec.series
+  const declared = spec.points ?? []
+  const points = declared.map((one) => clipPoints(one, curveRange(spec.x)))
+  const hasColourbar = series.length > LEGEND_LIMIT
+
+  const colours = series.map((_, index) => seriesColour(index, series.length))
+  const colourOf = (id: string): string => {
+    const index = series.findIndex((one) => one.id === id)
+    return colours[index] ?? token('fg-soft')
+  }
+
+  const entries: Entry[] = []
+  if (!hasColourbar) {
+    const unit = sharedUnit(series)
+    for (const [index, one] of series.entries()) {
+      entries.push({
+        id: one.id,
+        label: unit === undefined ? axisLabel(one.label, one.unit) : one.label,
+        colour: colours[index] ?? token('fg-soft'),
+        marker: false,
+      })
+    }
+  }
+  for (const one of declared) {
+    entries.push({
+      id: one.id,
+      label: one.label,
+      colour: colourOf(one.curve ?? one.id),
+      marker: true,
+    })
+  }
+
+  const barLabels = hasColourbar
+    ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
+    : []
+  const legendRoom =
+    entries.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(entries.map((one) => one.label)) : 0
+  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
+  const wanted = Math.max(legendRoom, barRoom)
+  const column = wanted > 0 ? Math.min(COLUMN_GAP + wanted, Math.round(width * COLUMN_SHARE)) : 0
+  const box: PlotBox = {
+    x0: LEFT,
+    y0: TOP,
+    x1: Math.max(LEFT + MIN_PLOT, width - PAD - column),
+    y1: Math.max(TOP + MIN_PLOT, height - BOTTOM),
+  }
+
+  const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
+  const ys: number[] = []
+  for (const one of series) {
+    for (let index = 0; index < Math.min(spec.x.length, one.values.length); index += 1) {
+      const value = one.values[index]
+      if (value !== undefined) {
+        ys.push(value)
+      }
+    }
+  }
+  for (const one of points) {
+    for (const [index, value] of one.y.entries()) {
+      const error = one.yerr?.[index]
+      ys.push(value)
+      if (error !== undefined && Number.isFinite(error)) {
+        ys.push(value - Math.abs(error), value + Math.abs(error))
+      }
+    }
+  }
+
+  return {
+    width,
+    height,
+    box,
+    x: axisOf(xs, false, box.x0, box.x1, tickCount(box.x1 - box.x0, X_TICK_ROOM)),
+    y: axisOf(ys, spec.logY, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM)),
+    points,
+    colours,
+    entries,
+    hasColourbar,
+    legendLabels: column - COLUMN_GAP - SWATCH - LABEL_GAP * 2,
+    barLabelRoom: column - COLUMN_GAP - COLOURBAR_BAR - TICK - LABEL_GAP,
+    colourOf,
+  }
+}
+
+/**
+ * Get where a figure puts its plot box and what lands where inside it.
+ *
+ * It is the layout `plotSvg` draws from, so a caller which places a crosshair,
+ * a readout or a marker of its own over a figure places it on the figure which
+ * is drawn. The coordinates are the ones of the `viewBox`; a figure which is
+ * scaled by the box its host gives it scales them with it.
+ *
+ * @param spec the figure, the same one `plotSvg` is given
+ * @returns its geometry
+ */
+export function plotGeometry(spec: PlotSpec): PlotGeometry {
+  const layout = layoutOf(spec)
+  return {
+    width: layout.width,
+    height: layout.height,
+    box: layout.box,
+    xAt: layout.x.position,
+    yAt: layout.y.position,
+    drawable: layout.y.drawable,
+  }
+}
+
 /**
  * Draw a figure as one inline SVG element.
  *
@@ -1083,7 +1346,9 @@ function colourbarGroup(
  * The plot box is clipped, so a value outside of the limits of an axis - the
  * decades a logarithmic axis cuts away - leaves the box instead of drawing over
  * the axes; the clip is named after that box, so two figures of one size share
- * one name and one definition of it.
+ * one name and one definition of it. The study data is cut to the x the curves
+ * cover before anything is measured, so a study which reaches past the horizon
+ * of the simulation stretches neither axis and draws nothing outside the box.
  *
  * @param spec the figure: its size, its axes, its curves and the study data
  *   under them
@@ -1091,78 +1356,21 @@ function colourbarGroup(
  *   gives the same bytes
  */
 export function plotSvg(spec: PlotSpec): string {
-  const width = size(spec.width)
-  const height = size(spec.height)
   const series = spec.series
-  const points = spec.points ?? []
-  const hasColourbar = series.length > LEGEND_LIMIT
-
-  const colours = series.map((_, index) =>
-    rampColour(series.length > 1 ? index / (series.length - 1) : 0),
-  )
-  const colourOf = (id: string): string => {
-    const index = series.findIndex((one) => one.id === id)
-    return colours[index] ?? token('fg-soft')
-  }
-
-  const entries: Entry[] = []
-  if (!hasColourbar) {
-    const unit = sharedUnit(series)
-    for (const [index, one] of series.entries()) {
-      entries.push({
-        id: one.id,
-        label: unit === undefined ? axisLabel(one.label, one.unit) : one.label,
-        colour: colours[index] ?? token('fg-soft'),
-        marker: false,
-      })
-    }
-  }
-  for (const one of points) {
-    entries.push({ id: one.id, label: one.label, colour: colourOf(one.id), marker: true })
-  }
-
-  const barLabels = hasColourbar
-    ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
-    : []
-  const legendRoom =
-    entries.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(entries.map((one) => one.label)) : 0
-  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
-  const wanted = Math.max(legendRoom, barRoom)
-  const column = wanted > 0 ? Math.min(COLUMN_GAP + wanted, Math.round(width * COLUMN_SHARE)) : 0
-  const legendLabels = column - COLUMN_GAP - SWATCH - LABEL_GAP * 2
-  const barLabelRoom = column - COLUMN_GAP - COLOURBAR_BAR - TICK - LABEL_GAP
-  const box = {
-    x0: LEFT,
-    y0: TOP,
-    x1: Math.max(LEFT + MIN_PLOT, width - PAD - column),
-    y1: Math.max(TOP + MIN_PLOT, height - BOTTOM),
-  }
-
-  const xs: number[] = [...spec.x]
-  const ys: number[] = []
-  for (const one of series) {
-    for (let index = 0; index < Math.min(spec.x.length, one.values.length); index += 1) {
-      const value = one.values[index]
-      if (value !== undefined) {
-        ys.push(value)
-      }
-    }
-  }
-  for (const one of points) {
-    for (const at of one.x) {
-      xs.push(at)
-    }
-    for (const [index, value] of one.y.entries()) {
-      const error = one.yerr?.[index]
-      ys.push(value)
-      if (error !== undefined && Number.isFinite(error)) {
-        ys.push(value - Math.abs(error), value + Math.abs(error))
-      }
-    }
-  }
-
-  const x = axisOf(xs, false, box.x0, box.x1, tickCount(box.x1 - box.x0, X_TICK_ROOM))
-  const y = axisOf(ys, spec.logY, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM))
+  const {
+    width,
+    height,
+    box,
+    x,
+    y,
+    points,
+    colours,
+    entries,
+    hasColourbar,
+    legendLabels,
+    barLabelRoom,
+    colourOf,
+  } = layoutOf(spec)
 
   const clip =
     `sbmlsim-plot-clip-${coord(box.x0)}-${coord(box.y0)}-${coord(box.x1)}-${coord(box.y1)}`.replace(
@@ -1186,7 +1394,7 @@ export function plotSvg(spec: PlotSpec): string {
 
   const drawnPoints = points
     .map((one) => {
-      const colour = colourOf(one.id)
+      const colour = colourOf(one.curve ?? one.id)
       const bars = errorsOf(one, x, y)
       const path =
         bars === ''
