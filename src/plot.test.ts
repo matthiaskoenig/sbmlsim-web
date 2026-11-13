@@ -808,3 +808,85 @@ describe('the label of an axis', () => {
     expect(Math.max(...ys)).toBeLessThanOrEqual(220)
   })
 })
+
+describe('the room the tick labels keep', () => {
+  /** The size of the font of a tick label, the estimate of the renderer. */
+  const SMALL_FONT = 11
+  /** The width of one character of that font, the estimate of the renderer. */
+  const EM = 0.55
+
+  /** A figure over a grid of minutes, whose ticks are four digits wide. */
+  function minutes(width: number, more: Partial<PlotSpec> = {}): PlotSpec {
+    const grid = Array.from({ length: 50 }, (_, index) => (index * 1440) / 49)
+    return spec(1, {
+      width,
+      height: 200,
+      x: grid,
+      xLabel: 'time (min)',
+      series: [
+        {
+          ...series(
+            1,
+            grid.map((at) => at / 30),
+          ),
+          label: 'urine',
+        },
+      ],
+      ...more,
+    })
+  }
+
+  /** The pixels every tick label of the x axis spans, in their order. */
+  function xTickSpans(svg: string): { label: string; from: number; to: number }[] {
+    const axis = svg.split('<g class="axis ')[1] ?? ''
+    const group = axis.split('<g class="data"')[0] ?? ''
+    return [
+      ...group.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+    ].map((one) => {
+      const at = Number(one[1])
+      const label = one[2] ?? ''
+      const half = (label.length * SMALL_FONT * EM) / 2
+      return { label, from: at - half, to: at + half }
+    })
+  }
+
+  it('keeps every tick label of the x axis inside the figure', () => {
+    // a tick label is centred on its tick, so the label of the last tick of an
+    // axis reaches half its width past the end of the plot: the margins of the
+    // figure are grown by what its ticks need beyond them, which is
+    // `_fit_margins` of sbmlsim, and the sweep is every width a host gives a
+    // figure from a phone to a wide screen
+    for (let width = 240; width <= 1500; width += 7) {
+      for (const span of xTickSpans(plotSvg(minutes(width)))) {
+        expect({ width, label: span.label, from: span.from }).toEqual({
+          width,
+          label: span.label,
+          from: Math.max(span.from, 0),
+        })
+        expect({ width, label: span.label, to: span.to }).toEqual({
+          width,
+          label: span.label,
+          to: Math.min(span.to, width),
+        })
+      }
+    }
+  })
+
+  it('moves the edge its labels overhang and leaves the other one where it was', () => {
+    // the two sides are counted apart, so the room the label of the last tick
+    // needs comes out of the right margin and the plot starts where it started
+    const long = plotGeometry(minutes(316)).box
+    const short = plotGeometry(minutes(316, { x: [0, 1, 2, 3] })).box
+    expect(long.x0).toBe(short.x0)
+    expect(long.x1).toBeLessThan(short.x1)
+  })
+
+  it('leaves the margins of the layout where no label overhangs', () => {
+    // the same grid on a figure wide enough that its last tick label falls
+    // inside the plot: a margin grows by what its ticks need and by no more, so
+    // this figure is the figure of the layout
+    expect(plotGeometry(minutes(600)).box).toEqual(
+      plotGeometry(minutes(600, { x: [0, 1, 2, 3] })).box,
+    )
+  })
+})

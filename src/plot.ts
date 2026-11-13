@@ -236,6 +236,16 @@ const LEGEND_LINE = 13
 const LEGEND_LINES = 2
 /** The most lines the label of an axis is given before its last line is cut. */
 const AXIS_LINES = 2
+/**
+ * The passes which fit the margins of a figure to what it draws.
+ *
+ * A pass counts the lines of the labels and the overhang of the tick labels
+ * against the box of the pass before it and grows the margins by what they
+ * need, so one more pass than the margins can grow in settles them: a label
+ * takes at most `AXIS_LINES` lines and either side takes the overhang of its
+ * tick labels once, which is the third pass.
+ */
+const PASSES = 3
 /** The height of a further line of the label of an axis, in pixels. */
 const AXIS_LINE = 14
 /** The radius of the marker of a study point, in pixels. */
@@ -1658,15 +1668,60 @@ function boxArea(box: PlotBox): number {
 }
 
 /**
+ * Get what the tick labels of an x axis need beyond the room it was given.
+ *
+ * A tick label is centred on its tick, so the label of a tick at either end of
+ * the axis reaches half its width past that end. The ticks of an axis are the
+ * ticks of a box, so this is asked of the box the margins of a pass left, and
+ * what comes back is what the next pass has to grow them by.
+ *
+ * @param xs the values the axis covers
+ * @param from the pixel its lower limit is at
+ * @param to the pixel of its upper limit
+ * @param edge the pixel the room of the plot ends at, which is the figure
+ *   without its padding and without the column of a legend or a colour bar
+ * @returns the pixels the labels reach left of `PAD` and right of `edge`, 0 on
+ *   a side they stay inside of
+ */
+function tickOverhang(
+  xs: number[],
+  from: number,
+  to: number,
+  edge: number,
+): { left: number; right: number } {
+  const axis = axisOf(xs, false, from, to, tickCount(to - from, X_TICK_ROOM))
+  const decimals = tickDecimals(axis.ticks)
+  const exponential = exponentialTicks(axis.ticks)
+  let left = 0
+  let right = 0
+  for (const value of axis.ticks) {
+    if (!axis.drawable(value)) {
+      continue
+    }
+    const half = labelRoom(formatNumber(value, decimals, exponential), SMALL_FONT) / 2
+    const at = axis.position(value)
+    left = Math.max(left, PAD - (at - half))
+    right = Math.max(right, at + half - edge)
+  }
+  return { left: Math.max(0, left), right: Math.max(0, right) }
+}
+
+/**
  * Fit the plot box of a figure into the room beside and below it.
  *
  * The label of an axis takes the length of that axis, which the margin the
- * other label needs is part of. Two passes settle both: the lines are counted
- * against the margins of the pass before, a count only grows as a margin does,
- * and a count which grew is at `AXIS_LINES`, which is where it stops.
+ * other label needs is part of, and the tick labels of the x axis reach half
+ * their width past either end of it. The passes settle them: the lines and the
+ * ticks are counted against the box the margins of the pass before left, and a
+ * margin only grows, so the room a pass counts against is never larger than the
+ * room the next one leaves and the box the last pass returns holds everything
+ * the passes asked for. The two sides are counted apart, so the label of the
+ * last tick moves the right edge of the plot and never its left edge, and a
+ * margin which needs nothing is the margin of the layout.
  *
  * @param spec the figure
  * @param full the label of the y axis with the unit of its curves
+ * @param xs the values the x axis covers, which decide its ticks
  * @param width the width of the figure in whole pixels
  * @param height its height in whole pixels
  * @param column the pixels right of the plot, 0 for a figure with nothing there
@@ -1676,28 +1731,35 @@ function boxArea(box: PlotBox): number {
 function fitBox(
   spec: PlotSpec,
   full: string,
+  xs: number[],
   width: number,
   height: number,
   column: number,
   under: number,
 ): Fitted {
+  const edge = width - PAD - column
   let left = LEFT
+  let rightRoom = PAD
+  let overLeft = 0
   let bottomRoom = BOTTOM
   let xLines: string[] = [spec.xLabel]
   let yLines: string[] = [full]
-  for (let pass = 0; pass < 2; pass += 1) {
-    const right = Math.max(left + MIN_PLOT, width - PAD - column)
+  for (let pass = 0; pass < PASSES; pass += 1) {
+    const right = Math.max(left + MIN_PLOT, width - rightRoom - column)
     const foot = Math.max(TOP + MIN_PLOT, height - bottomRoom - under)
     xLines = wrapLabel(spec.xLabel, right - left, LABEL_FONT, AXIS_LINES)
     yLines = wrapLabel(full, foot - TOP, LABEL_FONT, AXIS_LINES)
-    left = LEFT + (yLines.length - 1) * AXIS_LINE
+    const needed = tickOverhang(xs, left, right, edge)
+    overLeft = Math.max(overLeft, needed.left)
+    rightRoom = Math.max(rightRoom, PAD + needed.right)
+    left = LEFT + (yLines.length - 1) * AXIS_LINE + overLeft
     bottomRoom = BOTTOM + (xLines.length - 1) * AXIS_LINE
   }
   return {
     box: {
       x0: left,
       y0: TOP,
-      x1: Math.max(left + MIN_PLOT, width - PAD - column),
+      x1: Math.max(left + MIN_PLOT, width - rightRoom - column),
       y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
     },
     xLines,
@@ -1789,13 +1851,15 @@ function layoutFor(spec: PlotSpec): Layout {
     belowHeight <= height * BELOW_SHARE &&
     height - BOTTOM - belowHeight - TOP >= MIN_PLOT
   const full = axisLabel(spec.yLabel, sharedUnit(series))
-  const beside = fitBox(spec, full, width, height, columnOf(Math.max(legendRoom, barRoom)), 0)
-  const under = roomy ? fitBox(spec, full, width, height, columnOf(barRoom), belowHeight) : null
+  // the ticks of the x axis are the ticks of the values the figure draws over,
+  // so the margins of the box are fitted to them and not to the box alone
+  const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
+  const beside = fitBox(spec, full, xs, width, height, columnOf(Math.max(legendRoom, barRoom)), 0)
+  const under = roomy ? fitBox(spec, full, xs, width, height, columnOf(barRoom), belowHeight) : null
   const fitted = under !== null && boxArea(under.box) > boxArea(beside.box) ? under : beside
   const below = fitted !== beside
   const { box, xLines, yLines, bottomRoom, column } = fitted
 
-  const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
   const frame = spec.yLimits
   const ys: number[] = frame === undefined ? [] : [frame.low, frame.high]
   if (frame === undefined) {
