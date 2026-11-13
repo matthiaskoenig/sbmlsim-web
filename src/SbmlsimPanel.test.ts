@@ -173,6 +173,29 @@ function run(
   }
 }
 
+/** The ids of a panel of as many curves as the contract lets one carry. */
+const MANY = Array.from({ length: 16 }, (_, index) => `curve${String(index)}`)
+
+/** A declaration of sixteen curves, the most the contract carries. */
+function manyCurves(): PanelDeclaration {
+  return {
+    ...declaration(),
+    curves: MANY.map((id) => ({ id, label: `curve ${id}`, unit: 'uM', scale: 'linear' as const })),
+  }
+}
+
+/** The answer of a run of those sixteen curves, each on a line of its own. */
+function manyRuns(): SimulateResponse {
+  const answer = run()
+  const rows = (factor: number): number[][] =>
+    AXIS_VALUES.map((value) => [0, factor * value, 2 * factor * value])
+  return {
+    ...answer,
+    curves: Object.fromEntries(MANY.map((id, index) => [id, rows(index + 1)])),
+    units: { x: 'h', ...Object.fromEntries(MANY.map((id) => [id, 'uM'])) },
+  }
+}
+
 /** The answer of a run whose two curves span the same eight decades. */
 function decades(): SimulateResponse {
   const rows = AXIS_VALUES.map(() => [1e-8, 1e-4, 1])
@@ -197,6 +220,9 @@ const served: {
 
 /** The calls the element made since the test started. */
 let calls: Call[] = []
+
+/** The stub of `console.warn`, which collects what the element says on it. */
+let warned = vi.spyOn(console, 'warn')
 
 /** The observers the element created, so a test can report a width to them. */
 let observers: { callback: ResizeObserverCallback }[] = []
@@ -435,6 +461,17 @@ function readoutBox(element: PanelElement): {
   }
 }
 
+/** Let every request the element has in flight answer and the dom catch up. */
+async function settled(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await nextTick()
+}
+
+/** Take the lines the element wrote to the console, which the stub collects. */
+function warnings(): string[] {
+  return warned.mock.calls.map((one) => String(one[0]))
+}
+
 /** Report a width to every observer the element created. */
 async function resizeTo(width: number): Promise<void> {
   for (const one of observers) {
@@ -449,6 +486,9 @@ async function resizeTo(width: number): Promise<void> {
 beforeEach(() => {
   calls = []
   observers = []
+  // a series the figure leaves out is said once on the console, which no test
+  // of this file wants printed: the stub collects the lines instead
+  warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   served.panel = () => Promise.resolve(declaration())
   served.simulate = () => Promise.resolve(run())
   served.data = () => Promise.resolve(studyData())
@@ -1021,6 +1061,30 @@ describe('the readout at the cursor', () => {
     expect(shadow(element).querySelector('.crosshair')).toBeNull()
   })
 
+  it('counts the rows a short plot box has no room for and loses no marker', async () => {
+    served.panel = () => Promise.resolve(manyCurves())
+    served.simulate = () => Promise.resolve(manyRuns())
+    const element = await started()
+    await resizeTo(400)
+    const box = laidOut(element)
+    await hover(element, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 })
+    const rows = readoutRows(element)
+    const more = shadow(element).querySelector('.readout-more')
+    const shown = more === null ? rows.length : rows.length - 1
+    const left = more === null ? 0 : Number(/\+(\d+) more/.exec(more.textContent)?.[1] ?? 0)
+    // the box shows the rows it has room for and counts the rest: nothing is
+    // cut in half and nothing goes missing without being said
+    expect(shown + left).toBe(MANY.length)
+    expect(left).toBeGreaterThan(0)
+    expect(more?.textContent.trim()).toBe(`+${String(left)} more`)
+    // the markers on the crosshair are drawn for every curve whatever the box
+    // shows, so the figure itself loses no value
+    expect(shadow(element).querySelectorAll('.dot')).toHaveLength(MANY.length)
+    const card = readoutBox(element)
+    expect(card.top).toBeGreaterThanOrEqual(box.y0)
+    expect(card.top + card.height).toBeLessThanOrEqual(box.y1 + 1e-6)
+  })
+
   it('keeps the crosshair and the readout out of the accessibility tree', async () => {
     const element = await started()
     const box = laidOut(element)
@@ -1081,14 +1145,81 @@ describe('the study data under the curves', () => {
     expect(control(element, 'knobA').disabled).toBe(false)
   })
 
-  it('leaves out a series which is delivered on a scale of its own', async () => {
+  it('leaves out a series which is delivered on a scale of its own and says so once', async () => {
     // a figure has one y axis: a series in another unit than its curve would
     // be drawn on a scale which is not the one of the axis it sits on
     served.panel = () => Promise.resolve(withData({ unit: 'nM' }))
     served.data = () => Promise.resolve(studyData({ unit: 'nM' }))
+    const seen: string[] = []
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    element.addEventListener('sbmlsim-error', (event) => {
+      seen.push((event as CustomEvent<{ kind: string }>).detail.kind)
+    })
+    await element.activate()
+    await nextTick()
+    expect(figure(element)).not.toContain('class="points"')
+    expect(textOf(element, '.error')).toBe('')
+    expect(seen).toEqual([])
+    // the line names the series, the curve it sits under and the two units
+    expect(warnings()).toHaveLength(1)
+    expect(warnings()[0]).toContain('"seriesA"')
+    expect(warnings()[0]).toContain('"curveA"')
+    expect(warnings()[0]).toContain('nM')
+    expect(warnings()[0]).toContain('uM')
+    // a redraw says it again for no series: it is said once per element
+    move(control(element, 'knobB'), '0.4', 'input')
+    await nextTick()
+    expect(warnings()).toHaveLength(1)
+  })
+
+  it('leaves out a series whose curve the panel does not draw and says so once', async () => {
+    served.panel = () => Promise.resolve(withData({ curve: 'curveTypo' }))
     const element = await started()
     expect(figure(element)).not.toContain('class="points"')
     expect(textOf(element, '.error')).toBe('')
+    expect(warnings()).toHaveLength(1)
+    expect(warnings()[0]).toContain('"seriesA"')
+    expect(warnings()[0]).toContain('"curveTypo"')
+  })
+
+  it('leaves out a series whose x is in another unit than the run and says so once', async () => {
+    served.panel = () => Promise.resolve(withData())
+    served.data = () => Promise.resolve(studyData({ x_unit: 'min' }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    expect(textOf(element, '.error')).toBe('')
+    expect(warnings()).toHaveLength(1)
+    expect(warnings()[0]).toContain('"seriesA"')
+    expect(warnings()[0]).toContain('min')
+    expect(warnings()[0]).toContain(' h')
+  })
+
+  it('keeps the study data when data is switched off after it arrived', async () => {
+    served.panel = () => Promise.resolve(withData())
+    const element = await started()
+    expect(figure(element)).toContain('class="points"')
+    element.setAttribute('data', 'off')
+    await nextTick()
+    // the overlay goes, the curves stay, and nothing is asked for again
+    expect(figure(element)).not.toContain('class="points"')
+    expect(figure(element)).toContain('class="curve"')
+    expect(dataCalls()).toHaveLength(1)
+    element.setAttribute('data', 'on')
+    await nextTick()
+    expect(figure(element)).toContain('class="points"')
+    expect(dataCalls()).toHaveLength(1)
+  })
+
+  it('reads the study data when data is switched on after the panel started', async () => {
+    served.panel = () => Promise.resolve(withData())
+    const element = await started({ data: 'off' })
+    expect(dataCalls()).toHaveLength(0)
+    element.setAttribute('data', 'on')
+    await settled()
+    // a panel which is asked for its study data later asks for it, once, as a
+    // panel which carried the attribute from the start does
+    expect(dataCalls()).toHaveLength(1)
+    expect(figure(element)).toContain('class="points"')
   })
 
   it('keeps a study point beyond the simulated time out of the figure', async () => {

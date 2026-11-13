@@ -1208,18 +1208,48 @@ export function seriesColour(index: number, count: number): string {
   return rampColour(count > 1 ? index / (count - 1) : 0)
 }
 
+/** The figure which was laid out last, whose layout is kept. */
+let laidOut: PlotSpec | null = null
+/** The layout of that figure. */
+let lastLayout: Layout | null = null
+
 /**
  * Lay a figure out: its box, its axes and the room of its column.
+ *
+ * The layout of the figure which was laid out last is kept, keyed on the
+ * identity of its spec, so a figure which is drawn and then measured -
+ * `plotSvg` and `plotGeometry` of the same spec, which is what a panel with a
+ * readout does on every movement of a knob - is laid out once. A spec is read
+ * and never written here, so a caller builds a new spec rather than changing
+ * one it has passed already: a changed spec is the same object and would get
+ * the layout of what it held before.
  *
  * @param spec the figure
  * @returns the layout `plotSvg` writes and `plotGeometry` hands out
  */
 function layoutOf(spec: PlotSpec): Layout {
+  if (spec === laidOut && lastLayout !== null) {
+    return lastLayout
+  }
+  const layout = layoutFor(spec)
+  laidOut = spec
+  lastLayout = layout
+  return layout
+}
+
+/**
+ * Lay a figure out, whatever was laid out before it.
+ *
+ * @param spec the figure
+ * @returns its layout
+ */
+function layoutFor(spec: PlotSpec): Layout {
   const width = size(spec.width)
   const height = size(spec.height)
   const series = spec.series
   const declared = spec.points ?? []
-  const points = declared.map((one) => clipPoints(one, curveRange(spec.x)))
+  const range = curveRange(spec.x)
+  const points = declared.map((one) => clipPoints(one, range))
   const hasColourbar = series.length > LEGEND_LIMIT
 
   const colours = series.map((_, index) => seriesColour(index, series.length))

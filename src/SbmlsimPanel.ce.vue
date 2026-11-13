@@ -147,6 +147,33 @@ interface PointerState {
   top: number
   /** The pixels of the drawn figure per pixel of its `viewBox`. */
   scale: number
+  /** The size of the font of the readout, in pixels, as the page resolved it. */
+  font: number
+}
+
+/** Why a series of the study data is not drawn. */
+type DropReason = 'curve' | 'unit' | 'x-unit'
+
+/** One series of the study data which is not drawn, with the reason it is not. */
+interface DroppedSeries {
+  /** The id of the series. */
+  id: string
+  /** The curve it resolved to, its own id where its declaration names none. */
+  curve: string
+  /** Why it is not drawn. */
+  reason: DropReason
+  /** The unit it was delivered in, `null` for values which carry none. */
+  delivered: string | null
+  /** The unit it would have to be in, `null` where there is no curve to carry it. */
+  wanted: string | null
+}
+
+/** The study data of the panel, split into what is drawn and what is not. */
+interface ResolvedData {
+  /** The series which are drawn, in the order of the answer. */
+  drawn: Points[]
+  /** The ones which are not, with the reason. */
+  dropped: DroppedSeries[]
 }
 
 /** One row of the readout: a curve, its colour and its value at the cursor. */
@@ -189,10 +216,16 @@ interface Readout {
   width: number
   /** Its height. */
   height: number
+  /** The height of one of its rows. */
+  row: number
   /** The x which is read out, with its unit. */
   time: string
   /** One row per curve of the figure, in the order they are drawn. */
   rows: ReadoutRow[]
+  /** The rows the box has room for, the first of `rows` or all of them. */
+  shown: ReadoutRow[]
+  /** How many rows are not shown, 0 for a box which shows them all. */
+  more: number
 }
 
 /** One curve as it is drawn: the declaration of a curve, resolved against a run. */
@@ -260,29 +293,40 @@ const MOST_HEADING = 6
 const GENERIC_Y = 'value'
 /** The separator of the parts of the provenance footer. */
 const FOOTER_SEPARATOR = ' · '
+/*
+ * The numbers the box of the readout is built of. The box carries every one of
+ * them into its own style as a custom property, so the number which places it
+ * and the number which draws it are one number: a test lays nothing out, and a
+ * value which drifted apart from a literal of the stylesheet would be caught by
+ * nothing.
+ */
 /** The pixels between the crosshair and the box of the readout. */
 const READOUT_GAP = 8
 /** The padding inside the box of the readout, in pixels. */
 const READOUT_PAD = 6
-/** The border of that box, which its style declares, in pixels. */
+/** The border of that box, in pixels. */
 const READOUT_BORDER = 1
-/** The height of one row of the readout, which its style declares, in pixels. */
-const READOUT_ROW = 15
+/** The height of one row of the readout, a share of the size of its font. */
+const READOUT_LINE = 1.36
+/** The size of the swatch of a row, in pixels. */
+const READOUT_SWATCH = 8
+/** The gap between the swatch, the label and the value of a row, in pixels. */
+const READOUT_ROW_GAP = 6
 /**
- * The size of the font of the readout in pixels, the small font of the design.
+ * The size of the font of the readout where no style can be read off the page.
  *
- * The box of the readout is placed and never measured, as the figure places its
- * legend: its room is the characters of its rows at this size and this width,
- * so a host which sets `--sbmlsim-font-size-small` well away from it gets a box
- * which is a little wide or a label which is cut with an ellipsis.
+ * The box is placed and never measured, as the figure places its legend: its
+ * room is the characters of its rows at the size its box carries and the widths
+ * below, so a host whose font is much wider than them gets a label cut with an
+ * ellipsis. The size itself is read off the element (`fontSizeOf`), so a host
+ * which sets `--sbmlsim-font-size-small` gets a box and rows of that size, and
+ * this is the value of the design for an environment which computes no style.
  */
 const READOUT_FONT = 11
 /** The width a character of a label is given, a share of its font size. */
 const READOUT_EM = 0.5
 /** The width a character of a value is given, which is set in the mono font. */
 const READOUT_MONO_EM = 0.62
-/** The pixels the swatch of a row and the gap after it take. */
-const READOUT_SWATCH = 14
 /** The pixels between the label of a row and its value. */
 const READOUT_COLUMN = 8
 /** The smallest box the readout is drawn in, in pixels. */
@@ -309,8 +353,9 @@ const props = defineProps({
   theme: { type: String as PropType<ThemeName>, default: 'auto' },
   /**
    * Whether the pointer reads the curves out: `on` (the default) or `off`. A
-   * panel with `hover="off"` draws no crosshair and no readout and listens to
-   * no pointer.
+   * panel with `hover="off"` draws no crosshair and no readout; it keeps its
+   * pointer handlers, which answer such a panel with no readout, so switching
+   * the attribute back on needs no rebinding.
    */
   hover: { type: String as PropType<Switch>, default: 'on' },
   /**
@@ -620,30 +665,45 @@ const yLabel = computed<string>(() => {
 })
 
 /**
- * The study data as it is drawn, empty while there is none to draw.
+ * The study data split into what is drawn and what is not.
  *
  * A series sits under the curve its declaration names, its own id without one,
- * and is drawn only where the endpoint delivered it on the scale of that curve:
- * the contract makes the unit of a series and the unit of its curve the same
- * text unless the series declares one of its own, so a series which does not
- * match the curve it sits on is one of another scale, which a figure of one y
- * axis cannot draw without lying about it.
+ * and is drawn only where the endpoint delivered it on the scale of that curve
+ * and on the scale of its x axis. Three things take a series out of the figure:
+ * its curve is none of the drawn ones (`curve`, e.g. a declaration which names
+ * a curve by a typo), its values are in another unit than that curve (`unit`)
+ * or its x is in another unit than the run (`x-unit`). The contract makes the
+ * unit of a series and the unit of its curve the same text unless the series
+ * declares one of its own, so a series which does not match is one of another
+ * scale, which a figure of one y axis cannot draw without lying about it.
+ *
+ * This is a view of the answer and nothing else. What a reader is told about a
+ * dropped series is said by the watcher below, where a side effect runs once.
  */
-const drawnData = computed<Points[]>(() => {
+const resolvedData = computed<ResolvedData>(() => {
   const answer = grid.value
   if (answer === null || props.data === 'off') {
-    return []
+    return { drawn: [], dropped: [] }
   }
   const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
   const units = new Map(drawnCurves.value.map((one) => [one.id, one.unit]))
   const drawn: Points[] = []
+  const dropped: DroppedSeries[] = []
   for (const one of seriesOf(study.value)) {
     const curve = declared.get(one.id)?.curve ?? one.id
     const unit = units.get(curve)
-    if (unit === undefined || !sameUnit(one.unit, unit)) {
+    const delivered = one.unit ?? null
+    if (unit === undefined) {
+      dropped.push({ id: one.id, curve, reason: 'curve', delivered, wanted: null })
+      continue
+    }
+    if (!sameUnit(one.unit, unit)) {
+      dropped.push({ id: one.id, curve, reason: 'unit', delivered, wanted: unit })
       continue
     }
     if (!sameUnit(one.x_unit, answer.units.x)) {
+      const wanted = answer.units.x ?? null
+      dropped.push({ id: one.id, curve, reason: 'x-unit', delivered: one.x_unit ?? null, wanted })
       continue
     }
     const points: Points = { id: one.id, label: one.label, curve, x: one.x, y: one.y }
@@ -653,8 +713,64 @@ const drawnData = computed<Points[]>(() => {
     }
     drawn.push(points)
   }
-  return drawn
+  return { drawn, dropped }
 })
+
+/** The study data as it is drawn, empty while there is none to draw. */
+const drawnData = computed<Points[]>(() => resolvedData.value.drawn)
+
+/** The series which were already reported, so each is reported once per element. */
+const reported = new Set<string>()
+
+/**
+ * Write a unit of a payload for a reader of the console.
+ *
+ * @param unit the unit, `null` or empty for values which carry none
+ * @returns the unit, or what "no unit" is called
+ */
+function shownUnit(unit: string | null): string {
+  return unit === null || unit === '' ? 'no unit' : unit
+}
+
+/**
+ * Write the line which says that a series of the study data is not drawn.
+ *
+ * @param one the series and the reason it is not drawn
+ * @param panel the id of the panel it belongs to
+ * @returns the line, which names the series, its curve and the two units
+ */
+function droppedMessage(one: DroppedSeries, panel: string): string {
+  const head = `sbmlsim-panel ${panel}: the study data "${one.id}" is not drawn`
+  if (one.reason === 'curve') {
+    return `${head}, it sits under the curve "${one.curve}", which the panel does not draw.`
+  }
+  const axis = one.reason === 'x-unit' ? 'x' : 'y'
+  return (
+    `${head}, its ${axis} is delivered in ${shownUnit(one.delivered)} and the curve ` +
+    `"${one.curve}" is drawn in ${shownUnit(one.wanted)}.`
+  )
+}
+
+/*
+ * Say once per series what the figure leaves out. A dropped series is no
+ * failure of the panel, so it is no `sbmlsim-error` and no error line: the
+ * curves are there and the reader asked for them. It is a mistake in a
+ * declaration or in a study, which only the console can carry to the one who
+ * can fix it.
+ */
+watch(
+  () => resolvedData.value.dropped,
+  (dropped) => {
+    for (const one of dropped) {
+      if (reported.has(one.id)) {
+        continue
+      }
+      reported.add(one.id)
+      console.warn(droppedMessage(one, props.panel))
+    }
+  },
+  { immediate: true },
+)
 
 /** The figure as it is drawn now, `null` while there is nothing to draw. */
 const plot = computed<PlotSpec | null>(() => {
@@ -748,14 +864,14 @@ const footer = computed<string>(() => {
 })
 
 /**
- * Get the index of the grid nearest to a pixel of the x axis.
+ * Get the index of the grid nearest to a pixel of the x axis, by scanning it.
  *
  * @param xs the x of the figure, the output times of the run
  * @param drawn the layout of the figure
  * @param at the pixel, in the coordinates of the figure
  * @returns the index of the nearest x, `null` for a figure without one
  */
-function nearestIndex(xs: number[], drawn: PlotGeometry, at: number): number | null {
+function scanNearest(xs: number[], drawn: PlotGeometry, at: number): number | null {
   let found: number | null = null
   let best = Number.POSITIVE_INFINITY
   for (const [index, value] of xs.entries()) {
@@ -769,6 +885,57 @@ function nearestIndex(xs: number[], drawn: PlotGeometry, at: number): number | n
     }
   }
   return found
+}
+
+/**
+ * Get the index of the grid nearest to a pixel of the x axis.
+ *
+ * The x of a run is sorted and its axis is linear in the pixels, so the pixel
+ * is turned back into an x by the two ends of the grid and the x is found by
+ * halving: eleven comparisons on a grid of two thousand points instead of two
+ * thousand, on every movement of the pointer. A grid which is not sorted, not
+ * finite at its ends or drawn on an axis of no width is scanned instead, so a
+ * payload which breaks the assumption is answered by the slow way and never by
+ * a wrong index. Ties keep the lower index, as the scan does.
+ *
+ * @param xs the x of the figure, the output times of the run
+ * @param drawn the layout of the figure
+ * @param at the pixel, in the coordinates of the figure
+ * @returns the index of the nearest x, `null` for a figure without one
+ */
+function nearestIndex(xs: number[], drawn: PlotGeometry, at: number): number | null {
+  const last = xs.length - 1
+  const first = xs[0]
+  const end = xs[last]
+  if (first === undefined || end === undefined || !(end > first)) {
+    return scanNearest(xs, drawn, at)
+  }
+  const p0 = drawn.xAt(first)
+  const p1 = drawn.xAt(end)
+  if (!Number.isFinite(p0) || !Number.isFinite(p1) || !(p1 > p0)) {
+    return scanNearest(xs, drawn, at)
+  }
+  const wanted = first + ((at - p0) * (end - first)) / (p1 - p0)
+  let low = 0
+  let high = last
+  while (high - low > 1) {
+    const middle = (low + high) >> 1
+    const value = xs[middle]
+    if (value === undefined || !Number.isFinite(value)) {
+      return scanNearest(xs, drawn, at)
+    }
+    if (value <= wanted) {
+      low = middle
+    } else {
+      high = middle
+    }
+  }
+  const below = xs[low]
+  const above = xs[high]
+  if (below === undefined || above === undefined || above < below) {
+    return scanNearest(xs, drawn, at)
+  }
+  return Math.abs(drawn.xAt(above) - at) < Math.abs(drawn.xAt(below) - at) ? high : low
 }
 
 /**
@@ -788,21 +955,37 @@ function readoutValue(value: number | undefined, unit: string | null): string {
 }
 
 /**
+ * Write the row which says how many rows the box has no room for.
+ *
+ * @param more how many rows are not shown
+ * @returns the text of that row
+ */
+function moreText(more: number): string {
+  return `+${String(more)} more`
+}
+
+/**
  * Get the room the box of the readout needs.
  *
  * @param time the x which is read out, with its unit
  * @param rows the rows of the readout
+ * @param more how many rows the box will not show, 0 for a box which shows all
+ * @param font the size of its font in pixels, as the page resolved it
  * @returns the pixels of its widest row with its padding and its border, an
  *   estimate of its characters and no measurement, as the figure estimates the
  *   room of its legend
  */
-function readoutRoom(time: string, rows: ReadoutRow[]): number {
-  const label = READOUT_FONT * READOUT_EM
-  const value = READOUT_FONT * READOUT_MONO_EM
+function readoutRoom(time: string, rows: ReadoutRow[], more: number, font: number): number {
+  const label = font * READOUT_EM
+  const value = font * READOUT_MONO_EM
+  const swatch = READOUT_SWATCH + READOUT_ROW_GAP
   let most = time.length * value
   for (const one of rows) {
     const text = one.label.length * label + one.value.length * value
-    most = Math.max(most, READOUT_SWATCH + text + READOUT_COLUMN)
+    most = Math.max(most, swatch + text + READOUT_COLUMN)
+  }
+  if (more > 0) {
+    most = Math.max(most, swatch + moreText(more).length * label)
   }
   return (READOUT_PAD + READOUT_BORDER) * 2 + most
 }
@@ -815,6 +998,12 @@ function readoutRoom(time: string, rows: ReadoutRow[]): number {
  * cursor. The box is placed next to the crosshair and never leaves the plot
  * box: it flips to the other side where it would pass the right edge, and it is
  * clamped at the top and at the bottom.
+ *
+ * A box of a plot box too short for its rows shows the rows it has room for and
+ * says how many it does not (`+N more`), as a legend label too long for its
+ * column ends in an ellipsis: nothing is cut in half and nothing goes missing
+ * without being counted. The markers on the crosshair are drawn for every curve
+ * whatever the box shows, so the figure itself never loses a value.
  */
 const readout = computed<Readout | null>(() => {
   const at = pointer.value
@@ -849,12 +1038,18 @@ const readout = computed<Readout | null>(() => {
     }
   })
   const shownTime = readoutValue(time, grid.value?.units.x ?? null)
+  const row = at.font * READOUT_LINE
+  const chrome = (READOUT_PAD + READOUT_BORDER) * 2 + row
+  const fits = Math.floor((y1 - y0 - chrome) / row)
+  const room = clamp(fits, 0, rows.length)
+  const shown = room < rows.length ? rows.slice(0, Math.max(0, room - 1)) : rows
+  const more = rows.length - shown.length
   const width = Math.min(
-    Math.max(readoutRoom(shownTime, rows), READOUT_MIN),
+    Math.max(readoutRoom(shownTime, shown, more, at.font), READOUT_MIN),
     Math.max(READOUT_MIN, x1 - x0),
   )
-  const rowsHeight = READOUT_ROW * (rows.length + 1) + (READOUT_PAD + READOUT_BORDER) * 2
-  const height = Math.min(rowsHeight, y1 - y0)
+  const wantedHeight = chrome + row * (shown.length + (more > 0 ? 1 : 0))
+  const height = Math.min(wantedHeight, y1 - y0)
   const after = line + READOUT_GAP
   const wanted = after + width <= x1 ? after : line - READOUT_GAP - width
   return {
@@ -865,10 +1060,27 @@ const readout = computed<Readout | null>(() => {
     top: clamp(at.y - height / 2, y0, Math.max(y0, y1 - height)),
     width,
     height,
+    row,
     time: shownTime,
     rows,
+    shown,
+    more,
   }
 })
+
+/**
+ * The numbers of the box of the readout its own style carries.
+ *
+ * The box is placed by the script and drawn by the stylesheet, and both read
+ * these: the style of the box names them as custom properties, so a change of
+ * one of the constants moves the measurement and the drawing together.
+ */
+const readoutStyle = {
+  pad: READOUT_PAD,
+  border: READOUT_BORDER,
+  swatch: READOUT_SWATCH,
+  gap: READOUT_ROW_GAP,
+}
 
 /** The markers where the crosshair crosses the curves, none without a readout. */
 const dots = computed<Dot[]>(() =>
@@ -1320,6 +1532,23 @@ function onChange(axis: PanelAxis, event: Event): void {
 }
 
 /**
+ * Read the size of the font the readout is drawn in, in pixels.
+ *
+ * The box of the readout is placed in script and drawn by the stylesheet, and
+ * both read the same size: the one the page resolved for the box the figure
+ * sits in, which carries the small font of the design. An environment which
+ * computes no style, e.g. the one the tests run in, gives the size of the
+ * design.
+ *
+ * @param box the element the figure and the overlay sit in
+ * @returns the size in pixels, the one of the design where none can be read
+ */
+function fontSizeOf(box: HTMLElement): number {
+  const size = Number.parseFloat(globalThis.getComputedStyle(box).fontSize)
+  return Number.isFinite(size) && size > 0 ? size : READOUT_FONT
+}
+
+/**
  * Read where a pointer is, in the pixels of the box the overlay is drawn in.
  *
  * Nothing here assumes that there is a pointer, that it carries coordinates or
@@ -1331,20 +1560,21 @@ function onChange(axis: PanelAxis, event: Event): void {
  * @returns where the pointer is, `null` where that cannot be told
  */
 function pointerState(event: Event): PointerState | null {
+  // the guards below are what makes this cast safe, and `instanceof PointerEvent` is not an
+  // option: a page and a test may send a plain `Event` which carries the coordinates all the same
   const { clientX, clientY } = event as Partial<PointerEvent>
-  const spec = plot.value
+  const drawn = geometry.value
   const box = plotted.value
   const figure = box?.querySelector('svg') ?? null
   if (typeof clientX !== 'number' || typeof clientY !== 'number' || !Number.isFinite(clientX)) {
     return null
   }
-  if (!Number.isFinite(clientY) || spec === null || box === null || figure === null) {
+  if (!Number.isFinite(clientY) || drawn === null || box === null || figure === null) {
     return null
   }
   const inner = figure.getBoundingClientRect()
   const outer = box.getBoundingClientRect()
-  const width = Math.round(spec.width)
-  if (!(inner.width > 0) || !(width > 0)) {
+  if (!(inner.width > 0) || !(drawn.width > 0)) {
     return null
   }
   return {
@@ -1352,7 +1582,8 @@ function pointerState(event: Event): PointerState | null {
     y: clientY - outer.top,
     left: inner.left - outer.left,
     top: inner.top - outer.top,
-    scale: inner.width / width,
+    scale: inner.width / drawn.width,
+    font: fontSizeOf(box),
   }
 }
 
@@ -1445,6 +1676,22 @@ watch(drawFailed, (failed) => {
     fail(new PanelRequestError('internal'))
   }
 })
+
+/*
+ * A panel which was started with `data="off"` made no request for its study
+ * data. A page which switches the attribute on afterwards asks for the same
+ * thing a page which carried it from the start asks for, so it gets the one
+ * request of the element here, and a panel whose data already arrived keeps it.
+ */
+watch(
+  () => props.data,
+  (wanted) => {
+    const declared = declaration.value
+    if (wanted !== 'off' && declared !== null && study.value === null) {
+      void loadData(declared)
+    }
+  },
+)
 
 onBeforeUnmount(() => {
   stopWork()
@@ -1543,13 +1790,21 @@ defineExpose({ activate, freeze, reset })
                 top: `${readout.top}px`,
                 width: `${readout.width}px`,
                 height: `${readout.height}px`,
+                '--readout-pad': `${readoutStyle.pad}px`,
+                '--readout-border': `${readoutStyle.border}px`,
+                '--readout-line': `${readout.row}px`,
+                '--readout-swatch': `${readoutStyle.swatch}px`,
+                '--readout-gap': `${readoutStyle.gap}px`,
               }"
             >
               <p class="readout-time">{{ readout.time }}</p>
-              <p v-for="row of readout.rows" :key="row.id" class="readout-row">
+              <p v-for="row of readout.shown" :key="row.id" class="readout-row">
                 <span class="readout-swatch" :style="{ background: row.colour }"></span>
                 <span class="readout-label">{{ row.label }}</span>
                 <span class="readout-value">{{ row.value }}</span>
+              </p>
+              <p v-if="readout.more > 0" class="readout-row readout-more">
+                {{ moreText(readout.more) }}
               </p>
             </div>
           </div>
@@ -1797,12 +2052,15 @@ defineExpose({ activate, freeze, reset })
 /*
  * The box the figure and the overlay of the cursor share. The overlay is laid
  * out in its pixels and takes no pointer event of its own, so the readout
- * never stands between the pointer and the figure it reads out.
+ * never stands between the pointer and the figure it reads out. It carries the
+ * font of the readout, which the script reads off it, so the size which places
+ * the box and the size which draws it are the same size.
  */
 .plot {
   position: relative;
   width: 100%;
   min-width: 0;
+  font-size: var(--_font-size-small);
 }
 
 .cursor {
@@ -1826,18 +2084,22 @@ defineExpose({ activate, freeze, reset })
   border-radius: 50%;
 }
 
+/*
+ * The box of the readout. Every number which places it the script hands to it
+ * as a custom property, so the box which was measured and the box which is
+ * drawn are built of one set of numbers, which no stylesheet can drift from.
+ */
 .readout {
   position: absolute;
   box-sizing: border-box;
-  padding: 6px;
+  padding: var(--readout-pad);
   overflow: hidden;
-  border: 1px solid var(--_line);
+  border: var(--readout-border) solid var(--_line);
   border-radius: 6px;
   background: var(--_bg-card);
   box-shadow: var(--_shadow);
   color: var(--_fg);
-  font-size: var(--_font-size-small);
-  line-height: 15px;
+  line-height: var(--readout-line);
 }
 
 .readout-time {
@@ -1849,15 +2111,21 @@ defineExpose({ activate, freeze, reset })
 
 .readout-row {
   display: flex;
-  gap: 6px;
+  gap: var(--readout-gap);
   align-items: center;
   margin: 0;
 }
 
+/* the row is counted with the room of a swatch, so it starts where a label does */
+.readout-more {
+  padding-left: calc(var(--readout-swatch) + var(--readout-gap));
+  color: var(--_fg-soft);
+}
+
 .readout-swatch {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
+  width: var(--readout-swatch);
+  height: var(--readout-swatch);
   border-radius: 50%;
 }
 
