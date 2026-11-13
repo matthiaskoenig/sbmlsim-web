@@ -754,18 +754,21 @@ describe('the knobs the panels of a page share', () => {
   it('resets the shared knobs of the page, and only where they moved', async () => {
     const element = await shell({ page: 'pageB' })
     const button = part(element, '.knobs button.reset') as HTMLButtonElement
-    expect(button.disabled).toBe(true)
+    // a reset with nothing to do says so and stays focusable
+    expect(button.disabled).toBe(false)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     const slider = part(element, '#knob-knobA') as HTMLInputElement
     slider.value = '0.5'
     slider.dispatchEvent(new Event('input'))
     await settled()
-    expect(button.disabled).toBe(false)
+    expect(button.hasAttribute('aria-disabled')).toBe(false)
     button.click()
     await settled()
     expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('1')
     expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
     expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
-    expect(button.disabled).toBe(true)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    expect(button.disabled).toBe(false)
   })
 
   it('tells a screen reader which panels a shared control sets', async () => {

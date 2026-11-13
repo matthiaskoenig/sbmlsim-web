@@ -502,7 +502,7 @@ onBeforeUnmount(() => {
           @input="moveShared(one.knob, $event)"
           @change="moveShared(one.knob, $event)"
         />
-        <ResetButton :disabled="sharedAtDefaults" @click="resetShared()" />
+        <ResetButton :idle="sharedAtDefaults" @reset="resetShared()" />
         <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" class="unseen">
           {{ drivesText(one) }}
         </p>
@@ -703,9 +703,29 @@ onBeforeUnmount(() => {
   max-width: 20rem;
 }
 
+/*
+ * The rows a card spans are reserved before its panel has read anything, so a
+ * card does not grow under the reader when the declaration and the first run
+ * arrive (a subgrid card ignores a `min-height` of its own, its rows do not):
+ * the head row holds one line of the title (15px) and one of the subtitle, the
+ * foot row one line of the provenance, each in the line height of the panel
+ * (1.45). The body row needs none: a panel reserves the height of its figure
+ * from its width before it has an answer. A track holds its part, the padding
+ * and the border of the card, less half of the difference between the gap of
+ * the grid and the gap of the panel (16px and 8px), which the subgrid takes as
+ * a margin.
+ */
 .grid {
+  --_card-pad: 16px;
+  --_track-edge: calc(var(--_card-pad) + 1px - 4px);
+
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+  grid-auto-rows: minmax(
+      calc(15px * 1.45 + 2px + var(--_font-size) * 1.45 + var(--_track-edge)),
+      auto
+    )
+    auto minmax(calc(var(--_font-size-small) * 1.45 + var(--_track-edge)), auto);
   gap: 16px;
 }
 
@@ -723,7 +743,7 @@ onBeforeUnmount(() => {
   grid-template-rows: subgrid;
   row-gap: 0;
   min-width: 0;
-  padding: 16px;
+  padding: var(--_card-pad);
   border: 1px solid var(--_line);
   border-radius: var(--_radius);
   background: var(--_bg-card);
@@ -806,8 +826,8 @@ onBeforeUnmount(() => {
 
 /* a figure keeps the room on a phone, where the card is nearly the screen */
 @container (max-width: 480px) {
-  .cell {
-    padding: 12px;
+  .grid {
+    --_card-pad: 12px;
   }
 }
 </style>

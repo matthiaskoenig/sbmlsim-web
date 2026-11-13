@@ -535,6 +535,100 @@ test.describe('the app shell', () => {
     expect(order).toBeCloseTo(8, 0)
   })
 
+  for (const width of [390, 1280]) {
+    test(`moves nothing while the panels load at ${String(width)} px`, async ({ page }) => {
+      // the service answers before the first paint, so its answers are held
+      // back as a remote one holds them: the declarations 400 ms, the runs 300 ms
+      await page.route(/\/panels\/[^/]+$/, async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        await route.continue()
+      })
+      await page.route('**/simulate', async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        await route.continue()
+      })
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/demo/app.html')
+      // where the second card and the footer are on every frame until both
+      // figures are drawn, from the frame the grid is first laid out
+      const tops = await page.evaluate(
+        () =>
+          new Promise<string[]>((done) => {
+            const seen: string[] = []
+            const tick = (): void => {
+              const root = document.querySelector('sbmlsim-app')?.shadowRoot
+              const cells = [...(root?.querySelectorAll('.cell') ?? [])]
+              const footer = root?.querySelector('.footer')
+              const drawn = [...(root?.querySelectorAll('sbmlsim-panel') ?? [])].filter(
+                (one) => one.shadowRoot?.querySelector('svg') !== null,
+              ).length
+              if (cells.length === 2 && footer) {
+                const key = `${String(cells[1]?.getBoundingClientRect().top)} ${String(footer.getBoundingClientRect().top)}`
+                if (seen.at(-1) !== key) {
+                  seen.push(key)
+                }
+              }
+              if (drawn === 2) {
+                done(seen)
+                return
+              }
+              requestAnimationFrame(tick)
+            }
+            requestAnimationFrame(tick)
+          }),
+      )
+      expect(tops).toHaveLength(1)
+    })
+  }
+
+  test('keeps the focus on a shared Reset it was pressed with', async ({ page }) => {
+    const app = await openApp(page)
+    await app.locator('.knobs select').first().selectOption({ label: 'impaired' })
+    const reset = app.locator('.knobs button.reset')
+    await reset.focus()
+    await page.keyboard.press('Enter')
+    await expect(app.locator('.knobs select').first()).toHaveValue('1')
+    await expect(reset).toHaveAttribute('aria-disabled', 'true')
+    // the focus is still on the button, which says it has nothing left to do
+    expect(
+      await app.evaluate((element) => element.shadowRoot?.activeElement?.className ?? null),
+    ).toBe('reset')
+  })
+
+  test('draws no figure of the variant before when the run of a switch fails', async ({ page }) => {
+    await page.route('**/api/models/hctz/app', async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as Record<string, unknown>
+      body.variants = [
+        { id: 'default', label: 'Default' },
+        { id: 'impaired', label: 'Impaired' },
+      ]
+      await route.fulfill({ response, json: body })
+    })
+    // the service knows one variant: the plasma panel cannot run the other,
+    // the urine panel is answered without it
+    await page.route('**/simulate', async (route) => {
+      const request = route.request()
+      const sent = request.postDataJSON() as Record<string, unknown>
+      if (request.url().includes('renal_plasma') && sent.variant === 'impaired') {
+        await route.abort()
+        return
+      }
+      await route.continue({ postData: JSON.stringify({ values: sent.values, grid: sent.grid }) })
+    })
+    const app = await openApp(page)
+    const panels = app.locator('sbmlsim-panel')
+    await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+    await app.locator('.variant-select').selectOption('impaired')
+    await expect(panels.nth(0).locator('.error')).toContainText('cannot be drawn')
+    await expect(panels.nth(0).locator('svg path')).toHaveCount(0)
+    await expect(panels.nth(0).locator('.provenance')).toHaveCount(0)
+    await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+    // back on the variant it drew, it draws it again
+    await app.locator('.variant-select').selectOption('default')
+    await expect(panels.nth(0).locator('svg path').first()).toBeVisible()
+  })
+
   test('a panel whose run failed follows the shared controls once it runs again', async ({
     page,
   }) => {

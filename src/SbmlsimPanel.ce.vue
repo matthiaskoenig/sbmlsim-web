@@ -101,10 +101,13 @@
  * A failure is no freeze: the knobs stay where they are and keep working, and
  * the next move of any knob, of a control of the panel or of its host, runs
  * again, the knob the drawn grid covers among them, since the run which failed
- * covered nothing. Until a run answers, the figure is drawn only while the
- * answer it holds is of the state the knobs show (`stale`); where a knob stands
+ * covered nothing; so does a switch of the variant. Until a run answers, the
+ * figure is drawn only while the answer it holds is of the state the knobs and
+ * the attribute `variant` show (`stale`); where a knob or the variant stands
  * elsewhere, the panel draws no figure and its line says that the figure of the
  * settings shown cannot be drawn, so it never shows a state no control shows.
+ * A change of `endpoint`, `model` or `panel` after the panel started starts it
+ * again (`restart`), so it never draws an answer of another one either.
  * `freeze()` is the one stop of a panel, the one a shell makes of the panels of
  * a page it leaves.
  *
@@ -575,6 +578,11 @@ const knobValues = shallowRef<Record<string, number>>({})
  * arrived.
  */
 const drawnValues = shallowRef<Record<string, number> | null>({})
+/**
+ * The variant the drawn answer was run on, as the attribute `variant` named it
+ * then: empty for the one the panel declares, which a stored answer is of too.
+ */
+const drawnVariant = ref('')
 /**
  * The id of the knob the latest run grids over, `null` for a run of one point.
  *
@@ -1282,22 +1290,28 @@ const drawFailed = computed<boolean>(() => grid.value !== null && svg.value === 
 
 /**
  * Whether the answer which is drawn is of another state than the one the
- * knobs show, after a run which failed.
+ * knobs and the attributes show, after a run which failed.
  *
- * While runs answer, the figure runs behind a moved knob by a debounce and a
- * round trip at most. A run which failed leaves the answer before it, and a
- * knob it does not grid over may stand at another value than the one that
- * answer was run at: a knob of the host, which the host keeps moving, or a
- * control which was released into the failure. Such a figure would show a
- * state no control shows, so it is not drawn, and the error line says that the
- * panel cannot show the state its knobs are at. The next run which answers
- * draws it again; the knob the drawn answer grids over is read out of the grid
- * and never makes a figure stale.
+ * While runs answer, the figure runs behind a moved knob or a switched variant
+ * by a debounce and a round trip at most. A run which failed leaves the answer
+ * before it, which may be of another variant than the attribute `variant`
+ * names, or of another value of a knob it does not grid over: a knob of the
+ * host, which the host keeps moving, or a control which was released into the
+ * failure. Such a figure would show a state no control shows, so it is not
+ * drawn, and the error line says that the panel cannot show the state it is
+ * set to. The next run which answers draws it again; the knob the drawn answer
+ * grids over is read out of the grid and never makes a figure stale. The
+ * endpoint, the model and the panel, the other inputs of a run, start the
+ * panel again when they change (`restart`), so no answer of another one is
+ * drawn either.
  */
 const stale = computed<boolean>(() => {
   const answer = grid.value
   if (failure.value === null || answer === null) {
     return false
+  }
+  if (drawnVariant.value !== props.variant) {
+    return true
   }
   const swept = new Set(answer.dims.map((dim) => dim.id))
   return axes.value.some(
@@ -1669,6 +1683,7 @@ function drawStored(answer: SimulateResponse): void {
   }
   grid.value = answer
   drawnValues.value = null
+  drawnVariant.value = ''
   fromStore.value = true
 }
 
@@ -1744,6 +1759,7 @@ async function simulate(gridId: string | null): Promise<void> {
   // whatever the controls hold by then, and the answer is drawn at the state
   // it was run at however the controls moved while it was in flight
   const sent = { ...knobValues.value }
+  const sentVariant = props.variant
   const body = bodyFor(gridId)
   try {
     const answer = await attempt(() =>
@@ -1754,6 +1770,7 @@ async function simulate(gridId: string | null): Promise<void> {
     }
     grid.value = answer
     drawnValues.value = sent
+    drawnVariant.value = sentVariant
     fromStore.value = false
     failure.value = null
     host?.dispatchEvent(
@@ -2131,6 +2148,41 @@ async function activate(): Promise<void> {
 }
 
 /**
+ * Start the panel again for other attributes of what it runs.
+ *
+ * The endpoint, the model and the panel are what a declaration, a run and the
+ * study data are of, so an answer of the ones before is no figure of these:
+ * everything read of them is dropped and read again. A panel which was not
+ * started yet reads them when it is; a frozen panel reads them when it is
+ * activated again.
+ */
+function restart(): void {
+  if (!started) {
+    return
+  }
+  stopWork()
+  sequence += 1
+  pending.value = false
+  declaration.value = null
+  grid.value = null
+  stored.value = null
+  study.value = null
+  knobValues.value = {}
+  drawnValues.value = {}
+  drawnVariant.value = ''
+  fromStore.value = false
+  failure.value = null
+  gridded.value = null
+  pointer.value = null
+  if (frozen.value) {
+    started = false
+    return
+  }
+  client = new PanelClient(props.endpoint, props.timeout)
+  void Promise.all([loadStored(), load()])
+}
+
+/**
  * Stop every pending request and freeze the knobs.
  *
  * What is drawn stays drawn; `activate()` lifts the freeze.
@@ -2217,6 +2269,13 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => [props.endpoint, props.model, props.panel],
+  () => {
+    restart()
+  },
+)
+
 /*
  * The curves of the other variant are another simulation of the same knobs.
  * It goes through `schedule`, so a shell which switches every panel of its
@@ -2278,7 +2337,7 @@ defineExpose({ activate, freeze, reset })
             <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
             <span>logarithmic y</span>
           </label>
-          <ResetButton :disabled="frozen || !resettable" @click="reset()" />
+          <ResetButton :disabled="frozen" :idle="!resettable" @reset="reset()" />
         </div>
       </div>
       <div

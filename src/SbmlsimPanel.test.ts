@@ -1905,6 +1905,66 @@ describe('the variant of the model', () => {
     expect(declarations()).toHaveLength(1)
   })
 
+  it('draws no figure of the variant before when the run of a switch fails', async () => {
+    vi.useFakeTimers()
+    const element = await started({ variant: 'variantA' })
+    expect(figure(element)).toContain('class="curve"')
+    served.simulate = unreachable
+    element.setAttribute('variant', 'variantB')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    // the answer held is of variant A, which the attribute no longer names
+    expect(figure(element)).toBe('')
+    expect(textOf(element, '.error')).toContain('cannot be drawn')
+    expect(textOf(element, '.provenance')).toBe('')
+    // back on the variant of the answer, the figure is the state shown again
+    element.setAttribute('variant', 'variantA')
+    await nextTick()
+    await nextTick()
+    expect(figure(element)).toContain('class="curve"')
+    // and a switch with the endpoint back draws the variant it names
+    served.simulate = () => Promise.resolve(run())
+    element.setAttribute('variant', 'variantB')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations().at(-1)?.variant).toBe('variantB')
+    expect(textOf(element, '.error')).toBe('')
+    expect(figure(element)).toContain('class="curve"')
+  })
+
+  it('starts again for another model, endpoint or panel', async () => {
+    const element = await started()
+    for (const [name, value] of [
+      ['panel', 'panelB'],
+      ['model', 'modelB'],
+      ['endpoint', '/other-root'],
+    ] as const) {
+      const before = calls.length
+      element.setAttribute(name, value)
+      await settled()
+      await settled()
+      const asked = calls.slice(before).map((one) => one.url)
+      // the declaration and the run of what the attributes name now, read afresh
+      expect(
+        asked.some((url) => url.endsWith(`/panels/${element.getAttribute('panel') ?? ''}`)),
+        name,
+      ).toBe(true)
+      expect(
+        asked.some((url) => url.endsWith('/simulate')),
+        name,
+      ).toBe(true)
+      expect(
+        asked.every((url) => url.startsWith(element.getAttribute('endpoint') ?? '')),
+        name,
+      ).toBe(true)
+      expect(
+        asked.every((url) => url.includes(`/models/${element.getAttribute('model') ?? ''}/`)),
+        name,
+      ).toBe(true)
+    }
+    expect(figure(element)).toContain('class="curve"')
+  })
+
   it('announces every answer with its provenance', async () => {
     const heard: unknown[] = []
     document.addEventListener('sbmlsim-result', (event) =>
@@ -2114,28 +2174,51 @@ describe('the knobs the host owns', () => {
     expect(shownKnobs(element)).toEqual(['knobA', 'knobB'])
   })
 
-  it('offers a reset only where it changes something', async () => {
+  it('offers a reset only where it changes something, and keeps it focusable', async () => {
+    /** Whether the reset says it has nothing to do; it is never disabled for it. */
+    const idle = (button: HTMLButtonElement): boolean => {
+      expect(button.disabled).toBe(false)
+      return button.getAttribute('aria-disabled') === 'true'
+    }
     const element = await started({ values: '{"knobA": 12.5}' })
     const button = part(element, 'button.reset') as HTMLButtonElement
-    expect(button.disabled).toBe(true)
+    expect(idle(button)).toBe(true)
     move(control(element, 'knobB'), '0.4', 'input')
     await nextTick()
-    expect(button.disabled).toBe(false)
-    element.reset()
+    expect(idle(button)).toBe(false)
+    button.click()
     await nextTick()
-    expect(button.disabled).toBe(true)
+    expect(control(element, 'knobB').value).toBe('1')
+    expect(idle(button)).toBe(true)
+    // a press with nothing to reset does nothing, also where the run the panel
+    // holds grids over another knob than the one a reset would grid over
+    vi.useFakeTimers()
+    element.setAttribute('values', '{"knobA": 25}')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations().at(-1)?.grid).toEqual({ knobA: 2 })
+    expect(idle(button)).toBe(true)
+    const runs = simulations().length
+    button.click()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toHaveLength(runs)
+    vi.useRealTimers()
     // a panel whose host owns every knob resets its scale and nothing else
     const owned = await started({ values: '{"knobA": 12.5, "knobB": 1}' })
     const scale = part(owned, '.toggle input') as HTMLInputElement
     const ownButton = part(owned, 'button.reset') as HTMLButtonElement
-    expect(ownButton.disabled).toBe(true)
+    expect(idle(ownButton)).toBe(true)
     scale.checked = true
     scale.dispatchEvent(new Event('change'))
     await nextTick()
-    expect(ownButton.disabled).toBe(false)
+    expect(idle(ownButton)).toBe(false)
     ownButton.click()
     await nextTick()
     expect(scale.checked).toBe(false)
+    expect(idle(ownButton)).toBe(true)
+    // a frozen panel is the one where the reset is dead
+    owned.freeze()
+    await nextTick()
     expect(ownButton.disabled).toBe(true)
   })
 })

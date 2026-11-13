@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { marginFits, plotGeometry, plotSvg, tableMeasure } from './plot'
 import type { PlotSpec, Points, Series, TextMeasure } from './plot'
@@ -7,11 +7,15 @@ import type { PlotSpec, Points, Series, TextMeasure } from './plot'
 // payload and never of this library, so no model and no entity of a model is
 // named here.
 
-// The invariants of the renderer are checked over sweeps of thousands of
-// figures, the longest of which takes close to the default bound of a test of
-// five seconds, so a machine busy with anything else failed it for time and not
-// for a figure (5.6 s under a load of 7). They get a bound a sweep stays within.
-vi.setConfig({ testTimeout: 60_000 })
+/**
+ * The bound of time of one sweep of the renderer, in milliseconds. The
+ * invariants are checked over sweeps of thousands of figures, cut into pieces
+ * which take at most about half a second on an idle machine: a piece took up to
+ * 1.8 s while another test suite kept every core of this machine of 20 busy (a
+ * load of 15 to 24), so the bound is what such a machine stays within, and a
+ * renderer about ten times slower is not.
+ */
+const SWEEP_TIMEOUT = 3_000
 
 /** Build a series of `values` over four x, with a straight ramp as its values. */
 function series(index: number, values?: number[]): Series {
@@ -1060,26 +1064,44 @@ describe('the band of rows below the plot', () => {
     expect((rows.at(-1) ?? 0) + SMALL_FONT / 2).toBeLessThanOrEqual(200)
   })
 
-  it('reserves the rows it draws at every size, with a short and a wrapped y label', () => {
-    // the rows are counted against the width of the plot box the fit returns,
-    // which is the width they are drawn into, so the band and its rows are one
-    // measurement and no estimate of the margins can open a gap between them
-    const problems: string[] = []
-    let banded = 0
-    for (const yLabel of ['amount', 'amount in urine']) {
-      for (let width = 220; width <= 1400; width += 1) {
+  /** The sweeps of the band, one per y label and half of the widths 220 to 1400 px. */
+  const BAND_SWEEPS = ['amount', 'amount in urine'].flatMap((yLabel) =>
+    [
+      [220, 810],
+      [811, 1400],
+    ].map(([from = 0, to = 0]) => ({ yLabel, from, to })),
+  )
+  /** The figures of each sweep which drew a band, which the last test reads. */
+  const banded: number[] = []
+
+  it.each(BAND_SWEEPS)(
+    'reserves the rows it draws at every size, $yLabel, $from to $to px',
+    ({ yLabel, from, to }) => {
+      // the rows are counted against the width of the plot box the fit returns,
+      // which is the width they are drawn into, so the band and its rows are one
+      // measurement and no estimate of the margins can open a gap between them
+      const problems: string[] = []
+      let count = 0
+      for (let width = from; width <= to; width += 1) {
         for (const height of new Set([urine(width, yLabel).height, 200])) {
           const figure = urine(width, yLabel, height)
-          banded += bandRows(plotSvg(figure)).length > 0 ? 1 : 0
+          count += bandRows(plotSvg(figure)).length > 0 ? 1 : 0
           const problem = bandProblem(figure)
           if (problem !== null) {
             problems.push(problem)
           }
         }
       }
-    }
-    expect(banded).toBeGreaterThan(1000)
-    expect(problems).toEqual([])
+      banded.push(count)
+      expect(problems).toEqual([])
+    },
+    SWEEP_TIMEOUT,
+  )
+
+  it('draws a band for many figures of the sweeps', () => {
+    // a sweep which never draws a band checks nothing of its rows
+    expect(banded).toHaveLength(BAND_SWEEPS.length)
+    expect(banded.reduce((sum, one) => sum + one, 0)).toBeGreaterThan(1000)
   })
 })
 
@@ -1158,47 +1180,58 @@ describe('the fit of the margins', () => {
     return Number(found?.[1] ?? Number.NaN)
   }
 
-  it('ends on a pass which measured the box it returns, within its bound', () => {
-    // the fit ends on the first pass which asks for nothing, so the tick labels
-    // of the box it returns are inside the room of the plot to the rounding of
-    // the written coordinates: inside the padding of the figure, where nothing
-    // is right of the plot, and left of the column of a legend beside it. A
-    // width is a constant of its text for the measure of a fit, so the fit
-    // settles whatever the measure is, which the table and the widths of
-    // Chrome both show
-    const problems: string[] = []
-    let most = 0
-    for (const measure of [tableMeasure, chromeLike]) {
-      for (const range of RANGES) {
-        for (let width = 200; width <= 1600; width += 13) {
-          for (const height of [120, 200, 300]) {
-            for (const yLabel of ['amount', 'amount in urine']) {
-              for (const study of [false, true]) {
-                const one = { ...figure(range, width, height, yLabel, study), measure }
-                const svg = plotSvg(one)
-                const name = `${measure.name} ${String(range)} ${String(width)}x${String(height)} ${yLabel}`
-                for (const fit of marginFits(one)) {
-                  most = Math.max(most, fit.passes)
-                  if (!fit.settled) {
-                    problems.push(`${name}: unsettled after ${String(fit.passes)} passes`)
-                  }
+  /** The sweeps of the fit, one per measure and range of x, each within `SWEEP_TIMEOUT`. */
+  const FIT_SWEEPS = [tableMeasure, chromeLike].flatMap((measure) =>
+    RANGES.map((range) => ({ measure, range, label: `${measure.name} ${String(range)}` })),
+  )
+  /** The most passes a figure of each sweep took, which the last test reads. */
+  const passes: number[] = []
+
+  it.each(FIT_SWEEPS)(
+    'ends on a pass which measured the box it returns, within its bound, $label',
+    ({ measure, range }) => {
+      // the fit ends on the first pass which asks for nothing, so the tick labels
+      // of the box it returns are inside the room of the plot to the rounding of
+      // the written coordinates: inside the padding of the figure, where nothing
+      // is right of the plot, and left of the column of a legend beside it. A
+      // width is a constant of its text for the measure of a fit, so the fit
+      // settles whatever the measure is, which the table and the widths of
+      // Chrome both show
+      const problems: string[] = []
+      let most = 0
+      for (let width = 200; width <= 1600; width += 13) {
+        for (const height of [120, 200, 300]) {
+          for (const yLabel of ['amount', 'amount in urine']) {
+            for (const study of [false, true]) {
+              const one = { ...figure(range, width, height, yLabel, study), measure }
+              const svg = plotSvg(one)
+              const name = `${measure.name} ${String(range)} ${String(width)}x${String(height)} ${yLabel}`
+              for (const fit of marginFits(one)) {
+                most = Math.max(most, fit.passes)
+                if (!fit.settled) {
+                  problems.push(`${name}: unsettled after ${String(fit.passes)} passes`)
                 }
-                const right = Math.min(width - PAD, columnStart(svg))
-                for (const span of xTickSpans(svg, measure)) {
-                  if (span.from < PAD - WRITTEN || span.to > right + WRITTEN) {
-                    problems.push(
-                      `${name}: a tick label at ${String(span.from)}..${String(span.to)}`,
-                    )
-                  }
+              }
+              const right = Math.min(width - PAD, columnStart(svg))
+              for (const span of xTickSpans(svg, measure)) {
+                if (span.from < PAD - WRITTEN || span.to > right + WRITTEN) {
+                  problems.push(`${name}: a tick label at ${String(span.from)}..${String(span.to)}`)
                 }
               }
             }
           }
         }
       }
-    }
-    expect(problems).toEqual([])
-    expect(most).toBeGreaterThan(1)
+      passes.push(most)
+      expect(problems).toEqual([])
+    },
+    SWEEP_TIMEOUT,
+  )
+
+  it('takes more than one pass for some figure of the sweeps', () => {
+    // a fit which never takes a second pass checks nothing of the passes
+    expect(passes).toHaveLength(FIT_SWEEPS.length)
+    expect(Math.max(...passes)).toBeGreaterThan(1)
   })
 })
 
@@ -1242,16 +1275,28 @@ describe('the room the y tick labels keep', () => {
     [0, 1440],
   ]
 
-  it('keeps every y tick label inside the figure and clear of the label of its axis', () => {
-    // a y tick label is written right-aligned left of the plot and the lines of
-    // the y label run from the left edge of the figure: the left margin grows by
-    // what the widest tick label needs beyond the lines, as the right margin
-    // grows by what the last x tick label needs, by the widths of the measure,
-    // which a font a third wider than the table shows
-    const wide = (text: string, size: number): number => tableMeasure(text, size) * 1.3
-    const problems: string[] = []
-    for (const measure of [tableMeasure, wide]) {
-      for (const [low, high] of RANGES) {
+  /** A font a third wider than the table. */
+  function wide(text: string, size: number): number {
+    return tableMeasure(text, size) * 1.3
+  }
+
+  /** The sweeps of the y tick labels, one per range of y. */
+  const TICK_SWEEPS = RANGES.map(([low, high]) => ({
+    low,
+    high,
+    label: `${String(low)}..${String(high)}`,
+  }))
+
+  it.each(TICK_SWEEPS)(
+    'keeps every y tick label inside the figure and clear of the label of its axis, $label',
+    ({ low, high }) => {
+      // a y tick label is written right-aligned left of the plot and the lines of
+      // the y label run from the left edge of the figure: the left margin grows by
+      // what the widest tick label needs beyond the lines, as the right margin
+      // grows by what the last x tick label needs, by the widths of the measure,
+      // which a font a third wider than the table shows
+      const problems: string[] = []
+      for (const measure of [tableMeasure, wide]) {
         for (const yLabel of ['amount', 'amount in urine of a long name']) {
           for (let width = 240; width <= 1500; width += 7) {
             for (const height of [160, 300]) {
@@ -1268,9 +1313,10 @@ describe('the room the y tick labels keep', () => {
           }
         }
       }
-    }
-    expect(problems).toEqual([])
-  })
+      expect(problems).toEqual([])
+    },
+    SWEEP_TIMEOUT,
+  )
 
   it('moves the left edge for its labels and leaves the right one where it was', () => {
     // the two sides are counted apart: a wide y tick label moves where the plot
@@ -1617,18 +1663,26 @@ describe('the choice of the legend', () => {
     return (box.x1 - box.x0) * (box.y1 - box.y0)
   }
 
-  it('draws the larger of the boxes it can draw and follows no other rule', () => {
-    // the larger of two boxes loses no more plot to a change of the content
-    // than the layout which loses more, so one row more never halves a plot,
-    // which a cap on the share of the height a band takes did: it threw away a
-    // band which still left the larger plot
-    const problems: string[] = []
-    let tall = 0
-    for (const y of [
+  /** The sweeps of the choice of the box, one per range of y. */
+  const BOX_SWEEPS = (
+    [
       [0, 3],
       [-170000, 0],
       [0, 150000],
-    ] as [number, number][]) {
+    ] as [number, number][]
+  ).map((y) => ({ y, label: `${String(y[0])}..${String(y[1])}` }))
+  /** The figures of each sweep whose band took more than 35 % of the height. */
+  const tall: number[] = []
+
+  it.each(BOX_SWEEPS)(
+    'draws the larger of the boxes it can draw and follows no other rule, $label',
+    ({ y }) => {
+      // the larger of two boxes loses no more plot to a change of the content
+      // than the layout which loses more, so one row more never halves a plot,
+      // which a cap on the share of the height a band takes did: it threw away a
+      // band which still left the larger plot
+      const problems: string[] = []
+      let count = 0
       for (const studies of [[], ['Beermann 1976'], STUDIES, ARMS]) {
         for (let width = 220; width <= 700; width += 3) {
           for (const height of [120, 200, 300]) {
@@ -1643,14 +1697,20 @@ describe('the choice of the legend', () => {
             // the rows a band reserves are the height between the room of the x
             // axis, one line of its label here, and the plot
             const band = height - 42 - plotGeometry(one).box.y1
-            tall += plotSvg(one).includes('class="legend below"') && band > 0.35 * height ? 1 : 0
+            count += plotSvg(one).includes('class="legend below"') && band > 0.35 * height ? 1 : 0
           }
         }
       }
-    }
-    expect(problems).toEqual([])
-    // and the sweep has bands which a cap of 35 % of the height refused
-    expect(tall).toBeGreaterThan(0)
+      tall.push(count)
+      expect(problems).toEqual([])
+    },
+    SWEEP_TIMEOUT,
+  )
+
+  it('draws bands which a cap of 35 % of the height refused in the sweeps', () => {
+    // a sweep without such a band checks nothing of the cap it replaced
+    expect(tall).toHaveLength(BOX_SWEEPS.length)
+    expect(tall.reduce((sum, one) => sum + one, 0)).toBeGreaterThan(0)
   })
 
   it('keeps the band of a narrow figure whose y tick labels grow by a character', () => {
@@ -1863,52 +1923,65 @@ describe('the legends a figure may draw', () => {
 })
 
 describe('the ticks of the x axis', () => {
-  it('keeps a gap between the labels of neighbouring ticks however narrow the plot', () => {
-    // an axis asks for fewer ticks until its measured labels keep their gap, so
-    // a plot beside a legend at the width of a phone writes no two labels into
-    // each other, falling to two ticks or one where that is all it holds
-    const problems: string[] = []
-    let fewer = 0
-    for (const measure of [tableMeasure, chromeLike]) {
-      for (const span of [1440, 96, 143000]) {
-        for (const declared of [
-          [],
-          [['Beermann 1976 (5 mg, oral)']],
-          [['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']],
-        ]) {
-          for (let at = 0; at < 2 * 394; at += 1) {
-            // every width at the height the element gives it and at 120 px
-            const width = 220 + 3 * Math.floor(at / 2)
-            const height =
-              at % 2 === 0 ? (width < 300 ? 200 : Math.round(Math.min(420, width * 0.6))) : 120
-            const grid = Array.from({ length: 50 }, (_, index) => (span * index) / 49)
-            const svg = plotSvg({
-              ...spec(1, { x: grid, width, height }),
-              declaredLegends: declared,
-              measure,
-            })
-            const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
-            const spans = [
-              ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-            ].map((one) => {
-              const half = measure(one[2] ?? '', 11) / 2
-              return { from: Number(one[1]) - half, to: Number(one[1]) + half }
-            })
-            fewer += spans.length < 3 ? 1 : 0
-            for (const [index, one] of spans.entries()) {
-              const next = spans[index + 1]
-              if (next !== undefined && next.from - one.to < 6 - 0.01) {
-                problems.push(
-                  `${measure.name} ${String(span)} ${String(width)}: ${String(next.from - one.to)}`,
-                )
-              }
+  /** The sweeps of the gaps, one per measure and span of x. */
+  const GAP_SWEEPS = [tableMeasure, chromeLike].flatMap((measure) =>
+    [1440, 96, 143000].map((span) => ({ measure, span, label: `${measure.name} ${String(span)}` })),
+  )
+  /** The figures of each sweep which drew fewer than three ticks, which the last test reads. */
+  const fewer: number[] = []
+
+  it.each(GAP_SWEEPS)(
+    'keeps a gap between the labels of neighbouring ticks however narrow the plot, $label',
+    ({ measure, span }) => {
+      // an axis asks for fewer ticks until its measured labels keep their gap, so
+      // a plot beside a legend at the width of a phone writes no two labels into
+      // each other, falling to two ticks or one where that is all it holds
+      const problems: string[] = []
+      let count = 0
+      for (const declared of [
+        [],
+        [['Beermann 1976 (5 mg, oral)']],
+        [['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']],
+      ]) {
+        for (let at = 0; at < 2 * 394; at += 1) {
+          // every width at the height the element gives it and at 120 px
+          const width = 220 + 3 * Math.floor(at / 2)
+          const height =
+            at % 2 === 0 ? (width < 300 ? 200 : Math.round(Math.min(420, width * 0.6))) : 120
+          const grid = Array.from({ length: 50 }, (_, index) => (span * index) / 49)
+          const svg = plotSvg({
+            ...spec(1, { x: grid, width, height }),
+            declaredLegends: declared,
+            measure,
+          })
+          const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
+          const spans = [
+            ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+          ].map((one) => {
+            const half = measure(one[2] ?? '', 11) / 2
+            return { from: Number(one[1]) - half, to: Number(one[1]) + half }
+          })
+          count += spans.length < 3 ? 1 : 0
+          for (const [index, one] of spans.entries()) {
+            const next = spans[index + 1]
+            if (next !== undefined && next.from - one.to < 6 - 0.01) {
+              problems.push(
+                `${measure.name} ${String(span)} ${String(width)}: ${String(next.from - one.to)}`,
+              )
             }
           }
         }
       }
-    }
-    expect(problems).toEqual([])
-    expect(fewer).toBeGreaterThan(0)
+      fewer.push(count)
+      expect(problems).toEqual([])
+    },
+    SWEEP_TIMEOUT,
+  )
+
+  it('falls to fewer than three ticks for some figure of the sweeps', () => {
+    // a sweep which never thins an axis checks nothing of the thinning
+    expect(fewer).toHaveLength(GAP_SWEEPS.length)
+    expect(fewer.reduce((sum, one) => sum + one, 0)).toBeGreaterThan(0)
   })
 })
 
@@ -2065,15 +2138,19 @@ describe('the box solved for the ticks it draws', () => {
     }
   })
 
-  it('never gives a wider figure a smaller plot at a height, in the sizes of a host and the design', () => {
-    // a tick set which a narrow axis thins keeps its first and its last tick,
-    // whose labels are the ones which reach past the ends, so a figure which
-    // grows into drawing more ticks does not lose the plot their ends cost; and
-    // the box is solved for the ticks it draws, so no end of an earlier pass
-    // holds it in
-    const problems: string[] = []
-    for (const sizes of [undefined, LARGE]) {
-      for (const span of [1440, 143000, 3]) {
+  /** The sweeps of the widths, one per span of x, each in the sizes of a host and the design. */
+  const WIDTH_SWEEPS = [1440, 143000, 3].map((span) => ({ span, label: String(span) }))
+
+  it.each(WIDTH_SWEEPS)(
+    'never gives a wider figure a smaller plot at a height, in the sizes of a host and the design, $label',
+    ({ span }) => {
+      // a tick set which a narrow axis thins keeps its first and its last tick,
+      // whose labels are the ones which reach past the ends, so a figure which
+      // grows into drawing more ticks does not lose the plot their ends cost; and
+      // the box is solved for the ticks it draws, so no end of an earlier pass
+      // holds it in
+      const problems: string[] = []
+      for (const sizes of [undefined, LARGE]) {
         for (const declared of [[], [['Beermann 1976 (5 mg, oral)']], [STUDIES]]) {
           let last = 0
           for (let width = 220; width <= 640; width += 1) {
@@ -2097,8 +2174,12 @@ describe('the box solved for the ticks it draws', () => {
           }
         }
       }
-    }
-    expect(problems).toEqual([])
+      expect(problems).toEqual([])
+    },
+    SWEEP_TIMEOUT,
+  )
+
+  it('gives the figure of three studies at 298 px no smaller plot than at 297 px', () => {
     // the case of the review: three studies, 0..1440, 297 and 298 px
     const at = (width: number): number =>
       area({ ...over(1440, [0, 3], width, 200, { declaredLegends: [STUDIES] }), fontSizes: LARGE })
