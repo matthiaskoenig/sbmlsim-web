@@ -11,6 +11,15 @@ import type {
   SimulateResponse,
 } from './contract'
 import { PANEL_TAG, register } from './index'
+import { plotSvg, tableMeasure } from './plot'
+
+// the renderer as it is, with `plotSvg` counted: a figure which is laid out
+// again is one more call of it, which is how a test sees that a font which
+// arrives late lays the figure out once and not once per event of the page
+vi.mock('./plot', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./plot')>()
+  return { ...actual, plotSvg: vi.fn(actual.plotSvg) }
+})
 
 // The element runs in a dom, which is `happy-dom` for this file alone: every
 // other test file of this library is pure and keeps running in node. Nothing
@@ -1889,5 +1898,121 @@ describe('the variant of the model', () => {
     )
     await started()
     expect(heard).toEqual(['engineA'])
+  })
+})
+
+describe('the measure of the text', () => {
+  /** What the stub of canvas was asked: the fonts it was set to and the texts it measured. */
+  interface Canvas {
+    /** The shorthands its font was set to, in their order. */
+    fonts: string[]
+    /** How much wider than the table its text is, which a test changes. */
+    factor: number
+  }
+
+  /**
+   * Give the page a canvas whose texts are `factor` times as wide as the table.
+   *
+   * happy-dom has no canvas, so this is the one a browser would have; its font
+   * is the shorthand it was last set to, as a browser keeps it.
+   */
+  function canvas(): Canvas {
+    const state: Canvas = { fonts: [], factor: 1.5 }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() => {
+      let font = '10px sans-serif'
+      return {
+        get font(): string {
+          return font
+        },
+        set font(value: string) {
+          font = value
+          state.fonts.push(value)
+        },
+        measureText: (text: string) => ({
+          width: tableMeasure(text, Number(/(\d+)px/.exec(font)?.[1] ?? 10)) * state.factor,
+        }),
+      }
+    }) as never)
+    return state
+  }
+
+  /** A font set of the page whose font of the figure arrives when a test says so. */
+  interface Fonts {
+    /** Let the font arrive. */
+    arrive: () => void
+    /** The font set, which also dispatches the events a page does. */
+    set: EventTarget
+  }
+
+  /** Give the document a font set whose font is still loading. */
+  function loading(): Fonts {
+    let arrive: () => void = () => undefined
+    const set = new EventTarget()
+    const loaded = new Promise<unknown[]>((resolve) => {
+      arrive = () => {
+        resolve([{ family: 'Inter' }])
+      }
+    })
+    Object.assign(set, { check: () => false, load: () => loaded })
+    Object.defineProperty(document, 'fonts', { configurable: true, value: set })
+    return {
+      arrive: () => {
+        arrive()
+      },
+      set,
+    }
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'fonts')
+  })
+
+  it('lays the figure out with canvas in the font of the panel', async () => {
+    const plain = figure(await started())
+    document.body.innerHTML = ''
+    const state = canvas()
+    const element = await started()
+    await settled()
+    // the figure is laid out with the widths canvas gives in the font the
+    // panel resolved, which is not the figure of the table
+    expect(figure(element)).not.toBe(plain)
+    expect(state.fonts.length).toBeGreaterThan(0)
+    const family = getComputedStyle(part(element, '.panel')).fontFamily
+    expect(family).not.toBe('')
+    for (const font of state.fonts) {
+      expect(font.endsWith(`px ${family.replace(/\s+/g, ' ').trim()}`)).toBe(true)
+    }
+  })
+
+  it('lays the figure out again once when its font arrives and not on a font event', async () => {
+    const state = canvas()
+    const fonts = loading()
+    const element = await started()
+    await settled()
+    const drawn = vi.mocked(plotSvg).mock.calls.length
+    const before = figure(element)
+    // the font arrives, and it is wider than the one the browser drew meanwhile
+    state.factor = 2
+    fonts.arrive()
+    await settled()
+    expect(vi.mocked(plotSvg).mock.calls.length).toBe(drawn + 1)
+    expect(figure(element)).not.toBe(before)
+    // the page loads other fonts, and the figure is not laid out for them
+    fonts.set.dispatchEvent(new Event('loadingdone'))
+    fonts.set.dispatchEvent(new Event('loading'))
+    await settled()
+    expect(vi.mocked(plotSvg).mock.calls.length).toBe(drawn + 1)
+  })
+
+  it('leaves a font which is there already to the first layout', async () => {
+    canvas()
+    const load = vi.fn(() => Promise.resolve([]))
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { check: () => true, load },
+    })
+    await started()
+    await settled()
+    expect(load).not.toHaveBeenCalled()
   })
 })

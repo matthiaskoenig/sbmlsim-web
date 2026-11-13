@@ -61,8 +61,10 @@ export {
 } from './client'
 export type { FailureKind } from './client'
 export { interpolate } from './interpolate'
-export { plotGeometry, plotSvg, seriesColour } from './plot'
-export type { Limits, PlotBox, PlotGeometry, PlotSpec, Points, Series } from './plot'
+export { canvasMeasure, fontOf } from './measure'
+export type { FigureFont } from './measure'
+export { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
+export type { Limits, PlotBox, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
 
 export { APP_TAG, PANEL_TAG }
 

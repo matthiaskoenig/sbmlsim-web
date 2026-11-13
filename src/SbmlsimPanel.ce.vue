@@ -141,8 +141,9 @@ import type {
   SimulateResponse,
 } from './contract'
 import { interpolate } from './interpolate'
+import { canvasMeasure, fontOf, whenFontArrives } from './measure'
 import { plotGeometry, plotSvg, seriesColour } from './plot'
-import type { Limits, PlotGeometry, PlotSpec, Points, Series } from './plot'
+import type { Limits, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
 
 /** How the controls are placed next to the figure. */
 type LayoutName = 'auto' | 'sidebar' | 'stacked' | 'toolbar'
@@ -435,6 +436,36 @@ const props = defineProps({
 const host = useHost()
 const root = useTemplateRef<HTMLElement>('root')
 const plotted = useTemplateRef<HTMLElement>('plotted')
+
+/**
+ * How wide a text of the figure is drawn, `null` where the page cannot measure.
+ *
+ * It is built on canvas in the font of the panel, which is the font of the
+ * figure: the figure writes `var(--sbmlsim-font, ...)`, which `.figure-svg`
+ * sets to the font `.panel` resolves, and inherits the weight and the style of
+ * `.panel`. Without a canvas the figure is laid out with the table of the
+ * renderer. It is built once, when the panel is first drawn, and once more
+ * when the font, which may still have been loading then, has arrived; a new
+ * measure is a new spec, so that is one layout and not one per font event.
+ */
+const measure = shallowRef<TextMeasure | null>(null)
+/** Whether the measure was built, which happens once for the life of the element. */
+let measuring = false
+
+watch(root, (box) => {
+  if (box === null || measuring) {
+    return
+  }
+  measuring = true
+  const font = fontOf(box)
+  if (font === null) {
+    return
+  }
+  measure.value = canvasMeasure(font)
+  whenFontArrives(font, () => {
+    measure.value = canvasMeasure(font)
+  })
+})
 
 /** Whether `activate()` has run, which is what makes the element draw anything. */
 const active = ref(false)
@@ -1118,6 +1149,7 @@ const plot = computed<PlotSpec | null>(() => {
     height: figureHeight.value,
     logY: logY.value,
     ...(held === null ? {} : { yLimits: held }),
+    ...(measure.value === null ? {} : { measure: measure.value }),
   }
   const points = drawnData.value
   const labels = declaredLabels.value
@@ -1298,8 +1330,8 @@ function moreText(more: number): string {
  * @param more how many rows the box will not show, 0 for a box which shows all
  * @param font the size of its font in pixels, as the page resolved it
  * @returns the pixels of its widest row with its padding and its border, an
- *   estimate of its characters and no measurement, as the figure estimates the
- *   room of its legend
+ *   estimate of its characters and no measurement: the box is an overlay which
+ *   only has to hold its rows, while the figure under it measures its text
  */
 function readoutRoom(time: string, rows: ReadoutRow[], more: number, font: number): number {
   const label = font * READOUT_EM

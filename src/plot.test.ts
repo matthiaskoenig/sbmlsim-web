@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { marginFits, plotGeometry, plotSvg } from './plot'
-import type { PlotSpec, Points, Series } from './plot'
+import { marginFits, plotGeometry, plotSvg, tableMeasure } from './plot'
+import type { PlotSpec, Points, Series, TextMeasure } from './plot'
 
 // Every id below is a neutral one: a curve, a series and a knob are data of a
 // payload and never of this library, so no model and no entity of a model is
@@ -40,7 +40,7 @@ function spec(count: number, more: Partial<PlotSpec> = {}): PlotSpec {
  */
 const FILLERS = Array.from(
   { length: 10 },
-  (_, index) => `hydrochlorothiazide plasma level ${String(index + 1)}`,
+  (_, index) => `hydrochlorothiazide plasma concentration, level ${String(index + 1)}`,
 )
 
 /**
@@ -97,17 +97,51 @@ function texts(svg: string): string[] {
   return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((one) => one[1] ?? '')
 }
 
+/** The characters of `ROBOTO_ADVANCES`, printable ASCII and the ellipsis. */
+const ROBOTO_CHARACTERS = `${Array.from({ length: 95 }, (_, index) => String.fromCharCode(32 + index)).join('')}\u2026`
+
+/**
+ * The advance widths of Roboto Regular in units of 2048 to an em, in the order of
+ * `ROBOTO_CHARACTERS`, read with fontTools from `Roboto-Regular.ttf`.
+ *
+ * Roboto is the font Chrome resolves the font token of the figure to on
+ * linux, and canvas `measureText` in Chrome gives these widths for the labels
+ * of the panels to within 0.33 px (the difference is kerning, `Fr` of
+ * `Frost`), where the table of the renderer is Arial and the estimate before
+ * it was 35 % too wide: a measure of these widths is a measure of the widths
+ * a reader sees, and one which is not the table.
+ */
+const ROBOTO_ADVANCES = [
+  508, 528, 656, 1261, 1151, 1500, 1274, 358, 701, 713, 882, 1162, 403, 566, 540, 845, 1151, 1151,
+  1151, 1151, 1151, 1151, 1151, 1151, 1151, 1151, 496, 433, 1041, 1124, 1071, 968, 1839, 1336, 1276,
+  1333, 1344, 1164, 1132, 1395, 1461, 557, 1130, 1285, 1103, 1788, 1461, 1409, 1292, 1409, 1262,
+  1216, 1222, 1328, 1304, 1817, 1284, 1230, 1227, 543, 841, 543, 856, 924, 633, 1114, 1150, 1072,
+  1155, 1086, 712, 1150, 1128, 498, 490, 1038, 498, 1796, 1131, 1168, 1150, 1164, 694, 1057, 670,
+  1129, 992, 1539, 1016, 969, 1016, 693, 500, 693, 1393, 1370,
+]
+
+/** Measure a text in Roboto, the widths of Chrome on linux. */
+function chromeLike(text: string, size: number): number {
+  let units = 0
+  for (const character of text) {
+    units += ROBOTO_ADVANCES[ROBOTO_CHARACTERS.indexOf(character)] ?? 1151
+  }
+  return (units / 2048) * size
+}
+
 /**
  * The figure of a small spec, byte for byte.
  *
  * It is the pin of every caller which hands the renderer nothing but what it
  * draws: a spec without `yLimits` and without `declaredLabels` draws these
  * bytes, so neither field can move the figure of a page which never passes
- * them, and nothing else drifts under them unnoticed either. It is re-taken
+ * them, and nothing else drifts under them unnoticed either. It is drawn with
+ * the table of the renderer (`tableMeasure`), which a spec without a measure is
+ * laid out with, so it is one exact figure on every machine. It is re-taken
  * when the renderer changes its geometry on purpose, which the figure of the
  * change then has to show.
  */
-const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="71.64" y="107" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.55" y="107" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="173.45" y="107" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="224.36" y="107" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96.09" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70.03" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="43.97" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="17.91" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="114.83" y1="143" x2="132.82" y2="143"/><text x="138.82" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
+const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="71.64" y="107" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.55" y="107" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="173.45" y="107" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="224.36" y="107" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96.09" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70.03" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="43.97" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="17.91" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="116.74" y1="143" x2="134.74" y2="143"/><text x="140.74" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
 
 /** The spec `PINNED` was drawn from. */
 function pinned(): PlotSpec {
@@ -125,6 +159,8 @@ function pinned(): PlotSpec {
 describe('plotSvg', () => {
   it('draws the figure it is pinned to, byte for byte', () => {
     expect(plotSvg(pinned())).toBe(PINNED)
+    // the table is the measure of a spec which carries none
+    expect(plotSvg({ ...pinned(), measure: tableMeasure })).toBe(PINNED)
   })
 
   it('draws one path per series', () => {
@@ -456,20 +492,17 @@ describe('plotSvg', () => {
   })
 
   it('wraps a long legend label onto two lines instead of cutting it', () => {
-    const svg = plotSvg(columnLegend(['plasma concentration total']))
-    expect(legendEntries(svg)[0]).toBe('plasma concentration total')
+    const svg = plotSvg(columnLegend(['plasma concentration of the total']))
+    expect(legendEntries(svg)[0]).toBe('plasma concentration of the total')
     // the whole label is written, on the two lines of its words
-    expect(texts(svg)).toContain('plasma concentration')
-    expect(texts(svg)).toContain('total')
+    expect(texts(svg)).toContain('plasma concentration of')
+    expect(texts(svg)).toContain('the total')
   })
 
   it('cuts the last line of a label which two lines do not hold with an ellipsis', () => {
-    const svg = plotSvg(columnLegend(['A very long legend entry indeed, and then some']))
-    const lines = texts(svg).filter(
-      (one) =>
-        'A very long legend entry indeed, and then some'.includes(one.replace('…', '')) &&
-        one !== '',
-    )
+    const label = 'A very long legend entry indeed, which runs on past two lines, and then some'
+    const svg = plotSvg(columnLegend([label]))
+    const lines = texts(svg).filter((one) => label.includes(one.replace('…', '')) && one !== '')
     expect(lines).toHaveLength(2)
     expect(lines[1]?.startsWith('…')).toBe(true)
     expect(lines[1]?.endsWith('some')).toBe(true)
@@ -481,10 +514,14 @@ describe('plotSvg', () => {
       return texts(svg).find((one) => one.startsWith('…')) ?? ''
     }
     // the words of the end are words of the label and no tail of one
-    expect(lastLine('A very long legend entry indeed, and then some')).toBe('…and then some')
+    expect(
+      lastLine('A very long legend entry indeed, which runs on past two lines, and then some'),
+    ).toBe('…lines, and then some')
     // a label which ends in a word longer than the room keeps the end of it,
     // because there is no word to start at
-    expect(lastLine('Study A hydrochlorothiazideplasmaconcentrationofvolunteers')).toBe('…lunteers')
+    expect(lastLine('Study A hydrochlorothiazideplasmaconcentrationofvolunteers')).toBe(
+      '…oncentrationofvolunteers',
+    )
   })
 
   it('keeps the end of a label which needs more than two lines, where labels differ', () => {
@@ -624,11 +661,11 @@ describe('the room the legend keeps', () => {
     // keeps its legend beside the plot, where the reserved one takes the band
     // below it, so the reserve is part of the layout and not a note
     const plain = spec(1, {
-      width: 1100,
+      width: 900,
       height: 160,
       series: [{ ...series(1), label: CONDITIONED[0] ?? '' }],
     })
-    expect(plotGeometry(conditioned(1100, false, 160)).box.y1).toBeLessThan(
+    expect(plotGeometry(conditioned(900, false, 160)).box.y1).toBeLessThan(
       plotGeometry(plain).box.y1,
     )
   })
@@ -745,6 +782,25 @@ describe('plotGeometry', () => {
   })
 })
 
+/**
+ * Measure a text as the renderer once guessed it, 0.55 of its size a character.
+ *
+ * It is the measure the tests compare against to show that a figure follows
+ * its measure: the guess made `anti-Xa activity` 35 % wider than Chrome draws it.
+ */
+function estimate(text: string, size: number): number {
+  return Array.from(text).length * size * 0.55
+}
+
+/** The figure of the anti-Xa panel: its curve, its y label and its three studies. */
+function antiXa(width: number, height = 200): PlotSpec {
+  return {
+    ...spec(1, { width, height, yLabel: 'anti-Xa activity' }),
+    series: [{ ...series(1), label: 'anti-Xa', unit: 'ng/ml' }],
+    declaredLabels: ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly'],
+  }
+}
+
 describe('the label of an axis', () => {
   /**
    * Get the lines the label of an axis is written on, in their order.
@@ -794,33 +850,41 @@ describe('the label of an axis', () => {
     expect(lines[1]?.endsWith('[mM]')).toBe(true)
   })
 
-  // `anti-Xa activity [ng/ml]` beside the 90 px plot of a 316 px figure: two
-  // lines hold it in the browser and not in the estimate of `EM`, which cuts it
-  it.todo(
-    'reads a label whole on two lines where its measured width fits (the measured-width task)',
-  )
+  it('reads a label whole on two lines where its measured width fits', () => {
+    // `anti-Xa activity [ng/ml]` beside the plot of a 316 px figure under the
+    // band of its studies: the words are 78 px wide in the table and in
+    // Chrome, which two lines of the height of the plot hold, while the 0.55 em
+    // a character the renderer once guessed made them 106 px and cut the label
+    for (const measure of [tableMeasure, chromeLike]) {
+      const lines = labelLines(plotSvg({ ...antiXa(316), measure }), false)
+      expect({ measure: measure.name, lines }).toEqual({
+        measure: measure.name,
+        lines: ['anti-Xa activity', '[ng/ml]'],
+      })
+    }
+    const guessed = labelLines(plotSvg({ ...antiXa(316), measure: estimate }), false)
+    expect(guessed).toEqual(['anti-Xa', '\u2026[ng/ml]'])
+  })
 
   it('keeps the band of the anti-Xa panel where a longer y label would cost it a row', () => {
     // the y label takes two lines and no more: a third line moves the plot
     // right by a line, the band then needs a fourth row, which is more of the
     // height than a legend may take, and the legend goes beside a plot of half
     // the width with its study labels cut
-    for (let width = 249; width <= 262; width += 1) {
-      const figure: PlotSpec = {
-        ...spec(1, { width, height: 200, yLabel: 'anti-Xa activity' }),
-        series: [{ ...series(1), label: 'anti-Xa', unit: 'ng/ml' }],
-        declaredLabels: ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly'],
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (let width = 249; width <= 262; width += 1) {
+        const svg = plotSvg({ ...antiXa(width), measure })
+        expect({
+          measure: measure.name,
+          width,
+          below: svg.includes('class="legend below"'),
+        }).toEqual({ measure: measure.name, width, below: true })
       }
-      const svg = plotSvg(figure)
-      expect({ width, below: svg.includes('class="legend below"') }).toEqual({
-        width,
-        below: true,
-      })
     }
   })
 
   it('wraps the label of the x axis the same way', () => {
-    const label = 'time after the administration of the dose [h]'
+    const label = 'time after the administration of the first dose of the drug [h]'
     const lines = labelLines(plotSvg(spec(1, { xLabel: label, width: 300, height: 220 })), true)
     expect(lines.length).toBeGreaterThan(1)
     expect(lines[lines.length - 1]?.endsWith('[h]')).toBe(true)
@@ -835,10 +899,8 @@ describe('the label of an axis', () => {
 })
 
 describe('the room the tick labels keep', () => {
-  /** The size of the font of a tick label, the estimate of the renderer. */
+  /** The size of the font of a tick label, the renderer's. */
   const SMALL_FONT = 11
-  /** The width of one character of that font, the estimate of the renderer. */
-  const EM = 0.55
 
   /** A figure over a grid of minutes, whose ticks are four digits wide. */
   function minutes(width: number, more: Partial<PlotSpec> = {}): PlotSpec {
@@ -870,7 +932,7 @@ describe('the room the tick labels keep', () => {
     ].map((one) => {
       const at = Number(one[1])
       const label = one[2] ?? ''
-      const half = (label.length * SMALL_FONT * EM) / 2
+      const half = tableMeasure(label, SMALL_FONT) / 2
       return { label, from: at - half, to: at + half }
     })
   }
@@ -1018,10 +1080,8 @@ describe('the band of rows below the plot', () => {
 describe('the fit of the margins', () => {
   /** The padding of a figure, the renderer's. */
   const PAD = 8
-  /** The size of the font of a tick label, the estimate of the renderer. */
+  /** The size of the font of a tick label, the renderer's. */
   const SMALL_FONT = 11
-  /** The width of one character of that font, the estimate of the renderer. */
-  const EM = 0.55
   /** What the two decimals of a coordinate of the figure may round a pixel by. */
   const WRITTEN = 0.005
 
@@ -1069,13 +1129,16 @@ describe('the fit of the margins', () => {
   }
 
   /** The pixels every tick label of the x axis spans. */
-  function xTickSpans(svg: string): { from: number; to: number }[] {
+  function xTickSpans(
+    svg: string,
+    measure: TextMeasure = tableMeasure,
+  ): { from: number; to: number }[] {
     const axis = svg.split('<g class="axis ')[1] ?? ''
     const group = axis.split('<g class="data"')[0] ?? ''
     return [
       ...group.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
     ].map((one) => {
-      const half = ((one[2] ?? '').length * SMALL_FONT * EM) / 2
+      const half = measure(one[2] ?? '', SMALL_FONT) / 2
       return { from: Number(one[1]) - half, to: Number(one[1]) + half }
     })
   }
@@ -1093,27 +1156,34 @@ describe('the fit of the margins', () => {
     // the fit ends on the first pass which asks for nothing, so the tick labels
     // of the box it returns are inside the room of the plot to the rounding of
     // the written coordinates: inside the padding of the figure, where nothing
-    // is right of the plot, and left of the column of a legend beside it
+    // is right of the plot, and left of the column of a legend beside it. A
+    // width is a constant of its text for the measure of a fit, so the fit
+    // settles whatever the measure is, which the table and the widths of
+    // Chrome both show
     const problems: string[] = []
     let most = 0
-    for (const range of RANGES) {
-      for (let width = 200; width <= 1600; width += 13) {
-        for (const height of [120, 200, 300]) {
-          for (const yLabel of ['amount', 'amount in urine']) {
-            for (const study of [false, true]) {
-              const one = figure(range, width, height, yLabel, study)
-              const svg = plotSvg(one)
-              const name = `${String(range)} ${String(width)}x${String(height)} ${yLabel}`
-              for (const fit of marginFits(one)) {
-                most = Math.max(most, fit.passes)
-                if (!fit.settled) {
-                  problems.push(`${name}: unsettled after ${String(fit.passes)} passes`)
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (const range of RANGES) {
+        for (let width = 200; width <= 1600; width += 13) {
+          for (const height of [120, 200, 300]) {
+            for (const yLabel of ['amount', 'amount in urine']) {
+              for (const study of [false, true]) {
+                const one = { ...figure(range, width, height, yLabel, study), measure }
+                const svg = plotSvg(one)
+                const name = `${measure.name} ${String(range)} ${String(width)}x${String(height)} ${yLabel}`
+                for (const fit of marginFits(one)) {
+                  most = Math.max(most, fit.passes)
+                  if (!fit.settled) {
+                    problems.push(`${name}: unsettled after ${String(fit.passes)} passes`)
+                  }
                 }
-              }
-              const right = Math.min(width - PAD, columnStart(svg))
-              for (const span of xTickSpans(svg)) {
-                if (span.from < PAD - WRITTEN || span.to > right + WRITTEN) {
-                  problems.push(`${name}: a tick label at ${String(span.from)}..${String(span.to)}`)
+                const right = Math.min(width - PAD, columnStart(svg))
+                for (const span of xTickSpans(svg, measure)) {
+                  if (span.from < PAD - WRITTEN || span.to > right + WRITTEN) {
+                    problems.push(
+                      `${name}: a tick label at ${String(span.from)}..${String(span.to)}`,
+                    )
+                  }
                 }
               }
             }
@@ -1132,8 +1202,6 @@ describe('the room the y tick labels keep', () => {
   /** The size of the font of a tick label and of an axis label, the renderer's. */
   const SMALL_FONT = 11
   const LABEL_FONT = 12
-  /** The width of one character of a font, a share of its size, the renderer's estimate. */
-  const EM = 0.55
 
   /** A figure whose y axis covers `low..high`, over a grid of four x. */
   function valued(low: number, high: number, more: Partial<PlotSpec> = {}): PlotSpec {
@@ -1142,11 +1210,11 @@ describe('the room the y tick labels keep', () => {
   }
 
   /** The pixel every y tick label starts at, its right end less its estimated width. */
-  function yTickStarts(svg: string): number[] {
+  function yTickStarts(svg: string, measure: TextMeasure = tableMeasure): number[] {
     const axis = (svg.split('<g class="axis ')[2] ?? '').split('<g class="data"')[0] ?? ''
     return [
       ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => Number(one[1]) - (one[2] ?? '').length * SMALL_FONT * EM)
+    ].map((one) => Number(one[1]) - measure(one[2] ?? '', SMALL_FONT))
   }
 
   /** The pixel the glyphs of the last line of the y label end at. */
@@ -1172,19 +1240,23 @@ describe('the room the y tick labels keep', () => {
     // a y tick label is written right-aligned left of the plot and the lines of
     // the y label run from the left edge of the figure: the left margin grows by
     // what the widest tick label needs beyond the lines, as the right margin
-    // grows by what the last x tick label needs
+    // grows by what the last x tick label needs, by the widths of the measure,
+    // which a font a third wider than the table shows
+    const wide = (text: string, size: number): number => tableMeasure(text, size) * 1.3
     const problems: string[] = []
-    for (const [low, high] of RANGES) {
-      for (const yLabel of ['amount', 'amount in urine of a long name']) {
-        for (let width = 240; width <= 1500; width += 7) {
-          for (const height of [160, 300]) {
-            const svg = plotSvg(valued(low, high, { width, height, yLabel }))
-            const clear = Math.max(labelEnd(svg), PAD)
-            for (const start of yTickStarts(svg)) {
-              if (start < clear - 0.005) {
-                problems.push(
-                  `${String(high)} ${String(width)}x${String(height)} ${yLabel}: ${String(start)} < ${String(clear)}`,
-                )
+    for (const measure of [tableMeasure, wide]) {
+      for (const [low, high] of RANGES) {
+        for (const yLabel of ['amount', 'amount in urine of a long name']) {
+          for (let width = 240; width <= 1500; width += 7) {
+            for (const height of [160, 300]) {
+              const svg = plotSvg({ ...valued(low, high, { width, height, yLabel }), measure })
+              const clear = Math.max(labelEnd(svg), PAD)
+              for (const start of yTickStarts(svg, measure)) {
+                if (start < clear - 0.005) {
+                  problems.push(
+                    `${measure.name} ${String(high)} ${String(width)}x${String(height)} ${yLabel}: ${String(start)} < ${String(clear)}`,
+                  )
+                }
               }
             }
           }
@@ -1197,7 +1269,7 @@ describe('the room the y tick labels keep', () => {
   it('moves the left edge for its labels and leaves the right one where it was', () => {
     // the two sides are counted apart: a wide y tick label moves where the plot
     // starts and never where it ends
-    const wide = plotGeometry(valued(0, 1.2e-4, { width: 600 })).box
+    const wide = plotGeometry(valued(-170000, 0, { width: 600 })).box
     const narrow = plotGeometry(valued(0, 4, { width: 600 })).box
     expect(wide.x0).toBeGreaterThan(narrow.x0)
     expect(wide.x1).toBe(narrow.x1)
@@ -1227,7 +1299,7 @@ describe('the column beside the plot', () => {
     const axis = svg.split('<g class="axis ')[1] ?? ''
     const ends = [
       ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => Number(one[1]) + ((one[2] ?? '').length * 11 * 0.55) / 2)
+    ].map((one) => Number(one[1]) + tableMeasure(one[2] ?? '', 11) / 2)
     const box = plotGeometry(figure).box
     // the plot was narrowed for its last label, which reaches past its end
     expect(Math.max(...ends)).toBeGreaterThan(box.x1 + 12)
@@ -1244,8 +1316,346 @@ describe('a row of the band below the plot', () => {
     const svg = plotSvg(figure)
     expect(svg).toContain('class="legend below"')
     const start = Number(/<line class="swatch" [^>]*\sx1="([^"]*)"/.exec(svg)?.[1])
-    const end = start + 18 + 6 + 'urine'.length * 11 * 0.55
+    const end = start + 18 + 6 + tableMeasure('urine', 11)
     const box = plotGeometry(figure).box
     expect(Math.abs((start + end) / 2 - (box.x0 + box.x1) / 2)).toBeLessThan(0.01)
+  })
+})
+
+describe('the measure of the text', () => {
+  /** One entry of the band below the plot: where its swatch starts and its text. */
+  interface BandEntry {
+    /** The pixel its swatch starts at. */
+    start: number
+    /** The pixel its label starts at. */
+    at: number
+    /** The pixel its row is centred on. */
+    row: number
+    /** Its label as it is written. */
+    label: string
+  }
+
+  /** The entries of the band below the plot, in their order. */
+  function bandEntries(svg: string): BandEntry[] {
+    const band = /<g class="legend below"[\s\S]*$/.exec(svg)?.[0] ?? ''
+    // the swatch of a curve is a line and the one of a study a marker, so an
+    // entry starts the swatch and its gap before its label
+    return [
+      ...band.matchAll(
+        /<g class="legend-entry"[^>]*>(?:(?!<\/g>).)*?<text x="([^"]*)" y="([^"]*)"[^>]*>([^<]*)<\/text><\/g>/g,
+      ),
+    ].map((one) => ({
+      start: Number(one[1]) - 18 - 6,
+      at: Number(one[1]),
+      row: Number(one[2]),
+      label: one[3] ?? '',
+    }))
+  }
+
+  /** The labels of the band below the plot, row by row. */
+  function bandRows(svg: string): string[][] {
+    const rows = new Map<number, string[]>()
+    for (const entry of bandEntries(svg)) {
+      rows.set(entry.row, [...(rows.get(entry.row) ?? []), entry.label])
+    }
+    return [...rows.values()]
+  }
+
+  /**
+   * Pack labels into rows of a width, as a reader would with a ruler.
+   *
+   * An entry is its swatch, the gap after it and its label, and two entries of
+   * a row are a column gap apart; the widths are the measure's.
+   */
+  function packed(labels: string[], room: number, measure: TextMeasure): string[][] {
+    const rows: string[][] = []
+    let row: string[] = []
+    let used = 0
+    for (const label of labels) {
+      const needed = 18 + 6 + measure(label, 11)
+      if (row.length > 0 && used + 12 + needed > room + 1e-9) {
+        rows.push(row)
+        row = []
+        used = 0
+      }
+      used += used === 0 ? needed : 12 + needed
+      row.push(label)
+    }
+    return row.length > 0 ? [...rows, row] : rows
+  }
+
+  /** The labels of the study series of `urine`. */
+  const STUDIES = ['Beermann 1976 (5 mg, oral)', 'Frost 2015, young', 'Frost 2015, elderly']
+
+  /** A figure of a curve and three study series under it, every one of them drawn. */
+  function urine(width: number, height = 200): PlotSpec {
+    return {
+      ...spec(1, { width, height, yLabel: 'amount in urine' }),
+      series: [{ ...series(1), label: 'urine', unit: 'umol' }],
+      declaredLabels: STUDIES,
+      points: STUDIES.map((label, index) => ({
+        id: `study${String(index)}`,
+        label,
+        curve: 'curve1',
+        x: [1],
+        y: [2],
+      })),
+    }
+  }
+
+  /** A figure of a curve and one study of a label longer than a row of a phone. */
+  function longStudy(width: number): PlotSpec {
+    const label = 'a study of a long name, 5 mg oral, healthy volunteers'
+    return {
+      ...urine(width),
+      declaredLabels: [label],
+      points: [{ id: 'study0', label, curve: 'curve1', x: [1], y: [2] }],
+    }
+  }
+
+  it('keeps one exact table where a spec carries no measure', () => {
+    // the advances of Arial: the table is the same on every machine and pins
+    // the figures of the tests, and a character it lacks is a digit wide
+    expect(tableMeasure('anti-Xa activity', 12)).toBe(78.029296875)
+    expect(tableMeasure('1.5e+5', 11)).toBe(33.95068359375)
+    expect(tableMeasure('一', 11)).toBe(tableMeasure('0', 11))
+    expect(tableMeasure('', 11)).toBe(0)
+  })
+
+  it('gives one spec two geometries under two measures', () => {
+    const narrow = (text: string, size: number): number => tableMeasure(text, size) * 0.7
+    const wide = (text: string, size: number): number => tableMeasure(text, size) * 1.4
+    const boxes = [narrow, tableMeasure, wide].map(
+      (measure) => plotGeometry({ ...urine(316), measure }).box,
+    )
+    expect(boxes[0]).not.toEqual(boxes[1])
+    expect(boxes[1]).not.toEqual(boxes[2])
+    // a wider font needs more room for the lines of its labels
+    expect(boxes[2]?.x0 ?? 0).toBeGreaterThan(boxes[0]?.x0 ?? 0)
+  })
+
+  it('wraps a label by the measure and not by a guess of its characters', () => {
+    // the same label at the same size reads whole under the widths of Chrome
+    // and is cut under the old guess, and a measure twice as wide wraps the x
+    // label which one line holds in the table
+    const label = 'time after the first dose [h]'
+    const lines = (measure: TextMeasure): string[] => {
+      const svg = plotSvg({ ...spec(1, { xLabel: label, width: 260, height: 200 }), measure })
+      const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
+      return [...axis.matchAll(/<text class="axis-label"[^>]*>([^<]*)<\/text>/g)].map(
+        (one) => one[1] ?? '',
+      )
+    }
+    expect(lines(tableMeasure)).toEqual([label])
+    expect(lines((text, size) => tableMeasure(text, size) * 2)).toEqual([
+      'time after the',
+      'first dose [h]',
+    ])
+  })
+
+  it('packs the rows of the band by the measure', () => {
+    // every row of the band is the labels packed into the width of the plot by
+    // the widths of the measure, and the measures pack them differently
+    const counts = new Set<string>()
+    for (const measure of [tableMeasure, chromeLike, estimate]) {
+      for (let width = 220; width <= 700; width += 4) {
+        const figure = { ...urine(width), measure }
+        const svg = plotSvg(figure)
+        if (!svg.includes('class="legend below"')) {
+          continue
+        }
+        const box = plotGeometry(figure).box
+        const labels = ['urine', ...STUDIES]
+        const expected = packed(labels, box.x1 - box.x0, measure)
+        // a label too long for its row is cut where it is written, so the rows
+        // are compared by the start of what is written
+        const drawn = bandRows(svg).map((row) => row.map((one) => one.replace('…', '')))
+        expect({ measure: measure.name, width, rows: drawn.map((row) => row.length) }).toEqual({
+          measure: measure.name,
+          width,
+          rows: expected.map((row) => row.length),
+        })
+        counts.add(`${measure.name} ${String(width)} ${String(expected.length)}`)
+      }
+    }
+    const byWidth = (name: string): string[] =>
+      [...counts].filter((one) => one.startsWith(`${name} `)).map((one) => one.slice(name.length))
+    expect(byWidth('tableMeasure')).not.toEqual(byWidth('estimate'))
+  })
+
+  it('centres every row of the band on the plot to half a pixel by the drawn widths', () => {
+    // a row is centred by the widths of the measure, so a measure which is the
+    // one of the font a reader sees puts the row where it looks centred: here
+    // the widths of Chrome, at the figures the element draws at 255, 316, 390
+    // and 1280 px and every width between; a row whose label is cut is
+    // centred by what is written of it
+    const problems: string[] = []
+    let rows = 0
+    let cut = 0
+    for (const make of [urine, antiXa, longStudy]) {
+      for (const width of [
+        220,
+        242,
+        316,
+        550,
+        ...Array.from({ length: 120 }, (_, i) => 230 + 4 * i),
+      ]) {
+        const figure = { ...make(width), measure: chromeLike }
+        const svg = plotSvg(figure)
+        const box = plotGeometry(figure).box
+        const byRow = new Map<number, BandEntry[]>()
+        for (const entry of bandEntries(svg)) {
+          byRow.set(entry.row, [...(byRow.get(entry.row) ?? []), entry])
+        }
+        for (const entries of byRow.values()) {
+          const first = entries[0]
+          const last = entries.at(-1)
+          if (first === undefined || last === undefined) {
+            continue
+          }
+          const end = last.at + chromeLike(last.label, 11)
+          rows += 1
+          cut += last.label.endsWith('\u2026') ? 1 : 0
+          const offset = (first.start + end) / 2 - (box.x0 + box.x1) / 2
+          if (Math.abs(offset) > 0.5) {
+            problems.push(`${make.name} ${String(width)}: ${String(offset)}`)
+          }
+        }
+      }
+    }
+    expect(rows).toBeGreaterThan(200)
+    expect(cut).toBeGreaterThan(10)
+    expect(problems).toEqual([])
+  })
+
+  it('takes a width the measure cannot give from the table', () => {
+    // a measure which fails on a text puts no NaN into the figure: that text
+    // is measured with the table, which here is every text
+    const broken = (): number => Number.NaN
+    const negative = (): number => -5
+    for (const measure of [broken, negative]) {
+      const svg = plotSvg({ ...urine(316), measure })
+      expect(svg).not.toContain('NaN')
+      expect(svg).toBe(plotSvg(urine(316)))
+    }
+  })
+  it('gives the column beside the plot the width of its widest label by the measure', () => {
+    // the column is the gap, the swatch, its gap and the widest label, so the
+    // plot ends where that column starts, by whichever measure the spec carries
+    const wide = (text: string, size: number): number => tableMeasure(text, size) * 1.3
+    for (const measure of [tableMeasure, chromeLike, wide]) {
+      const figure = { ...spec(3, { width: 1100, height: 160 }), measure }
+      const svg = plotSvg(figure)
+      expect(svg).not.toContain('class="legend below"')
+      const widest = Math.max(...figure.series.map((one) => measure(one.label, 11)))
+      expect({ measure: measure.name, right: plotGeometry(figure).box.x1 }).toEqual({
+        measure: measure.name,
+        right: 1100 - 8 - (12 + 18 + 6 + widest),
+      })
+    }
+  })
+
+  it('cuts a label which its row does not hold so that it ends inside the plot, ellipsis and all', () => {
+    // a label longer than the whole row is written from where its row starts,
+    // and what is written of it, the ellipsis included, ends where the plot ends
+    let cut = 0
+    for (let width = 200; width <= 260; width += 1) {
+      const figure = { ...longStudy(width), measure: chromeLike }
+      const box = plotGeometry(figure).box
+      for (const entry of bandEntries(plotSvg(figure))) {
+        if (entry.label.endsWith('\u2026')) {
+          cut += 1
+          expect({ width, end: entry.at + chromeLike(entry.label, 11) <= box.x1 + 0.01 }).toEqual({
+            width,
+            end: true,
+          })
+        }
+      }
+    }
+    expect(cut).toBeGreaterThan(10)
+  })
+})
+
+describe('the choice of the legend', () => {
+  /** The labels of three studies, the anti-Xa panel's. */
+  const STUDIES = ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']
+
+  /** A figure over `x` whose y axis covers `low..high`, with the studies declared. */
+  function figure(
+    width: number,
+    height: number,
+    x: [number, number],
+    y: [number, number],
+    studies: string[],
+  ): PlotSpec {
+    const grid = Array.from({ length: 50 }, (_, index) => x[0] + ((x[1] - x[0]) * index) / 49)
+    const values = grid.map((_, index) => y[0] + ((y[1] - y[0]) * index) / 49)
+    return {
+      ...spec(1, { x: grid, width, height, yLabel: 'amount', xLabel: 'time [min]' }),
+      series: [{ ...series(1, values), label: 'curve' }],
+      ...(studies.length > 0 ? { declaredLabels: studies } : {}),
+    }
+  }
+
+  /** The area of the plot box a figure draws. */
+  function drawnArea(one: PlotSpec): number {
+    const box = plotGeometry(one).box
+    return (box.x1 - box.x0) * (box.y1 - box.y0)
+  }
+
+  it('draws the larger of the boxes it can draw and follows no other rule', () => {
+    // the larger of two boxes loses no more plot to a change of the content
+    // than the layout which loses more, so one row more never halves a plot,
+    // which a cap on the share of the height a band takes did: it threw away a
+    // band which still left the larger plot
+    const problems: string[] = []
+    let tall = 0
+    for (const y of [
+      [0, 3],
+      [-170000, 0],
+      [0, 150000],
+    ] as [number, number][]) {
+      for (const studies of [[], ['Beermann 1976'], STUDIES]) {
+        for (let width = 220; width <= 700; width += 3) {
+          for (const height of [120, 200, 300]) {
+            const one = { ...figure(width, height, [0, 143000], y, studies), measure: chromeLike }
+            const fits = marginFits(one)
+            const best = Math.max(...fits.filter((fit) => fit.candidate).map((fit) => fit.area))
+            if (Math.abs(drawnArea(one) - best) > 1e-6) {
+              problems.push(
+                `${String(y)} ${String(studies.length)} ${String(width)}x${String(height)}`,
+              )
+            }
+            // the rows a band reserves are the height between the room of the x
+            // axis, one line of its label here, and the plot
+            const band = height - 42 - plotGeometry(one).box.y1
+            tall += plotSvg(one).includes('class="legend below"') && band > 0.35 * height ? 1 : 0
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+    // and the sweep has bands which a cap of 35 % of the height refused
+    expect(tall).toBeGreaterThan(0)
+  })
+
+  it('keeps the band of a narrow figure whose y tick labels grow by a character', () => {
+    // a seven character y tick label (`-1.5e+5`) moves the plot right and the
+    // band of three studies takes a fourth row, which is more than a third of
+    // the height and still the larger plot: the band stays, where a cap on its
+    // share put the legend beside a plot of a third less area
+    for (const width of [223, 229, 232]) {
+      for (const y of [
+        [0, 3],
+        [-170000, 0],
+      ] as [number, number][]) {
+        const one = { ...figure(width, 200, [0, 143000], y, STUDIES), measure: chromeLike }
+        expect({ width, y, below: plotSvg(one).includes('class="legend below"') }).toEqual({
+          width,
+          y,
+          below: true,
+        })
+      }
+    }
   })
 })

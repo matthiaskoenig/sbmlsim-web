@@ -2,8 +2,13 @@
  * The figure of a panel: a plot specification in, one inline SVG string out.
  *
  * The renderer is pure. It touches no dom, no canvas and no plotting library,
- * it measures no glyph, and it draws the same bytes for the same spec, so the
- * same figure is built in a page, in a slide deck, in a test and in a worker.
+ * and it draws the same bytes for the same spec, so the same figure is built
+ * in a page, in a slide deck, in a test and in a worker. The one thing it
+ * cannot know is how wide a text is drawn, since that is the font the host
+ * resolves: every width it lays out with is asked of the measure of the spec
+ * (`PlotSpec.measure`), which the element builds on the font it draws in, and
+ * a spec without one is measured with the advance widths of Arial
+ * (`tableMeasure`), so a figure without a dom is still one exact figure.
  * Inline SVG keeps it crisp under the transform of a slide and lets a host
  * restyle it: every colour, font and stroke width of the output is a
  * `var(--sbmlsim-*, <fallback>)` whose fallback is the value of the sbmlsim
@@ -144,7 +149,30 @@ export interface PlotSpec {
   height: number
   /** Whether the y axis is logarithmic. */
   logY: boolean
+  /**
+   * How wide a text is drawn, `tableMeasure` without.
+   *
+   * Every width the layout takes - a tick label, the lines an axis label wraps
+   * to, a legend entry and the rows they are packed into, the centring of a
+   * row, the column beside the plot - is asked of it and of nothing else, so a
+   * caller which measures the font the figure is drawn in gets a figure laid
+   * out for the text a reader sees. It is read as a function of its two
+   * arguments: the same text at the same size is the same width for as long as
+   * the spec is drawn, and a caller whose font changes passes a new spec with
+   * a new measure. A width which is no finite number of at least 0 is taken
+   * from the table instead.
+   */
+  measure?: TextMeasure
 }
+
+/**
+ * Get how wide a text is drawn.
+ *
+ * @param text the text, as it is written into the figure
+ * @param size the size of its font in pixels
+ * @returns its width in pixels
+ */
+export type TextMeasure = (text: string, size: number) => number
 
 /** The decades of data a logarithmic axis shows, `LOG_DECADES` of sbmlsim. */
 const LOG_DECADES = 6
@@ -207,22 +235,131 @@ const BOTTOM = 42
  * the height of the plot, keeps its column either way.
  */
 const COLUMN_SHARE = 0.35
+/** The units of an em of the advance widths of `ADVANCES`. */
+const UNITS_PER_EM = 2048
 /**
- * The share of the height of a figure a legend below the plot may take.
+ * The advance width of a character of Arial, in units of `UNITS_PER_EM`.
  *
- * A legend below the plot buys width with height, and past this much height it
- * has stopped being a trade: such a legend stays beside the plot and is cut
- * there, as it was before there was a legend below.
+ * They are the `hmtx` advances of Liberation Sans Regular 2.1, which is
+ * metrically compatible with Arial by design, and Arial with Helvetica, so the
+ * table is the width of the fallback of the font token on windows, of the
+ * Helvetica of a mac and of the Liberation Sans or Arimo of linux; read with
+ * fontTools from `LiberationSans-Regular.ttf`. It covers printable ASCII and
+ * the characters of units and of a cut label; kerning is left out, as it is
+ * of a width of the table.
  */
-const BELOW_SHARE = 0.35
-/**
- * The width of a character of a label, a share of its font size. It is an
- * estimate of the mean character of the font of the design system and no
- * measurement, so a label is placed and the column is sized without a dom; a
- * host which sets `--sbmlsim-font-size-small` or `--sbmlsim-font` well away
- * from their values gets the ellipsis a little early or a little late.
- */
-const EM = 0.55
+const ADVANCES: Readonly<Record<string, number>> = {
+  ' ': 569,
+  '!': 569,
+  '"': 727,
+  '#': 1139,
+  $: 1139,
+  '%': 1821,
+  '&': 1366,
+  "'": 391,
+  '(': 682,
+  ')': 682,
+  '*': 797,
+  '+': 1196,
+  ',': 569,
+  '-': 682,
+  '.': 569,
+  '/': 569,
+  '0': 1139,
+  '1': 1139,
+  '2': 1139,
+  '3': 1139,
+  '4': 1139,
+  '5': 1139,
+  '6': 1139,
+  '7': 1139,
+  '8': 1139,
+  '9': 1139,
+  ':': 569,
+  ';': 569,
+  '<': 1196,
+  '=': 1196,
+  '>': 1196,
+  '?': 1139,
+  '@': 2079,
+  A: 1366,
+  B: 1366,
+  C: 1479,
+  D: 1479,
+  E: 1366,
+  F: 1251,
+  G: 1593,
+  H: 1479,
+  I: 569,
+  J: 1024,
+  K: 1366,
+  L: 1139,
+  M: 1706,
+  N: 1479,
+  O: 1593,
+  P: 1366,
+  Q: 1593,
+  R: 1479,
+  S: 1366,
+  T: 1251,
+  U: 1479,
+  V: 1366,
+  W: 1933,
+  X: 1366,
+  Y: 1366,
+  Z: 1251,
+  '[': 569,
+  '\\': 569,
+  ']': 569,
+  '^': 961,
+  _: 1139,
+  '`': 682,
+  a: 1139,
+  b: 1139,
+  c: 1024,
+  d: 1139,
+  e: 1139,
+  f: 569,
+  g: 1139,
+  h: 1139,
+  i: 455,
+  j: 455,
+  k: 1024,
+  l: 455,
+  m: 1706,
+  n: 1139,
+  o: 1139,
+  p: 1139,
+  q: 1139,
+  r: 682,
+  s: 1024,
+  t: 569,
+  u: 1139,
+  v: 1024,
+  w: 1479,
+  x: 1024,
+  y: 1024,
+  z: 1024,
+  '{': 684,
+  '|': 532,
+  '}': 684,
+  '~': 1196,
+  '°': 819,
+  '±': 1124,
+  '²': 682,
+  '³': 682,
+  µ: 1180,
+  '·': 682,
+  '×': 1196,
+  α: 1184,
+  β: 1178,
+  μ: 1180,
+  '–': 1139,
+  '…': 2048,
+  '−': 1196,
+}
+/** The advance of a character the table does not carry, the one of a digit and of `n`. */
+const UNKNOWN_ADVANCE = 1139
 /** The width of the bar of a colour bar, in pixels. */
 const COLOURBAR_BAR = 12
 /** The gap between the plot and the column right of it, in pixels. */
@@ -503,14 +640,103 @@ function tag(
 }
 
 /**
- * Get the room a label needs, an estimate and no measurement.
+ * Measure a text with the advance widths of Arial, `ADVANCES`.
  *
- * @param label the label
- * @param fontSize the size of its font in pixels
- * @returns the pixels its characters are given
+ * It is the measure of a spec which carries none: the tests, the pinned
+ * figure and a host which has no canvas to measure with. It reads a table and
+ * nothing else, so the same text at the same size is the same width on every
+ * machine.
+ *
+ * @param text the text
+ * @param size the size of its font in pixels
+ * @returns the sum of the advances of its characters at that size, a
+ *   character the table does not carry counted as a digit
  */
-function labelRoom(label: string, fontSize: number): number {
-  return label.length * fontSize * EM
+export function tableMeasure(text: string, size: number): number {
+  let units = 0
+  for (const character of text) {
+    units += ADVANCES[character] ?? UNKNOWN_ADVANCE
+  }
+  return (units / UNITS_PER_EM) * size
+}
+
+/**
+ * Get the measure a figure is laid out with.
+ *
+ * @param spec the figure
+ * @returns its measure, which falls back to the table for a width which is no
+ *   finite number of at least 0, so a measure which fails on one text cannot
+ *   put a `NaN` into the layout
+ */
+function measureOf(spec: PlotSpec): TextMeasure {
+  const given = spec.measure
+  if (given === undefined) {
+    return tableMeasure
+  }
+  return (text, size) => {
+    const width = given(text, size)
+    return Number.isFinite(width) && width >= 0 ? width : tableMeasure(text, size)
+  }
+}
+
+/** The segmenter a label is cut with, by its graphemes where the runtime has one. */
+const GRAPHEMES =
+  typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter('en', { granularity: 'grapheme' })
+    : null
+
+/**
+ * Split a text into the characters a cut may fall between.
+ *
+ * @param text the text
+ * @returns its graphemes, so a cut never separates a letter from its accent or
+ *   the halves of a pair of surrogates; its code points where the runtime has
+ *   no segmenter
+ */
+function charactersOf(text: string): string[] {
+  return GRAPHEMES === null
+    ? Array.from(text)
+    : Array.from(GRAPHEMES.segment(text), (one) => one.segment)
+}
+
+/**
+ * Get whether a text fits the room it has.
+ *
+ * @param text the text
+ * @param room the pixels it has
+ * @param fontSize the size of its font in pixels
+ * @param measure the measure of the figure
+ * @returns whether its width is within the room
+ */
+function fits(text: string, room: number, fontSize: number, measure: TextMeasure): boolean {
+  return measure(text, fontSize) <= room + ROUNDING
+}
+
+/**
+ * Get the longest start of a text which fits a room.
+ *
+ * @param characters the characters of the text
+ * @param room the pixels the start has
+ * @param fontSize the size of its font in pixels
+ * @param measure the measure of the figure
+ * @param after what is written after the start, which is measured with it
+ * @returns how many characters the start keeps, 0 where not even one fits
+ */
+function fittingStart(
+  characters: string[],
+  room: number,
+  fontSize: number,
+  measure: TextMeasure,
+  after = '',
+): number {
+  let kept = 0
+  while (
+    kept < characters.length &&
+    fits(characters.slice(0, kept + 1).join('') + after, room, fontSize, measure)
+  ) {
+    kept += 1
+  }
+  return kept
 }
 
 /**
@@ -519,22 +745,21 @@ function labelRoom(label: string, fontSize: number): number {
  * @param label the label
  * @param room the pixels it has
  * @param fontSize the size of its font in pixels
- * @returns the label where it fits, else as many of its characters as fit with
- *   an ellipsis in the place of the last of them, so a cut label says that it
- *   was cut; nothing at all where not even the ellipsis fits
+ * @param measure the measure of the figure
+ * @returns the label where it fits, else as many of its first characters as
+ *   fit together with an ellipsis after them, so a cut label says that it was
+ *   cut; nothing at all where not even the ellipsis fits
  */
-function fittingLabel(label: string, room: number, fontSize: number): string {
-  if (labelRoom(label, fontSize) <= room + ROUNDING) {
+function fittingLabel(label: string, room: number, fontSize: number, measure: TextMeasure): string {
+  if (fits(label, room, fontSize, measure)) {
     return label
   }
-  const characters = Math.floor(room / (fontSize * EM))
-  if (label.length <= characters) {
-    return label
-  }
-  if (characters < 1) {
+  if (!fits(ELLIPSIS, room, fontSize, measure)) {
     return ''
   }
-  return label.slice(0, characters - 1) + ELLIPSIS
+  const characters = charactersOf(label)
+  const kept = fittingStart(characters, room, fontSize, measure, ELLIPSIS)
+  return characters.slice(0, kept).join('') + ELLIPSIS
 }
 
 /**
@@ -551,33 +776,45 @@ function fittingLabel(label: string, room: number, fontSize: number): string {
  * a word wherever the room it has holds one, so the reader is given words and
  * not the tail of a word which reads as another one. The unit of an axis label
  * is its last word and therefore the one thing a cut label always keeps, which
- * is what a reader cannot guess.
+ * is what a reader cannot guess. Every line is measured as it is written, its
+ * spaces included.
  *
  * @param label the label
  * @param room the pixels a line has
  * @param fontSize the size of its font in pixels
  * @param most the lines it is given before its last one is cut
- * @returns the lines, at least one; a single empty line where not even one
- *   character fits
+ * @param measure the measure of the figure
+ * @returns the lines, at least one; a single empty line where not even its
+ *   first character fits
  */
-function wrapLabel(label: string, room: number, fontSize: number, most: number): string[] {
-  if (labelRoom(label, fontSize) <= room + ROUNDING) {
+function wrapLabel(
+  label: string,
+  room: number,
+  fontSize: number,
+  most: number,
+  measure: TextMeasure,
+): string[] {
+  if (fits(label, room, fontSize, measure)) {
     return [label]
   }
-  const width = Math.floor(room / (fontSize * EM))
-  if (width < 1) {
+  if (fittingStart(charactersOf(label), room, fontSize, measure) < 1) {
     return ['']
   }
   const lines: string[] = []
   let line = ''
   for (const word of label.split(' ')) {
+    // a word breaks into the longest pieces a line holds, at least one
+    // character each, so a word which no line holds still makes progress
     const pieces: string[] = []
-    for (let at = 0; at < word.length || at === 0; at += width) {
-      pieces.push(word.slice(at, at + width))
-    }
+    let left = charactersOf(word)
+    do {
+      const kept = Math.max(1, fittingStart(left, room, fontSize, measure))
+      pieces.push(left.slice(0, kept).join(''))
+      left = left.slice(kept)
+    } while (left.length > 0)
     for (const piece of pieces) {
       const joined = line === '' ? piece : `${line} ${piece}`
-      if (joined.length <= width) {
+      if (fits(joined, room, fontSize, measure)) {
         line = joined
       } else {
         lines.push(line)
@@ -591,13 +828,22 @@ function wrapLabel(label: string, room: number, fontSize: number, most: number):
   }
   const kept = lines.slice(0, most - 1)
   const rest = lines.slice(most - 1).join(' ')
-  if (rest.length <= width) {
+  if (fits(rest, room, fontSize, measure)) {
     return [...kept, rest]
   }
-  // the kept end of the last line starts at a word where it can: a cut inside
-  // a word reads as another word and the reader cannot tell which it is, and a
-  // word longer than the room there is has nowhere else to break
-  const tail = rest.slice(rest.length - width + 1)
+  // the kept end of the last line is the longest end which fits after the
+  // ellipsis, and it starts at a word where it can: a cut inside a word reads
+  // as another word and the reader cannot tell which it is, and a word longer
+  // than the room there is has nowhere else to break
+  const characters = charactersOf(rest)
+  let start = characters.length
+  while (
+    start > 0 &&
+    fits(ELLIPSIS + characters.slice(start - 1).join(''), room, fontSize, measure)
+  ) {
+    start -= 1
+  }
+  const tail = characters.slice(start).join('')
   const space = tail.indexOf(' ')
   const end = space >= 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail
   return [...kept, ELLIPSIS + end]
@@ -609,12 +855,13 @@ function wrapLabel(label: string, room: number, fontSize: number, most: number):
  * @param label the label of the entry
  * @param room the pixels a line has
  * @param wrap whether the legend wraps its labels or cuts them on one line
+ * @param measure the measure of the figure
  * @returns the lines
  */
-function legendLines(label: string, room: number, wrap: boolean): string[] {
+function legendLines(label: string, room: number, wrap: boolean, measure: TextMeasure): string[] {
   return wrap
-    ? wrapLabel(label, room, SMALL_FONT, LEGEND_LINES)
-    : [fittingLabel(label, room, SMALL_FONT)]
+    ? wrapLabel(label, room, SMALL_FONT, LEGEND_LINES, measure)
+    : [fittingLabel(label, room, SMALL_FONT, measure)]
 }
 
 /**
@@ -623,12 +870,14 @@ function legendLines(label: string, room: number, wrap: boolean): string[] {
  * @param entries the entries
  * @param room the pixels a label has
  * @param wrap whether the legend wraps its labels
+ * @param measure the measure of the figure
  * @returns the pixels from the top of the first row of the legend to the end of
  *   its last
  */
-function legendHeight(entries: Entry[], room: number, wrap: boolean): number {
+function legendHeight(entries: Entry[], room: number, wrap: boolean, measure: TextMeasure): number {
   return entries.reduce(
-    (sum, entry) => sum + ROW + (legendLines(entry.label, room, wrap).length - 1) * LEGEND_LINE,
+    (sum, entry) =>
+      sum + ROW + (legendLines(entry.label, room, wrap, measure).length - 1) * LEGEND_LINE,
     0,
   )
 }
@@ -946,13 +1195,14 @@ function tickPositions(count: number): number[] {
 }
 
 /**
- * Get the room the longest of a set of labels needs.
+ * Get the room the widest of a set of labels needs.
  *
  * @param labels the labels
- * @returns the pixels of the longest of them, 0 without a label
+ * @param measure the measure of the figure
+ * @returns the pixels of the widest of them, 0 without a label
  */
-function widest(labels: string[]): number {
-  return labels.reduce((most, one) => Math.max(most, labelRoom(one, SMALL_FONT)), 0)
+function widest(labels: string[], measure: TextMeasure): number {
+  return labels.reduce((most, one) => Math.max(most, measure(one, SMALL_FONT)), 0)
 }
 
 /**
@@ -1371,10 +1621,11 @@ function legendEntry(entry: Entry, x: number, y: number, lines: string[]): strin
  * Get the pixels one entry of a legend needs on a line of its own.
  *
  * @param entry the entry
- * @returns its swatch, the gap after it and the characters of its label
+ * @param measure the measure of the figure
+ * @returns its swatch, the gap after it and the width of its label
  */
-function entryRoom(entry: Entry): number {
-  return SWATCH + LABEL_GAP * 2 + labelRoom(entry.label, SMALL_FONT)
+function entryRoom(entry: Entry, measure: TextMeasure): number {
+  return SWATCH + LABEL_GAP * 2 + measure(entry.label, SMALL_FONT)
 }
 
 /**
@@ -1382,15 +1633,16 @@ function entryRoom(entry: Entry): number {
  *
  * @param entries the entries, in their order
  * @param room the pixels a row has
+ * @param measure the measure of the figure
  * @returns the rows, in their order; an entry which is wider than a row on its
  *   own gets a row of its own, where its label is cut when it is written
  */
-function legendRows(entries: Entry[], room: number): Entry[][] {
+function legendRows(entries: Entry[], room: number, measure: TextMeasure): Entry[][] {
   const rows: Entry[][] = []
   let row: Entry[] = []
   let used = 0
   for (const entry of entries) {
-    const needed = entryRoom(entry)
+    const needed = entryRoom(entry, measure)
     if (row.length > 0 && used + COLUMN_GAP + needed > room + ROUNDING) {
       rows.push(row)
       row = []
@@ -1413,16 +1665,24 @@ function legendRows(entries: Entry[], room: number): Entry[][] {
  * @param y the pixel its first row is centred on
  * @param room the pixels a label has
  * @param wrap whether a label which is longer wraps; otherwise it is cut on one line
+ * @param measure the measure of the figure
  * @returns the group of the legend, empty for no entry at all
  */
-function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap: boolean): string {
+function legendGroup(
+  entries: Entry[],
+  x: number,
+  y: number,
+  room: number,
+  wrap: boolean,
+  measure: TextMeasure,
+): string {
   if (entries.length === 0) {
     return ''
   }
   let at = y
   const rows = entries
     .map((entry) => {
-      const lines = legendLines(entry.label, room, wrap)
+      const lines = legendLines(entry.label, room, wrap, measure)
       const written = legendEntry(entry, x, at, lines)
       at += ROW + (lines.length - 1) * LEGEND_LINE
       return written
@@ -1444,33 +1704,51 @@ function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap:
  * A legend below the plot writes every entry on one line, since the line it has
  * is the width of the plot and not the width of a column: a label which is
  * longer than a whole row is cut with an ellipsis, which is the one case a row
- * cannot hold. Every row is centred on the plot, as the label of the x axis
- * above it is, so the plot, its label and its legend are one block; a row too
- * wide to be centred starts where the plot starts and is cut at its end.
+ * cannot hold. Every row is centred on the plot by the width of what it
+ * writes, as the label of the x axis above it is, so the plot, its label and
+ * its legend are one block; a row which is cut is centred by what is left of
+ * it.
  *
  * @param rows the rows of entries, in their order
  * @param x the pixel the plot starts at
  * @param y the pixel the first row is centred on
  * @param room the pixels a row has, the width of the plot
+ * @param measure the measure of the figure
  * @returns the group of the legend, empty for no row at all
  */
-function belowLegendGroup(rows: Entry[][], x: number, y: number, room: number): string {
+function belowLegendGroup(
+  rows: Entry[][],
+  x: number,
+  y: number,
+  room: number,
+  measure: TextMeasure,
+): string {
   if (rows.length === 0) {
     return ''
   }
   const written = rows
     .map((row, index) => {
-      const wide = row.reduce((sum, one) => sum + entryRoom(one), 0) + (row.length - 1) * COLUMN_GAP
+      // the labels are cut to the row as if it started where the plot starts,
+      // and the row is centred by what is written of them, so a row which is
+      // cut is centred as well as one which is whole
+      let end = x
+      const labels = row.map((entry) => {
+        const label = fittingLabel(
+          entry.label,
+          x + room - end - SWATCH - LABEL_GAP * 2,
+          SMALL_FONT,
+          measure,
+        )
+        end += entryRoom({ ...entry, label }, measure) + COLUMN_GAP
+        return label
+      })
+      const wide = end - x - COLUMN_GAP
       let at = x + Math.max(0, (room - wide) / 2)
       return row
-        .map((entry) => {
-          const label = fittingLabel(
-            entry.label,
-            x + room - at - SWATCH - LABEL_GAP * 2,
-            SMALL_FONT,
-          )
+        .map((entry, place) => {
+          const label = labels[place] ?? ''
           const one = legendEntry(entry, at, y + index * ROW, [label])
-          at += entryRoom(entry) + COLUMN_GAP
+          at += entryRoom({ ...entry, label }, measure) + COLUMN_GAP
           return one
         })
         .join('')
@@ -1501,6 +1779,7 @@ function belowLegendGroup(rows: Entry[][], x: number, y: number, room: number): 
  * @param top the pixel its top is at
  * @param bottom the pixel its bottom is at
  * @param room the pixels a label has, which cuts one which is longer
+ * @param measure the measure of the figure
  * @returns the group of the colour bar, the first series at its bottom
  */
 function colourbarGroup(
@@ -1509,6 +1788,7 @@ function colourbarGroup(
   top: number,
   bottom: number,
   room: number,
+  measure: TextMeasure,
 ): string {
   const height = Math.max(1, bottom - top)
   const slice = height / BAR_BANDS
@@ -1540,7 +1820,7 @@ function colourbarGroup(
         x2: coord(x + COLOURBAR_BAR + TICK),
         y2: coord(at),
       })
-      const written = text(fittingLabel(one.label, room, SMALL_FONT), {
+      const written = text(fittingLabel(one.label, room, SMALL_FONT, measure), {
         style: `fill:${token('fg-soft')}`,
         x: coord(x + COLOURBAR_BAR + TICK + LABEL_GAP),
         y: coord(at),
@@ -1596,8 +1876,12 @@ interface Layout {
   columnX: number
   /** The colour of the curve of an id, the soft foreground for an unknown one. */
   colourOf: (id: string) => string
-  /** The fits the layout chose between, the one beside the plot first. */
+  /** The fits the layout made, the one beside the plot first. */
   fits: Fitted[]
+  /** The fits it chose the larger box of, which are those it can draw. */
+  candidates: Fitted[]
+  /** The measure every width of the layout was taken with. */
+  measure: TextMeasure
 }
 
 /**
@@ -1687,6 +1971,7 @@ function boxArea(box: PlotBox): number {
  * @param to the pixel of its upper limit
  * @param edge the pixel the room of the plot ends at, which is the figure
  *   without its padding and without the column of a legend or a colour bar
+ * @param measure the measure of the figure
  * @returns the smallest pixel the axis may start at and the largest it may end
  *   at, `-Infinity` and `Infinity` on a side no label constrains
  */
@@ -1695,6 +1980,7 @@ function tickReach(
   from: number,
   to: number,
   edge: number,
+  measure: TextMeasure,
 ): { from: number; to: number } {
   const axis = axisOf(xs, false, from, to, tickCount(to - from, X_TICK_ROOM))
   const decimals = tickDecimals(axis.ticks)
@@ -1706,7 +1992,7 @@ function tickReach(
     if (!axis.drawable(value)) {
       continue
     }
-    const half = labelRoom(formatNumber(value, decimals, exponential), SMALL_FONT) / 2
+    const half = measure(formatNumber(value, decimals, exponential), SMALL_FONT) / 2
     // the share of `axisOf`, so the solved end puts the tick where it is drawn
     const share = span > 0 ? (value - axis.limits.low) / span : 0.5
     if (share > 0) {
@@ -1732,30 +2018,44 @@ function tickReach(
  * @param log whether it is logarithmic
  * @param box the box whose height decides its ticks
  * @param lines the lines of the y label
+ * @param measure the measure of the figure
  * @returns the smallest pixel the plot may start at
  */
-function yTickClear(ys: number[], log: boolean, box: PlotBox, lines: number): number {
+function yTickClear(
+  ys: number[],
+  log: boolean,
+  box: PlotBox,
+  lines: number,
+  measure: TextMeasure,
+): number {
   const axis = axisOf(ys, log, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM))
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
   const labels = axis.ticks
     .filter((value) => axis.drawable(value))
     .map((value) => formatNumber(value, decimals, exponential))
-  return PAD + lines * AXIS_LINE + LABEL_GAP + widest(labels) + LABEL_GAP + TICK
+  return PAD + lines * AXIS_LINE + LABEL_GAP + widest(labels, measure) + LABEL_GAP + TICK
 }
 
 /**
  * Get the passes after which the fit of the margins of a figure has settled.
  *
  * Every pass but the last changes one of the four things a fit holds, and each
- * of them only moves one way. The left margin takes one of the
+ * of them only moves one way. A width is asked of the measure of the figure,
+ * which is one function for the whole fit, so the width of a text is a
+ * constant of that text: what a pass asks for is the same function of the box
+ * whatever the measure is, and the counting below holds for every measure.
+ * The left margin takes one of the
  * `AXIS_LINES` margins of the lines of the y label or one of the room the y
  * tick labels need (`yTickClear`), which is a function of the lines and of the
  * ticks of the height of the box, of which there are `TICK_COUNTS` counts; an x
- * tick label never asks the plot to start right of `LEFT` (half of the widest
- * is about 39 px, thirteen characters of `toFixed(6)`, and `LEFT - PAD` is 56,
- * while a tick right of the start of the plot only needs less), and a left
- * margin grown by the y axis is larger still. The room below the plot takes
+ * tick label never asks the plot to start right of `LEFT` while half of the
+ * widest is at most `LEFT - PAD`, 56 px (thirteen characters of `toFixed(6)`
+ * are 74 px in the table and 80 px in Roboto, so a font has to be half again
+ * as wide as Arial to reach it), since a tick right of the start of the plot only
+ * needs less, and a left margin grown by the y axis is larger still; a measure
+ * past that couples the two ends of the plot, and the fit then stops at this
+ * bound and says that it did not settle. The room below the plot takes
  * one of the `AXIS_LINES` margins of the x label, the band one of the row
  * counts of its entries, and the right end of the plot is solved from the left
  * margin and the ticks of the width of the box alone, so it takes one of
@@ -1801,6 +2101,7 @@ function passBound(entries: number): number {
  * @param height its height in whole pixels
  * @param column the pixels right of the plot, 0 for a figure with nothing there
  * @param band the entries of a legend below the plot, none for one beside it
+ * @param measure the measure of the figure
  * @returns the box with the lines, the margins and the band it was fitted into
  */
 function fitBox(
@@ -1812,6 +2113,7 @@ function fitBox(
   height: number,
   column: number,
   band: Entry[],
+  measure: TextMeasure,
 ): Fitted {
   const edge = width - PAD - column
   const bound = passBound(band.length)
@@ -1835,11 +2137,11 @@ function fitBox(
       x1: Math.max(x0 + MIN_PLOT, x1),
       y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
     }
-    xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, LABEL_FONT, AXIS_LINES)
-    yLines = wrapLabel(full, box.y1 - TOP, LABEL_FONT, AXIS_LINES)
-    const reach = tickReach(xs, box.x0, box.x1, edge)
-    const clear = yTickClear(ys, spec.logY, box, yLines.length)
-    const rows = band.length > 0 ? legendRows(band, box.x1 - box.x0).length : 0
+    xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, LABEL_FONT, AXIS_LINES, measure)
+    yLines = wrapLabel(full, box.y1 - TOP, LABEL_FONT, AXIS_LINES, measure)
+    const reach = tickReach(xs, box.x0, box.x1, edge, measure)
+    const clear = yTickClear(ys, spec.logY, box, yLines.length, measure)
+    const rows = band.length > 0 ? legendRows(band, box.x1 - box.x0, measure).length : 0
     const next = {
       x0: Math.max(x0, LEFT + (yLines.length - 1) * AXIS_LINE, reach.from, clear),
       x1: Math.min(x1, reach.to),
@@ -1865,6 +2167,7 @@ function fitBox(
 function layoutFor(spec: PlotSpec): Layout {
   const width = size(spec.width)
   const height = size(spec.height)
+  const measure = measureOf(spec)
   const series = spec.series
   const declared = spec.points ?? []
   const range = curveRange(spec.x)
@@ -1914,17 +2217,30 @@ function layoutFor(spec: PlotSpec): Layout {
       shape: null,
     })),
   ]
-  const legendRoom = held.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(held.map((o) => o.label)) : 0
-  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
+  const legendRoom =
+    held.length > 0
+      ? SWATCH +
+        LABEL_GAP * 2 +
+        widest(
+          held.map((o) => o.label),
+          measure,
+        )
+      : 0
+  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels, measure) : 0
   const cap = Math.round(width * COLUMN_SHARE)
   // a legend sits beside the plot or below it, where a row is as wide as the
   // figure: whichever of the two leaves the larger plot box is the one the
   // figure gets. Comparing the two is what keeps the choice monotone - a wider
   // figure never gets a smaller plot - where a rule on the width alone has a
   // step in it, at which a figure a little wider loses a third of its plot.
-  // A legend may not take more of the height than `BELOW_SHARE` of it, so a
-  // plot with a legend under it is still a plot and not a legend with a strip
-  // of plot over it
+  // The comparison is the whole rule, and no share of the height caps the band
+  // on top of it: a cap is a step as well, where one row more throws away a
+  // band which still left the larger plot and the figure loses half of it,
+  // while the larger of two boxes loses no more than the layout which loses
+  // more. The column is capped at `COLUMN_SHARE` of the width, so a band wins
+  // only while its rows cost the plot less height than that column costs it
+  // width, which is what keeps a plot with a band under it a plot and not a
+  // strip over a legend
   const columnOf = (wanted: number): number => (wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0)
   // the y axis holds the frame of the spec or what the figure draws, and its
   // tick labels are fitted into the left margin, so it is known before the box
@@ -1962,16 +2278,21 @@ function layoutFor(spec: PlotSpec): Layout {
     height,
     columnOf(Math.max(legendRoom, barRoom)),
     [],
+    measure,
   )
   // the band spans the plot box, so its rows are counted in the fit, against
   // the box they are drawn under, and the height it reserves is those rows
   const under =
-    held.length > 0 ? fitBox(spec, full, xs, ys, width, height, columnOf(barRoom), held) : null
-  const roomy =
-    under !== null &&
-    under.under <= height * BELOW_SHARE &&
-    height - BOTTOM - under.under - TOP >= MIN_PLOT
-  const fitted = roomy && boxArea(under.box) > boxArea(beside.box) ? under : beside
+    held.length > 0
+      ? fitBox(spec, full, xs, ys, width, height, columnOf(barRoom), held, measure)
+      : null
+  // a band whose rows leave no plot of `MIN_PLOT` cannot be drawn in the
+  // figure at all, which is no preference but where its rows would end
+  const candidates =
+    under !== null && height - BOTTOM - under.under - TOP >= MIN_PLOT ? [beside, under] : [beside]
+  const fitted = candidates.reduce((best, one) =>
+    boxArea(one.box) > boxArea(best.box) ? one : best,
+  )
   const below = fitted !== beside
   const { box, xLines, yLines, bottomRoom, column } = fitted
 
@@ -1986,9 +2307,10 @@ function layoutFor(spec: PlotSpec): Layout {
     colours,
     entries,
     hasColourbar,
-    belowRows: below ? legendRows(entries, box.x1 - box.x0) : [],
+    belowRows: below ? legendRows(entries, box.x1 - box.x0, measure) : [],
     belowHeight: below ? fitted.under : 0,
     fits: under === null ? [beside] : [beside, under],
+    candidates,
     xLines,
     yLines,
     bottomRoom,
@@ -1999,6 +2321,7 @@ function layoutFor(spec: PlotSpec): Layout {
     // label reaches past its end towards the column, which holds still
     columnX: Math.max(box.x1, width - PAD - column) + COLUMN_GAP,
     colourOf,
+    measure,
   }
 }
 
@@ -2030,14 +2353,26 @@ export function plotGeometry(spec: PlotSpec): PlotGeometry {
  *
  * It is no part of the API of the library, which `index.ts` does not export it
  * from: a fit which reaches its bound has ended on a box it did not measure,
- * which `passBound` says cannot happen, and this is how the tests check it.
+ * which `passBound` says cannot happen, and a figure which does not draw the
+ * larger box of the fits it can draw has a rule beside the comparison of the
+ * areas, which the layout says it has not; this is how the tests check both.
  *
  * @param spec the figure
- * @returns every fit the layout chose between, the one beside the plot first,
- *   with the passes it took, its bound and whether it ended on a measurement
+ * @returns every fit the layout made, the one beside the plot first, with the
+ *   passes it took, its bound, whether it ended on a measurement, the area of
+ *   its plot box and whether the layout could draw it
  */
-export function marginFits(spec: PlotSpec): { passes: number; bound: number; settled: boolean }[] {
-  return layoutOf(spec).fits.map(({ passes, bound, settled }) => ({ passes, bound, settled }))
+export function marginFits(
+  spec: PlotSpec,
+): { passes: number; bound: number; settled: boolean; area: number; candidate: boolean }[] {
+  const layout = layoutOf(spec)
+  return layout.fits.map((fit) => ({
+    passes: fit.passes,
+    bound: fit.bound,
+    settled: fit.settled,
+    area: boxArea(fit.box),
+    candidate: layout.candidates.includes(fit),
+  }))
 }
 
 /**
@@ -2055,18 +2390,20 @@ export function marginFits(spec: PlotSpec): { passes: number; bound: number; set
  * `transparent` until a host asks for a surface, so a figure is part of its
  * page and not a white box on a slide.
  *
- * The column right of the plot, the legend or the colour bar, is as wide as the
- * characters of its longest label need (`EM`, an estimate of the font and no
- * measurement) and at most `COLUMN_SHARE` of the figure. The legend sits there
+ * The column right of the plot, the legend or the colour bar, is as wide as its
+ * widest label is by the measure of the spec and at most `COLUMN_SHARE` of the
+ * figure. The legend sits there
  * or below the plot (`class="legend below"`), packed into rows of the width of
  * the figure: the figure is laid out both ways and keeps the one whose plot box
  * is larger, which is a column on a figure which is wide and short and a band
  * of rows on the figure of a panel, where a column of labels costs more plot
  * than a row of them. Comparing the two is what makes the choice monotone: a
  * figure which grows never ends up with a smaller plot than it had, which a
- * rule on the width alone does at the width where it changes its mind. A legend
- * whose rows would take more than `BELOW_SHARE` of the height, which is a
- * legend of many long labels, stays beside the plot and is cut there. A colour
+ * rule on the width alone does at the width where it changes its mind, and the
+ * larger of the two boxes never loses more plot to a change of the content
+ * than the layout which loses more, so one row more never halves a plot. A
+ * legend of many long labels, whose rows cost more plot than the column,
+ * stays beside the plot and is cut there. A colour
  * bar keeps its column whatever its labels need, since it is an axis of the
  * figure and is read against the height of the plot, and its labels are cut
  * with an ellipsis there; a figure of both keeps the bar beside the plot and
@@ -2111,6 +2448,7 @@ export function plotSvg(spec: PlotSpec): string {
     barLabelRoom,
     columnX,
     colourOf,
+    measure,
   } = layoutOf(spec)
 
   const clip =
@@ -2173,9 +2511,10 @@ export function plotSvg(spec: PlotSpec): string {
   // renderer never grows the figure behind the host, and never drops an entry
   const sideEntries = underneath ? [] : entries
   const sideRoom = box.y1 - box.y0 - (hasColourbar ? MIN_PLOT + ROW : 0)
-  const wrap = legendHeight(sideEntries, legendLabels, true) <= sideRoom
+  const wrap = legendHeight(sideEntries, legendLabels, true, measure) <= sideRoom
   const barBottom =
-    box.y1 - (sideEntries.length > 0 ? legendHeight(sideEntries, legendLabels, wrap) + ROW : 0)
+    box.y1 -
+    (sideEntries.length > 0 ? legendHeight(sideEntries, legendLabels, wrap, measure) + ROW : 0)
   const side = hasColourbar
     ? colourbarGroup(
         series,
@@ -2183,6 +2522,7 @@ export function plotSvg(spec: PlotSpec): string {
         box.y0 + MARKER,
         Math.max(box.y0 + MIN_PLOT, barBottom),
         barLabelRoom,
+        measure,
       ) +
       legendGroup(
         sideEntries,
@@ -2190,13 +2530,15 @@ export function plotSvg(spec: PlotSpec): string {
         Math.max(box.y0 + MIN_PLOT, barBottom) + ROW,
         legendLabels,
         wrap,
+        measure,
       )
-    : legendGroup(sideEntries, columnX, box.y0 + ROW / 2, legendLabels, wrap)
+    : legendGroup(sideEntries, columnX, box.y0 + ROW / 2, legendLabels, wrap, measure)
   const under = belowLegendGroup(
     belowRows,
     box.x0,
     height - PAD - belowHeight + ROW / 2,
     box.x1 - box.x0,
+    measure,
   )
 
   const label = axisLabel(spec.yLabel, sharedUnit(series))
