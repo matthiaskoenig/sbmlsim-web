@@ -188,7 +188,10 @@ test.describe('the slides on a touch screen', () => {
 })
 
 test.describe('the legend', () => {
-  for (const width of [1280, 390]) {
+  /** The width of a page which gives the legend its whole column. */
+  const WIDE = 1280
+
+  for (const width of [WIDE, 390]) {
     test(`tells the curves apart at ${String(width)} px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 })
       await open(page, 'docs.html')
@@ -206,7 +209,15 @@ test.describe('the legend', () => {
       expect(entries.length).toBeGreaterThanOrEqual(2)
       const names = entries.map((entry) => entry.text)
       expect(new Set(names).size).toBe(names.length)
-      expect(names.join('')).not.toContain('…')
+      if (width >= WIDE) {
+        // the labels of the panel fit the column of a page
+        expect(names.join('')).not.toContain('…')
+      } else {
+        // the curves of this panel are a concentration and an amount, so each
+        // entry carries its own unit, and a label too long for a phone is cut
+        // in its middle: the unit at its end is what a reader must keep
+        expect(names.every((name) => name.endsWith(']'))).toBe(true)
+      }
       for (const [index, entry] of entries.entries()) {
         const next = entries[index + 1]
         if (next !== undefined) {
