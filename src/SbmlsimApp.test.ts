@@ -846,9 +846,11 @@ describe('the knobs the panels of a page share', () => {
     const element = await shell({ page: 'pageB' })
     const slider = part(element, '#knob-knobA')
     const described = slider.getAttribute('aria-describedby') ?? ''
-    expect(part(element, `#${described}`).textContent.trim()).toBe(
-      'Sets Title of panelB, Title of panelC',
-    )
+    const description = part(element, `#${described}`)
+    expect(description.textContent.trim()).toBe('Sets Title of panelB, Title of panelC')
+    // hidden, so the text is heard once as the description of its control and not
+    // again in the reading order of the page
+    expect(description.hasAttribute('hidden')).toBe(true)
   })
 
   it('shares a knob whose id is a name every object has', async () => {

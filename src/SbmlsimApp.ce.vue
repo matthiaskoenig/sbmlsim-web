@@ -528,7 +528,9 @@ onBeforeUnmount(() => {
           @change="moveShared(one.knob, $event)"
         />
         <ResetButton :idle="sharedAtDefaults" @reset="resetShared()" />
-        <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" class="unseen">
+        <!-- hidden, so a screen reader hears the text once, as the description of its
+             control, and not again after the controls; aria-describedby reads it -->
+        <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
           {{ drivesText(one) }}
         </p>
       </div>
@@ -836,10 +838,8 @@ onBeforeUnmount(() => {
   row-gap: 8px;
 }
 
-/* read by a screen reader and drawn nowhere: the live region of a page switch
- * and the text which says which panels a shared control sets */
-.live,
-.unseen {
+/* read by a screen reader and drawn nowhere: the live region of a page switch */
+.live {
   position: absolute;
   width: 1px;
   height: 1px;
