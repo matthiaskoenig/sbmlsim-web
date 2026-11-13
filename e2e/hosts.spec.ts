@@ -49,6 +49,16 @@ test.describe('the element works on every host', () => {
       await expect.poll(simulations.count).toBe(1)
       const before = await curves(panel)
       expect(before).not.toBe('')
+      // a panel alone is as tall as what it draws: the room a card of an app
+      // gives it above its body is none here
+      const room = await panel.evaluate((element) => {
+        const inner = element.shadowRoot
+        const head = inner?.querySelector('.head')?.getBoundingClientRect().bottom ?? 0
+        const body = inner?.querySelector('.body')?.getBoundingClientRect().top ?? 0
+        const box = inner?.querySelector('.panel')
+        return body - head - (box ? Number.parseFloat(getComputedStyle(box).rowGap) : 0)
+      })
+      expect(room).toBeCloseTo(0, 0)
 
       // the first control of the panel, which is the knob the run grids over:
       // a slider on the deck, a select on the two pages of the renal panels.
@@ -358,16 +368,17 @@ test.describe('the app shell', () => {
       await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
       const sizes = await app.evaluate((element) => {
         const root = element.shadowRoot
-        const cells = [...(root?.querySelectorAll('.cell') ?? [])].map((cell) => {
-          const style = getComputedStyle(cell)
-          const room =
-            cell.getBoundingClientRect().height -
-            Number.parseFloat(style.paddingTop) -
-            Number.parseFloat(style.paddingBottom) -
-            Number.parseFloat(style.borderTopWidth) -
-            Number.parseFloat(style.borderBottomWidth)
-          const panel = cell.querySelector('sbmlsim-panel')?.getBoundingClientRect().height ?? 0
-          return room - panel
+        // a panel puts the room its card gives it beyond what it draws between
+        // its head and its body, which is the gap of the panel and nothing more
+        // where it draws all it is given
+        const cells = [...(root?.querySelectorAll('sbmlsim-panel') ?? [])].map((panel) => {
+          const inner = panel.shadowRoot
+          const head = inner?.querySelector('.head')?.getBoundingClientRect().bottom ?? 0
+          const body = inner?.querySelector('.body')?.getBoundingClientRect().top ?? 0
+          const gap = Number.parseFloat(
+            getComputedStyle(inner?.querySelector('.panel') ?? panel).rowGap,
+          )
+          return body - head - gap
         })
         const bar = root?.querySelector('.knobs')
         const knob = root?.querySelector('.knobs .knob')?.getBoundingClientRect().width ?? 0
@@ -384,6 +395,58 @@ test.describe('the app shell', () => {
       }
       // a control fills a phone and stays at 20rem on a wide page
       expect(sizes.knob).toBeCloseTo(Math.min(sizes.inner, 320), 0)
+    })
+  }
+
+  for (const width of [390, 1280]) {
+    test(`lines up the plots of a row whose titles take other lines at ${String(width)} px`, async ({
+      page,
+    }) => {
+      // the subtitle of the urine panel is given more lines than the one of
+      // the plasma panel beside it, as the apixaban panels have between 1060
+      // and 1180 px; the service is untouched
+      await page.route('**/api/models/hctz/panels/renal_urine', async (route) => {
+        const response = await route.fetch()
+        const body = (await response.json()) as { panel: Record<string, string> }
+        body.panel.subtitle = `${body.panel.subtitle ?? ''}, ${'and more words of it '.repeat(6)}`
+        await route.fulfill({ response, json: body })
+      })
+      await page.setViewportSize({ width, height: 900 })
+      const app = await openApp(page)
+      const panels = app.locator('sbmlsim-panel')
+      await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+      const boxes = await panels.evaluateAll((all) =>
+        all.map((panel) => {
+          const line = panel.shadowRoot?.querySelector('g.axis.y .axis-line')
+          const box = line?.getBoundingClientRect()
+          const head = panel.shadowRoot?.querySelector('.head')?.getBoundingClientRect()
+          const body = panel.shadowRoot?.querySelector('.body')?.getBoundingClientRect()
+          return {
+            top: box?.top ?? 0,
+            bottom: box?.bottom ?? 0,
+            head: head?.height ?? 0,
+            // the room between the head and the body beyond the gap of the panel
+            room: (body?.top ?? 0) - (head?.bottom ?? 0) - 8,
+          }
+        }),
+      )
+      const [plasma, urine] = boxes
+      if (plasma === undefined || urine === undefined) {
+        throw new Error('the page has two panels')
+      }
+      // the heads differ by lines either way
+      expect(urine.head - plasma.head).toBeGreaterThan(15)
+      if (width === 1280) {
+        expect(Math.abs(urine.top - plasma.top)).toBeLessThan(0.5)
+        expect(Math.abs(urine.bottom - plasma.bottom)).toBeLessThan(0.5)
+        // the plasma panel takes the lines it lacks as room above its body
+        expect(plasma.room).toBeCloseTo(urine.head - plasma.head, 0)
+        expect(urine.room).toBeCloseTo(0, 0)
+      } else {
+        // one column: every card is as tall as its own panel and has no room to place
+        expect(plasma.room).toBeCloseTo(0, 0)
+        expect(urine.room).toBeCloseTo(0, 0)
+      }
     })
   }
 

@@ -29,6 +29,11 @@
  * one column of a phone. The width is the one of the shell and not of the
  * window, so an app in a column of a page is as narrow as its column.
  *
+ * The cards of a row are as tall as the tallest of them and a panel fills its
+ * card, which it does by putting the room it is given between its head and its
+ * body: two panels side by side whose titles take other numbers of lines draw
+ * their plots at one height, and a panel alone in a page has no such room.
+ *
  * ## What happens to a page
  *
  * The declaration is read once for the life of the element, and a switch of the
@@ -731,10 +736,14 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
   gap: 16px;
-  align-items: start;
 }
 
+/* the cards of a row are as tall as the tallest of them, and a panel fills its
+ * card, which puts the room it is given above its plot, so the plots of a row
+ * line up whatever the lines of the titles above them */
 .cell {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   /* the card does not grow from its loading line to the panel, which would move
    * the footer under it, and is no taller than the smallest panel it holds: a
@@ -747,6 +756,10 @@ onBeforeUnmount(() => {
   border-radius: var(--_radius);
   background: var(--_bg-card);
   box-shadow: var(--_shadow);
+}
+
+.cell > * {
+  flex: 1 0 auto;
 }
 
 .live {

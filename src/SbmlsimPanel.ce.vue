@@ -2280,10 +2280,18 @@ defineExpose({ activate, freeze, reset })
  * `:host`, so a rule of the page which matches the element cannot hand them
  * to everything in the panel by inheritance.
  */
+/*
+ * A panel which is given more height than it needs - a card of a row of an app
+ * as tall as the tallest card of the row - puts the room between its head and
+ * its body, so the plots of panels whose heads take other numbers of lines
+ * line up. A panel which is given no height, alone in a page, is as tall as
+ * what it draws and has no room to place.
+ */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 100%;
   color: var(--_fg);
   font-family: var(--_font);
   font-size: var(--_font-size);
@@ -2318,6 +2326,7 @@ defineExpose({ activate, freeze, reset })
   display: flex;
   gap: 16px;
   align-items: flex-start;
+  margin-top: auto;
 }
 
 .controls {
