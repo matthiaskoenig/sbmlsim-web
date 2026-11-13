@@ -355,6 +355,19 @@ async function started(
   return element
 }
 
+/**
+ * Get the shape of the marker of a series of the study data.
+ *
+ * @param element the panel
+ * @param id the id of the series
+ * @returns the tag of its first marker, `circle` for the first shape and
+ *   `path` for a polygon of the same area
+ */
+function shapeOf(element: PanelElement, id: string): string {
+  const group = new RegExp(`<g class="points" data-series="${id}">(.*?)</g>`).exec(figure(element))
+  return /<(circle|path) class="marker"/.exec(group?.[1] ?? '')?.[1] ?? ''
+}
+
 /** Get one part of the panel, which has to be there. */
 function part(element: PanelElement, selector: string): Element {
   const found = shadow(element).querySelector(selector)
@@ -1305,9 +1318,15 @@ describe('the study data under the curves', () => {
     expect(figure(outside)).toBe(figure(inside))
   })
 
-  it('draws a series only while the knobs are at the state it was measured at', async () => {
-    // the choice knob starts at 25, the series was measured at 12.5: data of
-    // one condition is never drawn under a curve of another
+  it('draws a series only once the figure is the state it was measured at', async () => {
+    // the choice knob starts at 25 and the series was measured at 12.5, and
+    // the run grids over the range knob, so the figure follows a move of the
+    // choice knob only when the answer of it arrives. The condition of a
+    // series is a statement about the curve it sits on, so it is compared
+    // against the state the figure is drawn at and never against the controls,
+    // which run ahead of it by the debounce and a round trip: data of one
+    // condition is never drawn under a curve of another, not even for the
+    // frame between the move and the answer
     vi.useFakeTimers()
     served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
     const element = await started()
@@ -1316,10 +1335,78 @@ describe('the study data under the curves', () => {
     expect(warnings()).toHaveLength(0)
     move(control(element, 'knobA'), '12.5', 'change')
     await nextTick()
-    expect(figure(element)).toContain('class="points" data-series="seriesA"')
-    move(control(element, 'knobA'), '25', 'change')
-    await nextTick()
+    // the control is at the state of the series, the drawn curve is not: the
+    // run of it has not even started
+    expect(simulations()).toHaveLength(1)
     expect(figure(element)).not.toContain('class="points"')
+    await vi.advanceTimersByTimeAsync(500)
+    // the curve of that state and the series on it arrive together
+    expect(simulations()).toHaveLength(2)
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+  })
+
+  it('keeps a series on the figure it belongs to until the next one arrives', async () => {
+    // the other half of the same rule: a knob moved away from the state of the
+    // series leaves the series where it is, on the curve it was measured
+    // under, until the curve of the new state is drawn
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
+    const element = await started()
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    move(control(element, 'knobB'), '0.6', 'change')
+    await nextTick()
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+  })
+
+  it('leaves a series off when the run of the state it was measured at fails', async () => {
+    // a failed run keeps the answer it had and freezes the figure, so the
+    // pairing of a curve of one condition with the data of another would stand
+    // until the reader moves a knob again
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    served.simulate = unreachable
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(textOf(element, '.error')).not.toBe('')
+    expect(shadow(element).querySelector('.panel')?.className).toContain('frozen')
+    // the figure is the one of the first run, so the series is not on it
+    expect(figure(element)).toContain('class="curve"')
+    expect(figure(element)).not.toContain('class="points"')
+  })
+
+  it('keeps the shape of a series whose sibling under its curve is left out', async () => {
+    // two series under one curve share its colour and are told apart by their
+    // shape, so a shape which depends on which of them is drawn is a series
+    // changing shape as a knob moves
+    vi.useFakeTimers()
+    const second = declaredData({ id: 'seriesB', label: 'Series B' })
+    served.panel = () =>
+      Promise.resolve({
+        ...declaration(),
+        data: [declaredData({ at: { knobA: 12.5 } }), second],
+      })
+    served.data = () =>
+      Promise.resolve({
+        contract: 'paneldata/1',
+        series: [...studyData().series, { ...studyData().series[0], id: 'seriesB' }],
+      } as PanelDataResponse)
+    const element = await started()
+    // the first series is of another condition, the second is drawn alone and
+    // keeps the shape of its place among the two
+    expect(figure(element)).not.toContain('data-series="seriesA"')
+    // the first shape is the circle, the second a polygon of the same area
+    const alone = shapeOf(element, 'seriesB')
+    expect(alone).toBe('path')
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(shapeOf(element, 'seriesA')).toBe('circle')
+    expect(shapeOf(element, 'seriesB')).toBe(alone)
   })
 
   it('draws a series of a state of the knob the run grids over only at that choice', async () => {

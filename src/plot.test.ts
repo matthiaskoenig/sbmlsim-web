@@ -200,6 +200,19 @@ describe('plotSvg', () => {
     expect(swatches).toEqual(['circle', 'path', 'path', 'circle'])
   })
 
+  it('gives a series the shape of its rank, whatever is drawn beside it', () => {
+    // the rank is the place of a series among the series declared under its
+    // curve, so a series keeps its shape when a sibling is left out of the
+    // figure, e.g. by the state of the knobs it was measured at
+    const svg = plotSvg(
+      spec(2, {
+        points: [{ id: 'seriesB', label: 'Series B', curve: 'curve1', rank: 1, x: [0], y: [1] }],
+      }),
+    )
+    expect(svg).toContain('<path class="marker"')
+    expect(svg).not.toContain('<circle class="marker"')
+  })
+
   it('keeps the circle of a curve of one series and its colour', () => {
     const svg = plotSvg(spec(2, { points: [{ id: 'curve2', label: 'Series A', x: [0], y: [1] }] }))
     expect(svg).toContain('<circle class="marker"')

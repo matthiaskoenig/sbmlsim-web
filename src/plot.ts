@@ -64,6 +64,12 @@ export interface Points {
   label: string
   /** The id of the curve which lends it its colour, its own id without one. */
   curve?: string
+  /**
+   * Its place among the series declared under that curve, which decides its
+   * shape; its place among the drawn ones without, for a caller which has no
+   * declaration to count.
+   */
+  rank?: number
   /** The x of its points, in the x of the figure. */
   x: number[]
   /** The value of its points, on the y of the figure. */
@@ -1064,20 +1070,24 @@ function errorsOf(points: Points, x: Axis, y: Axis): string {
 /**
  * Get the shape of every series of study data.
  *
- * The series under one curve take the shapes of `MARKER_SHAPES` in the order
- * they are declared and start again at the first of them past the last shape,
- * so two series of one curve, which share its colour, are told apart by their
- * shape. A curve of one series therefore keeps the circle it always had.
+ * The series under one curve take the shapes of `MARKER_SHAPES` by their
+ * `rank`, their place among the series declared under that curve, and start
+ * again at the first of them past the last shape, so two series of one curve,
+ * which share its colour, are told apart by their shape and neither changes
+ * shape when the other is left out of the figure. A series without a rank
+ * takes its place among the drawn ones, and a curve of one series therefore
+ * keeps the circle it always had.
  *
- * @param points the series in the order they are declared
+ * @param points the series which are drawn
  * @returns the shape of every one of them, in that order
  */
 function markerShapes(points: Points[]): MarkerShape[] {
   const drawn = new Map<string, number>()
   return points.map((one) => {
     const curve = one.curve ?? one.id
-    const index = drawn.get(curve) ?? 0
-    drawn.set(curve, index + 1)
+    const next = drawn.get(curve) ?? 0
+    drawn.set(curve, next + 1)
+    const index = one.rank ?? next
     return MARKER_SHAPES[index % MARKER_SHAPES.length] ?? 'circle'
   })
 }

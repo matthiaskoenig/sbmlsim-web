@@ -439,6 +439,17 @@ const fromStore = ref(false)
 /** The value of every knob by its id, in the unit of the knob. */
 const values = shallowRef<Record<string, number>>({})
 /**
+ * The value of every knob the drawn answer was run at, `{}` until one is.
+ *
+ * It is the state the figure represents, which a control runs ahead of: a
+ * control changes at once, the run of it is debounced and answered a round
+ * trip later, and the figure follows a knob in between only where the answer
+ * grids over it. Anything which says something about the drawn curves, i.e.
+ * the condition of a series of the study data, is read from here and not from
+ * the controls.
+ */
+const drawnValues = shallowRef<Record<string, number>>({})
+/**
  * The id of the knob the latest run grids over, `null` for a run of one point.
  *
  * It is set when a run is scheduled or issued and not when its answer arrives:
@@ -555,6 +566,27 @@ function curvesOf(declared: PanelDeclaration | null): PanelCurve[] {
 function dataOf(declared: PanelDeclaration | null): PanelDataDeclaration[] {
   const given: unknown[] = declared?.data ?? []
   return given.filter((one): one is PanelDataDeclaration => carries(one, ['id', 'label']))
+}
+
+/**
+ * Get the place of every declared series among the series of its curve.
+ *
+ * The shape of a marker is that place, so a series keeps its shape whatever
+ * the state of the knobs leaves out of the figure.
+ *
+ * @param declared the series the panel declares, in their order
+ * @returns the place of every one of them by its id, counted per curve
+ */
+function declaredRanks(declared: PanelDataDeclaration[]): Map<string, number> {
+  const counted = new Map<string, number>()
+  const ranks = new Map<string, number>()
+  for (const one of declared) {
+    const curve = one.curve ?? one.id
+    const next = counted.get(curve) ?? 0
+    counted.set(curve, next + 1)
+    ranks.set(one.id, next)
+  }
+  return ranks
 }
 
 /**
@@ -706,21 +738,26 @@ const yLabel = computed<string>(() => {
 /**
  * Get the value of a knob the figure is drawn at.
  *
- * It is the value of its control, the knob a grid runs over included: a grid
- * is the points a movement is read between and not a family of curves, so the
- * figure draws one line per curve, at the value every knob has now, whether
- * that line was simulated or interpolated.
+ * The answer which is drawn grids over at most one knob, and the figure reads
+ * a movement of that knob out of the grid (`interpolate`), so the line is the
+ * one of the value its control has now. Every other knob is the one the answer
+ * was run at and not the one its control is at: the control runs ahead of the
+ * figure by the debounce and a round trip, and a figure which failed keeps the
+ * answer it had, so the value of the control says nothing about what is drawn.
  *
  * @param id the id of the knob
- * @returns its value, its default while its control has none; `null` for an id
- *   which is no knob of the panel, which no state of the knobs ever matches
+ * @returns its value, its default where neither the snapshot nor its control
+ *   has one; `null` for an id which is no knob of the panel, which no state of
+ *   the knobs ever matches
  */
 function drawnValue(id: string): number | null {
   const knob = axes.value.find((one) => one.id === id)
   if (knob === undefined) {
     return null
   }
-  const value = values.value[id]
+  const answer = grid.value
+  const read = answer !== null && !answer.dims.some((dim) => dim.id === id)
+  const value = read ? drawnValues.value[id] : values.value[id]
   return value === undefined || !Number.isFinite(value) ? knob.default : value
 }
 
@@ -737,13 +774,11 @@ function drawnValue(id: string): number | null {
  *   series which names none is at every state
  */
 function atState(declared: PanelDataDeclaration | undefined): boolean {
-  const state: unknown = declared?.at
-  if (typeof state !== 'object' || state === null) {
+  const state = declared?.at
+  if (state === undefined || state === null) {
     return true
   }
-  return Object.entries(state as Record<string, unknown>).every(
-    ([id, value]) => drawnValue(id) === (value as number),
-  )
+  return Object.entries(state).every(([id, value]) => drawnValue(id) === value)
 }
 
 /**
@@ -760,10 +795,10 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
  * scale, which a figure of one y axis cannot draw without lying about it.
  *
  * A series which was measured under a state of the knobs (`at`) is left out
- * while the knobs are not at it, and is none of the three: it is data of a
+ * while the figure is not at it, and is none of the three: it is data of a
  * condition the figure does not show right now, not a series the panel cannot
- * draw, so nothing is said about it and it comes back when the reader turns
- * the knob to its value.
+ * draw, so nothing is said about it and it comes back with the answer of its
+ * state (`drawnValue`).
  *
  * This is a view of the answer and nothing else. What a reader is told about a
  * dropped series is said by the watcher below, where a side effect runs once.
@@ -773,7 +808,9 @@ const resolvedData = computed<ResolvedData>(() => {
   if (answer === null || props.data === 'off') {
     return { drawn: [], dropped: [] }
   }
-  const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
+  const given = dataOf(declaration.value)
+  const declared = new Map(given.map((one) => [one.id, one]))
+  const ranks = declaredRanks(given)
   const units = new Map(drawnCurves.value.map((one) => [one.id, one.unit]))
   const drawn: Points[] = []
   const dropped: DroppedSeries[] = []
@@ -798,6 +835,10 @@ const resolvedData = computed<ResolvedData>(() => {
       continue
     }
     const points: Points = { id: one.id, label: one.label, curve, x: one.x, y: one.y }
+    const rank = ranks.get(one.id)
+    if (rank !== undefined) {
+      points.rank = rank
+    }
     const errors = one.yerr
     if (Array.isArray(errors)) {
       points.yerr = errors.map((value) => (typeof value === 'number' ? value : Number.NaN))
@@ -1357,6 +1398,7 @@ function fail(error: unknown): void {
   const keep = stored.value
   if (grid.value === null && keep !== null) {
     grid.value = keep
+    drawnValues.value = { ...values.value }
     fromStore.value = true
   }
   announce(kind)
@@ -1410,6 +1452,9 @@ async function simulate(gridId: string | null): Promise<void> {
   const own = (sequence += 1)
   gridded.value = gridId
   pending.value = true
+  // the state of the run, which the answer is drawn at however the controls
+  // moved while it was in flight
+  const sent = { ...values.value }
   try {
     const answer = await attempt(() =>
       talking.simulate(props.model, props.panel, bodyFor(gridId), controller.signal),
@@ -1418,6 +1463,7 @@ async function simulate(gridId: string | null): Promise<void> {
       return
     }
     grid.value = answer
+    drawnValues.value = sent
     fromStore.value = false
     failure.value = null
     frozen.value = false
@@ -1527,6 +1573,7 @@ async function loadStored(): Promise<void> {
     stored.value = answer
     if (grid.value === null) {
       grid.value = answer
+      drawnValues.value = { ...values.value }
       fromStore.value = true
     }
   } catch {
