@@ -447,8 +447,16 @@ const values = shallowRef<Record<string, number>>({})
  * grids over it. Anything which says something about the drawn curves, i.e.
  * the condition of a series of the study data, is read from here and not from
  * the controls.
+ *
+ * It is `null` while the drawn answer is the stored one: a fallback is an
+ * answer of the panel which was computed before the page was opened, its
+ * payload carries no knob values and this element cannot know which run it
+ * was, so the state it is read at is the one the panel is declared with. That
+ * is resolved where it is read and not where it is set, because the stored
+ * answer can be drawn before the declaration which carries those defaults has
+ * arrived.
  */
-const drawnValues = shallowRef<Record<string, number>>({})
+const drawnValues = shallowRef<Record<string, number> | null>({})
 /**
  * The id of the knob the latest run grids over, `null` for a run of one point.
  *
@@ -745,10 +753,14 @@ const yLabel = computed<string>(() => {
  * figure by the debounce and a round trip, and a figure which failed keeps the
  * answer it had, so the value of the control says nothing about what is drawn.
  *
+ * A stored answer is read at the values the panel declares, see
+ * `drawnValues`.
+ *
  * @param id the id of the knob
- * @returns its value, its default where neither the snapshot nor its control
- *   has one; `null` for an id which is no knob of the panel, which no state of
- *   the knobs ever matches
+ * @returns its value, its default where the figure is the stored answer or
+ *   nothing is drawn yet; `null` for an id which is no knob of the panel and
+ *   for a knob the state of the drawn run does not carry, neither of which any
+ *   declared state matches
  */
 function drawnValue(id: string): number | null {
   const knob = axes.value.find((one) => one.id === id)
@@ -756,9 +768,16 @@ function drawnValue(id: string): number | null {
     return null
   }
   const answer = grid.value
-  const read = answer !== null && !answer.dims.some((dim) => dim.id === id)
-  const value = read ? drawnValues.value[id] : values.value[id]
-  return value === undefined || !Number.isFinite(value) ? knob.default : value
+  if (answer === null || answer.dims.some((dim) => dim.id === id)) {
+    const held = values.value[id]
+    return held === undefined || !Number.isFinite(held) ? knob.default : held
+  }
+  const at = drawnValues.value
+  if (at === null) {
+    return knob.default
+  }
+  const value = at[id]
+  return value === undefined || !Number.isFinite(value) ? null : value
 }
 
 /**
@@ -1353,7 +1372,7 @@ function initialLog(declared: PanelDeclaration): boolean {
  * @returns the values of every other knob and the points of that one
  */
 function bodyFor(gridId: string | null): SimulateRequest {
-  const sent: Record<string, number> = {}
+  const fixed: Record<string, number> = {}
   const over: Record<string, number> = {}
   for (const axis of axes.value) {
     if (axis.id === gridId) {
@@ -1361,11 +1380,11 @@ function bodyFor(gridId: string | null): SimulateRequest {
       continue
     }
     const value = values.value[axis.id]
-    sent[axis.id] = value === undefined || !Number.isFinite(value) ? axis.default : value
+    fixed[axis.id] = value === undefined || !Number.isFinite(value) ? axis.default : value
   }
   return props.variant === ''
-    ? { values: sent, grid: over }
-    : { values: sent, grid: over, variant: props.variant }
+    ? { values: fixed, grid: over }
+    : { values: fixed, grid: over, variant: props.variant }
 }
 
 /**
@@ -1384,6 +1403,25 @@ function announce(kind: FailureKind): void {
 }
 
 /**
+ * Draw the stored answer of the `fallback` while nothing else is drawn.
+ *
+ * This is the one place a stored answer becomes the figure, so it is also the
+ * one place which says what state that figure is read at: the values the panel
+ * declares (`drawnValues`), since the payload of a stored answer carries the
+ * provenance of its run and no knob values.
+ *
+ * @param answer the stored answer
+ */
+function drawStored(answer: SimulateResponse): void {
+  if (grid.value !== null) {
+    return
+  }
+  grid.value = answer
+  drawnValues.value = null
+  fromStore.value = true
+}
+
+/**
  * Resolve a failure into the state a reader sees.
  *
  * @param error the error which was caught anywhere in the element
@@ -1396,10 +1434,8 @@ function fail(error: unknown): void {
   failure.value = kind
   frozen.value = true
   const keep = stored.value
-  if (grid.value === null && keep !== null) {
-    grid.value = keep
-    drawnValues.value = { ...values.value }
-    fromStore.value = true
+  if (keep !== null) {
+    drawStored(keep)
   }
   announce(kind)
 }
@@ -1452,12 +1488,16 @@ async function simulate(gridId: string | null): Promise<void> {
   const own = (sequence += 1)
   gridded.value = gridId
   pending.value = true
-  // the state of the run, which the answer is drawn at however the controls
-  // moved while it was in flight
+  // the state of the run, taken once for the request and for the answer
+  // alike: the body is built here and not in the closure below, which is
+  // called again for a second attempt and would otherwise send the state of
+  // whatever the controls hold by then, and the answer is drawn at the state
+  // it was run at however the controls moved while it was in flight
   const sent = { ...values.value }
+  const body = bodyFor(gridId)
   try {
     const answer = await attempt(() =>
-      talking.simulate(props.model, props.panel, bodyFor(gridId), controller.signal),
+      talking.simulate(props.model, props.panel, body, controller.signal),
     )
     if (own !== sequence) {
       return
@@ -1571,11 +1611,7 @@ async function loadStored(): Promise<void> {
   try {
     const answer = await talking.stored(props.fallback)
     stored.value = answer
-    if (grid.value === null) {
-      grid.value = answer
-      drawnValues.value = { ...values.value }
-      fromStore.value = true
-    }
+    drawStored(answer)
   } catch {
     // a page without a usable fallback is a page which shows the live answer
   }

@@ -1380,6 +1380,127 @@ describe('the study data under the curves', () => {
     expect(figure(element)).not.toContain('class="points"')
   })
 
+  it('draws the answer of a run at the state the run was issued at', async () => {
+    // a control which moves while a run is in flight does not change what that
+    // run answered: the series of the moved value belongs on the curve of the
+    // run which is still to come and not on the one which is drawn
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
+    let answer = (): void => {
+      // replaced by the run of the defaults, which is held open
+    }
+    let issued = 0
+    served.simulate = () => {
+      issued += 1
+      return new Promise((resolve) => {
+        answer = () => {
+          resolve(run())
+        }
+      })
+    }
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    void element.activate()
+    await vi.advanceTimersByTimeAsync(10)
+    // the run of the defaults is in flight and the reader moves the choice
+    // knob to the state of the series, which schedules a run of its own
+    expect(issued).toBe(1)
+    move(control(element, 'knobA'), '12.5', 'change')
+    answer()
+    // the answer lands well inside the debounce of the run which was just
+    // scheduled, so it is drawn and the run of the move is still to come
+    await vi.advanceTimersByTimeAsync(1)
+    await nextTick()
+    // the answer which lands is the figure of 25, so the series is not on it
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).toContain('class="curve"')
+    expect(figure(element)).not.toContain('class="points"')
+    served.simulate = () => Promise.resolve(run())
+    await vi.advanceTimersByTimeAsync(300)
+    expect(simulations()).toHaveLength(2)
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+  })
+
+  it('sends the state of the run again when a request is retried', async () => {
+    // the retry is the same request, not the request of whatever the controls
+    // hold when it is made: a body of the new state would be drawn as the
+    // answer of the old one
+    vi.useFakeTimers()
+    const element = await started()
+    let refuse = (): void => {
+      // replaced by the first attempt, which is held open
+    }
+    let attempts = 0
+    served.simulate = () => {
+      attempts += 1
+      if (attempts > 1) {
+        return Promise.resolve(run())
+      }
+      return new Promise((_resolve, reject) => {
+        refuse = () => {
+          reject(new TypeError('Failed to fetch'))
+        }
+      })
+    }
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(attempts).toBe(1)
+    // a knob moves while the first attempt is in flight, and the network
+    // failure of that attempt is retried
+    move(control(element, 'knobB'), '0.6', 'input')
+    refuse()
+    await vi.advanceTimersByTimeAsync(300)
+    const bodies = simulations()
+    expect(attempts).toBe(2)
+    expect(bodies).toHaveLength(3)
+    expect(bodies[2]).toEqual(bodies[1])
+    expect(bodies[2]?.values).toEqual({ knobB: 1 })
+  })
+
+  it('reads the stored answer at the values the panel declares', async () => {
+    // a fallback is an answer which was computed before the page was opened
+    // and carries no knob values, so it is the state the panel is declared
+    // with: a control a reader moved before it arrives says nothing about it
+    vi.useFakeTimers()
+    const atDefault = declaredData({ id: 'seriesA', at: { knobA: 25 } })
+    const atOther = declaredData({ id: 'seriesB', label: 'Series B', at: { knobA: 12.5 } })
+    served.panel = () => Promise.resolve({ ...declaration(), data: [atDefault, atOther] })
+    served.data = () =>
+      Promise.resolve({
+        contract: 'paneldata/1',
+        series: [...studyData().series, { ...studyData().series[0], id: 'seriesB' }],
+      } as PanelDataResponse)
+    served.simulate = () =>
+      new Promise(() => {
+        // the run is never answered, so the stored answer is what is drawn
+      })
+    let deliver = (): void => {
+      // replaced by the request of the stored answer, which is held open
+    }
+    served.stored = () =>
+      new Promise((resolve) => {
+        deliver = () => {
+          resolve(run('knobB', undefined, 'stored00stored00'))
+        }
+      })
+    const element = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      fallback: './stored.json',
+    })
+    void element.activate()
+    await vi.advanceTimersByTimeAsync(10)
+    // a reader moves the choice knob before the stored answer is drawn
+    move(control(element, 'knobA'), '12.5', 'change')
+    deliver()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(textOf(element, '.provenance')).toContain('stored')
+    // the stored answer is the figure of the declared 25, whatever the control
+    // was moved to while it was on its way
+    expect(figure(element)).toContain('data-series="seriesA"')
+    expect(figure(element)).not.toContain('data-series="seriesB"')
+  })
+
   it('keeps the shape of a series whose sibling under its curve is left out', async () => {
     // two series under one curve share its colour and are told apart by their
     // shape, so a shape which depends on which of them is drawn is a series
