@@ -896,7 +896,9 @@ function scanNearest(xs: number[], drawn: PlotGeometry, at: number): number | nu
  * thousand, on every movement of the pointer. A grid which is not sorted, not
  * finite at its ends or drawn on an axis of no width is scanned instead, so a
  * payload which breaks the assumption is answered by the slow way and never by
- * a wrong index. Ties keep the lower index, as the scan does.
+ * a wrong index. Ties keep the lower index, as the scan does; a grid which
+ * holds one x twice, which the output of a run does not, may answer with the
+ * later of the two.
  *
  * @param xs the x of the figure, the output times of the run
  * @param drawn the layout of the figure
@@ -2120,6 +2122,12 @@ defineExpose({ activate, freeze, reset })
 .readout-more {
   padding-left: calc(var(--readout-swatch) + var(--readout-gap));
   color: var(--_fg-soft);
+  /* the row is one line of the box: a card too narrow to hold it must not
+     wrap it onto a second line, which the box has no room for, so it is
+     cut with an ellipsis as a label of the rows above it is */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .readout-swatch {
