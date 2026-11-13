@@ -4,7 +4,7 @@ The panel below is a raw HTML block in a markdown page, which is how a documenta
 
 <script src="../dist/sbmlsim-web.iife.js"></script>
 
-<sbmlsim-panel endpoint="" model="hctz" panel="renal" layout="auto"></sbmlsim-panel>
+<sbmlsim-panel endpoint="" model="hctz" panel="renal_plasma" layout="auto"></sbmlsim-panel>
 <script>document.querySelector('sbmlsim-panel').activate()</script>
 
-Move the dose or the renal function and the plasma concentration follows. The page around it keeps its own style.
+Move the dose or the renal function and the two plasma concentrations follow. The page around it keeps its own style.

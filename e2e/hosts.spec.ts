@@ -51,7 +51,7 @@ test.describe('the element works on every host', () => {
       expect(before).not.toBe('')
 
       // the first control of the panel, which is the knob the run grids over:
-      // a slider on the deck, a select on the two pages of the renal panel.
+      // a slider on the deck, a select on the two pages of the renal panels.
       // `Home` is its lowest value, which both kinds of control take and which
       // the figure must show: a step of the dose slider does not move a pixel,
       // since the axis is scaled to the data and the model is nearly linear in
@@ -209,15 +209,10 @@ test.describe('the legend', () => {
       expect(entries.length).toBeGreaterThanOrEqual(2)
       const names = entries.map((entry) => entry.text)
       expect(new Set(names).size).toBe(names.length)
-      if (width >= WIDE) {
-        // the labels of the panel fit the column of a page
-        expect(names.join('')).not.toContain('…')
-      } else {
-        // the curves of this panel are a concentration and an amount, so each
-        // entry carries its own unit, and a label too long for a phone is cut
-        // in its middle: the unit at its end is what a reader must keep
-        expect(names.every((name) => name.endsWith(']'))).toBe(true)
-      }
+      // the curves of this panel are one quantity in one unit, so the unit is
+      // on the axis and every entry is the short label of its curve, which
+      // fits the column of a phone as well as the one of a page
+      expect(names.join('')).not.toContain('…')
       for (const [index, entry] of entries.entries()) {
         const next = entries[index + 1]
         if (next !== undefined) {
@@ -255,7 +250,7 @@ test.describe('the app shell', () => {
     await expect(app.locator('h1')).toHaveText('Hydrochlorothiazide')
     await expect(app.locator('.nav .tab')).toHaveText(['Renal impairment', 'Dose'])
     await expect(app.locator('.nav .tab[aria-current=page]')).toHaveText('Renal impairment')
-    await expect(app.locator('sbmlsim-panel')).toHaveCount(1)
+    await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
     // the declaration of the HCTZ app has one variant, so there is no switcher
     await expect(app.locator('.variant')).toHaveCount(0)
     await expect(app.locator('.footer')).toContainText('Beermann et al. (1976)')
@@ -269,7 +264,7 @@ test.describe('the app shell', () => {
 
   test('switches the page without reading the app again', async ({ page }) => {
     const apps = countRequests(page, '/api/models/hctz/app')
-    const renal = countRequests(page, '/panels/renal')
+    const renal = countRequests(page, '/panels/renal_plasma')
     const app = await openApp(page)
     await app.locator('.tab', { hasText: 'Dose' }).click()
     await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
@@ -283,9 +278,9 @@ test.describe('the app shell', () => {
     expect(renal.urls()).toHaveLength(1)
     // the page is the attribute, so it can be linked to
     await expect(app).toHaveAttribute('page', 'dose')
-    // and back: the panel is created again and reads its declaration again
+    // and back: the panels are created again and read their declarations again
     await app.locator('.tab', { hasText: 'Renal impairment' }).click()
-    await expect(app.locator('sbmlsim-panel')).toHaveCount(1)
+    await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
     await expect(app.locator('sbmlsim-panel svg path').first()).toBeVisible()
     expect(apps.urls()).toHaveLength(1)
   })
@@ -312,15 +307,15 @@ test.describe('the app shell', () => {
       })
     })
     const app = await openApp(page)
-    await expect.poll(() => sent.length).toBe(1)
-    expect(sent).toEqual(['default'])
+    await expect.poll(() => sent.length).toBe(2)
+    expect(sent).toEqual(['default', 'default'])
     await app.locator('.tab', { hasText: 'Dose' }).click()
     await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
-    await expect.poll(() => sent.length).toBe(3)
-    expect(sent.slice(1)).toEqual(['default', 'default'])
+    await expect.poll(() => sent.length).toBe(4)
+    expect(sent.slice(2)).toEqual(['default', 'default'])
     await app.locator('.variant-select').selectOption('impaired')
-    await expect.poll(() => sent.length).toBe(5)
-    expect(sent.slice(3)).toEqual(['impaired', 'impaired'])
+    await expect.poll(() => sent.length).toBe(6)
+    expect(sent.slice(4)).toEqual(['impaired', 'impaired'])
   })
 
   test('shows one readable line and no frame when the endpoint cannot be reached', async ({
@@ -501,8 +496,19 @@ test.describe('the app shell', () => {
   })
 
   test('lets a lone panel take the row', async ({ page }) => {
+    // every page of the HCTZ app shows two panels, since a panel draws one
+    // quantity; the layout of a page of one panel is what is under test, so
+    // the declaration is given such a page and the service is untouched
+    await page.route('**/api/models/hctz/app', async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as Record<string, unknown>
+      const pages = body.pages as Record<string, unknown>[]
+      body.pages = [{ ...pages[0], panels: ['renal_plasma'] }]
+      await route.fulfill({ response, json: body })
+    })
     await page.setViewportSize({ width: 1280, height: 900 })
     const app = await openApp(page)
+    await expect(app.locator('sbmlsim-panel')).toHaveCount(1)
     const widths = await app.evaluate((element) => {
       const root = element.shadowRoot
       const cell = root?.querySelector('.cell')?.getBoundingClientRect()
