@@ -14,6 +14,10 @@ A model declares its panels in its own SBML and an [sbmlsim](https://github.com/
 
 A grid is fetched once per figure and not once per movement of a knob: `interpolate(grid, at)` reads a position between its points locally, multilinear over the axes and clamped to their ends. A point which did not integrate is `null` on the wire with its index in `status.failed`, and it gives `NaN` for the positions it bounds without touching a neighbour it does not bound.
 
+`plotSvg(spec)` draws a figure as one inline SVG string: the axes with their ticks and their units, one path per curve, the study data as markers with error bars under them, and a legend of up to ten curves or, above them, a colour bar, which is where sbmlsim draws one. It is pure - a string in, a string out, no dom, no canvas and no plotting library - so the same figure is built in a page, in a test and in a worker, and it stays crisp under the transform of a slide. A logarithmic axis follows the rule of sbmlsim (at most six decades below the largest value), so a web figure and a matplotlib figure of the same data have the same limits.
+
+Every colour, font and stroke width of a figure is a `--sbmlsim-*` token whose fallback is the value of the style of the sbmlsim reports, so a page which loads nothing still gets the figure of a report. `src/theme.css` (`sbmlsim-web/theme.css`) carries those tokens in light and dark, and a page which sets one of them on the element it draws a panel in gets the figure in its own colours.
+
 ## Build
 
 ```bash

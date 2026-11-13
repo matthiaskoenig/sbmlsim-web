@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "src/theme.css"
   ],
   "main": "./dist/sbmlsim-web.umd.cjs",
   "module": "./dist/sbmlsim-web.js",
@@ -15,7 +16,8 @@
       "types": "./dist/types/index.d.ts",
       "import": "./dist/sbmlsim-web.js",
       "require": "./dist/sbmlsim-web.umd.cjs"
-    }
+    },
+    "./theme.css": "./src/theme.css"
   },
   "scripts": {
     "build": "vite build && vue-tsc -p tsconfig.build.json",

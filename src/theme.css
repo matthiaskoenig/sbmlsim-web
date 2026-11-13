@@ -1,0 +1,101 @@
+/*
+ * The design tokens of sbmlsim-web.
+ *
+ * The names and the values are the ones of the style of the sbmlsim reports
+ * (`src/sbmlsim/resources/templates/report_base.html`), under the prefix
+ * `--sbmlsim-`, so a panel in a page looks like a figure in a report. They are
+ * written as `rgb()` and not as hexadecimal, which is the same colour in
+ * another notation: a figure carries its tokens with their values as fallbacks,
+ * and a test of the renderer greps the output for a hard coded `#rrggbb`.
+ *
+ * Every token is overridable from outside. A host which loads this file sets
+ * its own value on the element it draws a panel in, e.g.
+ * `.my-figure { --sbmlsim-accent: rgb(0 0 0); }`, which wins over the rules
+ * below whether the panel is in the page or in a shadow root; a page which
+ * never loads this file still gets these values, because they are the
+ * fallbacks of the `var()` of every figure.
+ *
+ * The dark values follow `prefers-color-scheme`, as the reports do. A host with
+ * a switch of its own (a documentation theme, a slide deck) sets the tokens
+ * under its own selector the same way.
+ */
+
+:host,
+:root {
+  /* surfaces and text */
+  --sbmlsim-bg: rgb(255 255 255);
+  --sbmlsim-bg-soft: rgb(246 247 249);
+  --sbmlsim-bg-card: rgb(255 255 255);
+  --sbmlsim-fg: rgb(27 31 36);
+  --sbmlsim-fg-soft: rgb(91 100 114);
+  --sbmlsim-line: rgb(227 230 234);
+  --sbmlsim-accent: rgb(59 91 219);
+
+  /* the kinds of the data of a report */
+  --sbmlsim-training: rgb(47 158 68);
+  --sbmlsim-validation: rgb(28 126 214);
+  --sbmlsim-outlier: rgb(232 89 12);
+  --sbmlsim-excluded: rgb(134 142 150);
+
+  /* boxes */
+  --sbmlsim-radius: 10px;
+  --sbmlsim-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+
+  /* type */
+  --sbmlsim-font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --sbmlsim-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sbmlsim-font-size: 12px;
+  --sbmlsim-font-size-small: 11px;
+
+  /* the lines of a figure */
+  --sbmlsim-axis-width: 1px;
+  --sbmlsim-curve-width: 1.8px;
+  --sbmlsim-data-width: 1px;
+
+  /*
+   * The colour ramp of the curves and of the colour bar: the colour map of
+   * sbmlsim (viridis) over its first 85 %, which is the part its lines use
+   * because the light end of the map is hard to see on white. A curve takes
+   * the anchor at its position or the `color-mix` of the two around it, so a
+   * host which moves these six moves the curves, the legend and the colour bar
+   * together.
+   */
+  --sbmlsim-ramp-1: rgb(68 1 84);
+  --sbmlsim-ramp-2: rgb(68 58 131);
+  --sbmlsim-ramp-3: rgb(48 106 142);
+  --sbmlsim-ramp-4: rgb(32 146 140);
+  --sbmlsim-ramp-5: rgb(59 187 117);
+  --sbmlsim-ramp-6: rgb(155 217 60);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host,
+  :root {
+    --sbmlsim-bg: rgb(20 23 28);
+    --sbmlsim-bg-soft: rgb(26 30 36);
+    --sbmlsim-bg-card: rgb(26 30 36);
+    --sbmlsim-fg: rgb(230 233 238);
+    --sbmlsim-fg-soft: rgb(154 164 178);
+    --sbmlsim-line: rgb(42 48 56);
+    --sbmlsim-accent: rgb(116 143 252);
+
+    --sbmlsim-training: rgb(81 207 102);
+    --sbmlsim-validation: rgb(77 171 247);
+    --sbmlsim-outlier: rgb(255 146 43);
+    --sbmlsim-excluded: rgb(173 181 189);
+
+    --sbmlsim-shadow: none;
+
+    /*
+     * The ramp runs over the light half of the map on a dark background, from
+     * 25 % to its end, where its dark end would disappear into the page.
+     */
+    --sbmlsim-ramp-1: rgb(59 82 139);
+    --sbmlsim-ramp-2: rgb(42 120 142);
+    --sbmlsim-ramp-3: rgb(30 156 137);
+    --sbmlsim-ramp-4: rgb(68 191 112);
+    --sbmlsim-ramp-5: rgb(155 217 60);
+    --sbmlsim-ramp-6: rgb(253 231 37);
+  }
+}
