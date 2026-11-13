@@ -249,15 +249,74 @@ describe('plotSvg', () => {
     expect(texts(long)).toContain('Curve 1 of a study')
   })
 
-  it('cuts a legend entry which does not fit its column with an ellipsis', () => {
+  it('wraps a long legend label onto two lines instead of cutting it', () => {
+    // the figure of a panel of 736 px is about 490 px wide, the rest is the controls
+    const svg = plotSvg(
+      spec(2, {
+        width: 490,
+        series: [
+          { ...series(1), label: 'hydrochlorothiazide plasma', unit: 'umol' },
+          { ...series(2), label: 'hydrochlorothiazide urine', unit: 'umol' },
+        ],
+      }),
+    )
+    const all = texts(svg)
+    expect(all).toContain('hydrochlorothiazide')
+    expect(all).toContain('plasma')
+    expect(all).toContain('urine')
+    expect(all.some((one) => one.endsWith('…'))).toBe(false)
+  })
+
+  it('keeps two labels with a long shared prefix distinguishable in a narrow figure', () => {
+    const svg = plotSvg(
+      spec(2, {
+        width: 390,
+        series: [
+          { ...series(1), label: 'hydrochlorothiazide plasma', unit: 'umol' },
+          { ...series(2), label: 'hydrochlorothiazide urine', unit: 'umol' },
+        ],
+      }),
+    )
+    const legend = /<g class="legend"[\s\S]*$/.exec(svg)?.[0] ?? ''
+    const entries = [...legend.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map((one) =>
+      texts(one[0]).join(' '),
+    )
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).not.toBe(entries[1])
+    expect(entries[0]?.endsWith('plasma')).toBe(true)
+    expect(entries[1]?.endsWith('urine')).toBe(true)
+  })
+
+  it('cuts the last line of a label which two lines do not hold with an ellipsis', () => {
     const svg = plotSvg(
       spec(1, {
         series: [{ ...series(1), label: 'A very long legend entry indeed, and then some' }],
       }),
     )
-    const entry = texts(svg).find((one) => one.startsWith('A very long'))
-    expect(entry?.endsWith('…')).toBe(true)
-    expect(entry?.length).toBeLessThan(30)
+    const lines = texts(svg).filter(
+      (one) =>
+        'A very long legend entry indeed, and then some'.includes(one.replace('…', '')) &&
+        one !== '',
+    )
+    expect(lines).toHaveLength(2)
+    expect(lines[1]?.endsWith('…')).toBe(true)
+  })
+
+  it('spaces the entries of a legend by the lines they wrap to, so none overlaps', () => {
+    const svg = plotSvg(
+      spec(2, {
+        width: 390,
+        series: [
+          { ...series(1), label: 'hydrochlorothiazide plasma' },
+          { ...series(2), label: 'b' },
+        ],
+      }),
+    )
+    const swatches = [...svg.matchAll(/<line class="swatch"[^>]*\sy1="([^"]*)"/g)].map((one) =>
+      Number(one[1]),
+    )
+    expect(swatches).toHaveLength(2)
+    expect((swatches[1] ?? 0) - (swatches[0] ?? 0)).toBeGreaterThan(18)
   })
 
   it('cuts the labels of a colour bar which does not fit its column with an ellipsis', () => {

@@ -162,6 +162,10 @@ const COLUMN_GAP = 12
 const SWATCH = 18
 /** The height of a row of a legend, in pixels. */
 const ROW = 18
+/** The height of a further line of a legend entry which wraps, in pixels. */
+const LEGEND_LINE = 13
+/** The most lines a legend entry is given before its last line is cut. */
+const LEGEND_LINES = 2
 /** The radius of the marker of a study point, in pixels. */
 const MARKER = 3
 /** The half width of the cap of an error bar, in pixels. */
@@ -444,6 +448,70 @@ function fittingLabel(label: string, room: number, fontSize: number): string {
     return ''
   }
   return label.slice(0, characters - 1) + ELLIPSIS
+}
+
+/**
+ * Lay a label out on the lines of the room it has.
+ *
+ * A label which does not fit one line wraps at its words, so a legend in a
+ * narrow column still tells its curves apart: a cut at the end of the line
+ * would leave only the prefix the labels of a panel share. A word which is
+ * longer than a line breaks where the line ends, as there is no other place to
+ * break it. Past `LEGEND_LINES` lines the last one is cut with an ellipsis,
+ * which is how a reader sees that there was more.
+ *
+ * @param label the label
+ * @param room the pixels a line has
+ * @param fontSize the size of its font in pixels
+ * @returns the lines, at least one; a single empty line where not even one
+ *   character fits
+ */
+function wrapLabel(label: string, room: number, fontSize: number): string[] {
+  if (labelRoom(label, fontSize) <= room + ROUNDING) {
+    return [label]
+  }
+  const width = Math.floor(room / (fontSize * EM))
+  if (width < 1) {
+    return ['']
+  }
+  const lines: string[] = []
+  let line = ''
+  for (const word of label.split(' ')) {
+    const pieces: string[] = []
+    for (let at = 0; at < word.length || at === 0; at += width) {
+      pieces.push(word.slice(at, at + width))
+    }
+    for (const piece of pieces) {
+      const joined = line === '' ? piece : `${line} ${piece}`
+      if (joined.length <= width) {
+        line = joined
+      } else {
+        lines.push(line)
+        line = piece
+      }
+    }
+  }
+  lines.push(line)
+  if (lines.length <= LEGEND_LINES) {
+    return lines
+  }
+  const kept = lines.slice(0, LEGEND_LINES - 1)
+  const rest = lines.slice(LEGEND_LINES - 1).join(' ')
+  return [...kept, rest.length <= width ? rest : rest.slice(0, width - 1) + ELLIPSIS]
+}
+
+/**
+ * Get how tall a legend is, which the lines its entries wrap to decide.
+ *
+ * @param entries the entries
+ * @param room the pixels a label has
+ * @returns the pixels from the first row of the legend to the end of its last
+ */
+function legendHeight(entries: Entry[], room: number): number {
+  return entries.reduce(
+    (sum, entry) => sum + ROW + (wrapLabel(entry.label, room, SMALL_FONT).length - 1) * LEGEND_LINE,
+    0,
+  )
 }
 
 /**
@@ -1055,16 +1123,17 @@ function axisGroup(
  * @param entries the entries, in their order
  * @param x the pixel the column of the legend starts at
  * @param y the pixel its first row is centred on
- * @param room the pixels a label has, which cuts one which is longer
+ * @param room the pixels a label has, which wraps one which is longer
  * @returns the group of the legend, empty for no entry at all
  */
 function legendGroup(entries: Entry[], x: number, y: number, room: number): string {
   if (entries.length === 0) {
     return ''
   }
+  let at = y
   const rows = entries
-    .map((entry, index) => {
-      const at = y + index * ROW
+    .map((entry) => {
+      const lines = wrapLabel(entry.label, room, SMALL_FONT)
       const swatch = entry.marker
         ? tag('circle', {
             class: 'swatch',
@@ -1081,11 +1150,16 @@ function legendGroup(entries: Entry[], x: number, y: number, room: number): stri
             x2: coord(x + SWATCH),
             y2: coord(at),
           })
-      const written = text(fittingLabel(entry.label, room, SMALL_FONT), {
-        x: coord(x + SWATCH + LABEL_GAP * 2),
-        y: coord(at),
-        'dominant-baseline': 'central',
-      })
+      const written = lines
+        .map((line, index) =>
+          text(line, {
+            x: coord(x + SWATCH + LABEL_GAP * 2),
+            y: coord(at + index * LEGEND_LINE),
+            'dominant-baseline': 'central',
+          }),
+        )
+        .join('')
+      at += ROW + (lines.length - 1) * LEGEND_LINE
       return tag('g', { class: 'legend-entry', 'data-series': entry.id }, `${swatch}${written}`)
     })
     .join('')
@@ -1456,7 +1530,7 @@ export function plotSvg(spec: PlotSpec): string {
     .join('')
 
   const columnX = box.x1 + COLUMN_GAP
-  const barBottom = box.y1 - (entries.length > 0 ? entries.length * ROW + ROW : 0)
+  const barBottom = box.y1 - (entries.length > 0 ? legendHeight(entries, legendLabels) + ROW : 0)
   const side = hasColourbar
     ? colourbarGroup(
         series,

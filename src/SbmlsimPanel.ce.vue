@@ -84,6 +84,10 @@
  * line a reader can act on and dispatches `sbmlsim-error` so that the page can
  * react. `activate()` resolves either way and never rejects.
  *
+ * A page which cannot run a script of its own writes the boolean attribute
+ * `auto`, which calls `activate()` when the element is connected; without it
+ * the element does nothing until the page asks, which is what a deck needs.
+ *
  * The stored result (`fallback`) is a file next to the page and is therefore
  * fetched on `activate()` alongside the declaration and not when a request
  * fails: an endpoint which cannot be reached cannot serve the fallback either.
@@ -93,6 +97,7 @@ import {
   computed,
   nextTick,
   onBeforeUnmount,
+  onMounted,
   ref,
   shallowRef,
   useHost,
@@ -374,6 +379,15 @@ const props = defineProps({
    * outline of the document does not step.
    */
   headingLevel: { type: Number, default: 2 },
+  /**
+   * Whether the element starts itself when it is connected, as if the page had
+   * called `activate()`. It is off by default, because a deck has every slide
+   * in the page at once and an element which started itself would fetch for the
+   * slides nobody has shown; a page which has one panel, and cannot run a
+   * script of its own, switches it on. `activate()`, `freeze()` and `reset()`
+   * work as they do without it.
+   */
+  auto: { type: Boolean, default: false },
 })
 
 const host = useHost()
@@ -1728,6 +1742,12 @@ watch(
     }
   },
 )
+
+onMounted(() => {
+  if (props.auto) {
+    void activate()
+  }
+})
 
 onBeforeUnmount(() => {
   stopWork()

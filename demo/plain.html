@@ -7,15 +7,12 @@
   </head>
   <body>
     <!--
-      The page of a course platform or a file share: one script tag, one element
-      tag and the call which starts the panel. Nothing is built, bundled or
+      The page of a course platform or a file share: one script tag and one
+      element tag, which starts itself (`auto`). Nothing is built, bundled or
       served from anywhere but this directory and the endpoint, which here is the
       origin of the page itself.
     -->
     <script src="../dist/sbmlsim-web.iife.js"></script>
-    <sbmlsim-panel endpoint="" model="hctz" panel="renal"></sbmlsim-panel>
-    <script>
-      document.querySelector('sbmlsim-panel').activate()
-    </script>
+    <sbmlsim-panel endpoint="" model="hctz" panel="renal" auto></sbmlsim-panel>
   </body>
 </html>

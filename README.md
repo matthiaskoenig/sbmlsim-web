@@ -35,18 +35,19 @@ A page writes one tag and calls `activate()` on it:
 </script>
 ```
 
-| attribute       | what it is                                                                                                            |
-| --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`      | the service the panel talks to; empty is the origin of the page, which is the teaching mode                           |
-| `model`         | the id of the model, as the endpoint serves it                                                                        |
-| `panel`         | the id of the panel of that model                                                                                     |
-| `layout`        | `auto` (the default, the controls beside the figure above 560 px and under it below), `sidebar`, `stacked`, `toolbar` |
-| `theme`         | `auto` (the default, `prefers-color-scheme`), `light`, `dark`                                                         |
-| `hover`         | `on` (the default, the crosshair and the readout at the cursor) or `off`                                              |
-| `data`          | `on` (the default, the study data of the panel under its curves) or `off`                                             |
-| `fallback`      | the url of a stored answer of a run, drawn when the endpoint does not answer                                          |
-| `timeout`       | the milliseconds one request is given, 8000 without                                                                   |
-| `heading-level` | the level the title of the panel is drawn at, 2 without; a page writes the level below its own heading here           |
+| attribute       | what it is                                                                                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | the service the panel talks to; empty is the origin of the page, which is the teaching mode                                                                                                                                                                               |
+| `model`         | the id of the model, as the endpoint serves it                                                                                                                                                                                                                            |
+| `panel`         | the id of the panel of that model                                                                                                                                                                                                                                         |
+| `layout`        | `auto` (the default, the controls beside the figure above 560 px and under it below), `sidebar`, `stacked`, `toolbar`                                                                                                                                                     |
+| `theme`         | `auto` (the default, `prefers-color-scheme`), `light`, `dark`                                                                                                                                                                                                             |
+| `hover`         | `on` (the default, the crosshair and the readout at the cursor) or `off`                                                                                                                                                                                                  |
+| `data`          | `on` (the default, the study data of the panel under its curves) or `off`                                                                                                                                                                                                 |
+| `fallback`      | the url of a stored answer of a run, drawn when the endpoint does not answer                                                                                                                                                                                              |
+| `timeout`       | the milliseconds one request is given, 8000 without                                                                                                                                                                                                                       |
+| `heading-level` | the level the title of the panel is drawn at, 2 without; a page writes the level below its own heading here                                                                                                                                                               |
+| `auto`          | a boolean attribute: the element calls `activate()` itself when it is connected, which is what a page with one panel and no script of its own needs; without it nothing is drawn and nothing is requested before `activate()`, because a deck has every slide in the page |
 
 `activate()` starts it, `freeze()` stops every pending request and freezes the knobs, and `reset()` puts the knobs back to the values the declaration states. Nothing is fetched and nothing is drawn before `activate()`, so a slide deck or a long page mounts its panels lazily. The element registers itself on import under `sbmlsim-panel`; `register(tagName)` gives it another tag.
 

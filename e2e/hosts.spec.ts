@@ -78,7 +78,7 @@ test.describe('the slides', () => {
     await expect.poll(() => slideIndex(page)).toBe(2)
   })
 
-  test('a knob drag does not change the slide', async ({ page }) => {
+  test('a mouse drag moves the knob and leaves the slide', async ({ page }) => {
     await open(page, 'slides.html')
     const knob = page.locator('sbmlsim-panel input[type=range]').first()
     const box = await knob.boundingBox()
@@ -136,4 +136,77 @@ test.describe('the slides', () => {
     expect(ratios.select).toBeGreaterThan(4.5)
     expect(ratios.curve).toBeGreaterThan(3)
   })
+})
+
+test.describe('the slides on a touch screen', () => {
+  test.use({ hasTouch: true })
+
+  /** Swipe from one point to another with real touch events, as a finger does. */
+  async function swipe(
+    page: Page,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): Promise<void> {
+    const session = await page.context().newCDPSession(page)
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [from],
+    })
+    for (let step = 1; step <= 6; step += 1) {
+      const at = {
+        x: from.x + ((to.x - from.x) * step) / 6,
+        y: from.y + ((to.y - from.y) * step) / 6,
+      }
+      await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [at] })
+    }
+    await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await session.detach()
+  }
+
+  test('a swipe which starts on the panel does not change the slide', async ({ page }) => {
+    await open(page, 'slides.html')
+    // the control which the swipe is made to prove: the same gesture turns the
+    // slide where it starts outside the element, so a swipe which does not
+    // turn it on the panel is the attribute `data-prevent-swipe` at work and
+    // not a gesture reveal does not read
+    const title = await page.locator('sbmlsim-panel .title').boundingBox()
+    if (title === null) {
+      throw new Error('the panel has no title')
+    }
+    const start = { x: title.x + title.width / 2, y: title.y + title.height / 2 }
+    await swipe(page, start, { x: start.x - 300, y: start.y })
+    expect(await slideIndex(page)).toBe(1)
+    await swipe(page, { x: 1100, y: 40 }, { x: 600, y: 40 })
+    await expect.poll(() => slideIndex(page)).toBe(2)
+  })
+})
+
+test.describe('the legend', () => {
+  for (const width of [1280, 390]) {
+    test(`tells the curves apart at ${String(width)} px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 })
+      await open(page, 'docs.html')
+      const entries = await page.locator('sbmlsim-panel .legend-entry').evaluateAll((all) =>
+        all.map((entry) => {
+          const lines = [...entry.querySelectorAll('text')]
+          const boxes = lines.map((line) => line.getBoundingClientRect())
+          return {
+            text: lines.map((line) => line.textContent).join(' '),
+            top: Math.min(...boxes.map((box) => box.top)),
+            bottom: Math.max(...boxes.map((box) => box.bottom)),
+          }
+        }),
+      )
+      expect(entries.length).toBeGreaterThanOrEqual(2)
+      const names = entries.map((entry) => entry.text)
+      expect(new Set(names).size).toBe(names.length)
+      expect(names.join('')).not.toContain('…')
+      for (const [index, entry] of entries.entries()) {
+        const next = entries[index + 1]
+        if (next !== undefined) {
+          expect(entry.bottom).toBeLessThanOrEqual(next.top + 1)
+        }
+      }
+    })
+  }
 })

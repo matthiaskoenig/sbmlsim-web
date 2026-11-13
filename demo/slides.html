@@ -61,8 +61,10 @@
     <script>
       const panel = document.querySelector('sbmlsim-panel')
       const deck = new Reveal({
-        // arrow keys go to the deck only while it has focus, so a knob which
-        // has it takes them itself
+        // set as the deck of a page which embeds panels is meant to be; it does
+        // not keep the keys of a knob from the deck, as a deck which is not
+        // embedded always has focus: the element does that itself, by keeping
+        // the arrow keys to the knob which has them
         keyboardCondition: 'focused',
         hash: true,
         width: 1100,

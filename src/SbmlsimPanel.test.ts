@@ -544,6 +544,26 @@ describe('the element before it is started', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('starts itself when it is connected with the attribute auto and not without it', async () => {
+    await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    await settled()
+    expect(declarations()).toHaveLength(0)
+
+    const element = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      auto: '',
+    })
+    await settled()
+    expect(declarations()).toHaveLength(1)
+    expect(shadow(element).querySelector('.panel')).not.toBeNull()
+    // the methods keep working after it: a second call only lifts a freeze
+    element.freeze()
+    await element.activate()
+    expect(declarations()).toHaveLength(1)
+  })
+
   it('is registered once and takes another tag name on request', async () => {
     expect(customElements.get(PANEL_TAG)).toBeDefined()
     expect(register()).toBe(false)
