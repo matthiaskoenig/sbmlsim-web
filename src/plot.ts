@@ -27,10 +27,10 @@
  *   it may show (`declaredLabels`) and drawn with the ones it has, so an entry
  *   which comes and goes does not move the box either,
  * - the label of an axis wraps at its words onto at most `AXIS_LINES` lines of
- *   the length of that axis (`Y_AXIS_LINES` for the y axis), which is
- *   `_fit_margins` and `_wrap_label` of `sbmlsim.plot.serialization_matplotlib`;
- *   the margin of the figure grows by the lines it takes and by what the tick
- *   labels of either axis need beyond it,
+ *   the length of that axis, which is `_fit_margins` and `_wrap_label` of
+ *   `sbmlsim.plot.serialization_matplotlib`; the margin of the figure grows by
+ *   the lines it takes and by what the tick labels of either axis need beyond
+ *   it,
  * - a line takes its colour from the colour map at its position, viridis over
  *   its first 85 % (`COLORMAP` and `_COLORMAP_END` of `sbmlsim.plot.points`),
  *   which `RAMP` carries as six anchors a `color-mix` reads between, so the
@@ -235,22 +235,8 @@ const ROW = 18
 const LEGEND_LINE = 13
 /** The most lines a legend entry is given before its last line is cut. */
 const LEGEND_LINES = 2
-/** The most lines the label of the x axis is given before its last line is cut. */
+/** The most lines the label of an axis is given before its last line is cut. */
 const AXIS_LINES = 2
-/**
- * The most lines the label of the y axis is given where they make it whole.
- *
- * The y label runs along the height of the plot, which a band of legend rows
- * below it shortens, and a phone gives a figure little of it: a label of three
- * words whose first two do not share a line there, e.g. `anti-Xa activity
- * [ng/ml]` beside a plot 90 px tall, is cut to its first and last word on two
- * lines and reads whole on three. A further line costs the plot `AXIS_LINE` of
- * its width, so it is taken only where the label then reads whole, every word
- * of it on a line and none cut (`yLabelLines`); a label which three lines do
- * not make whole is cut on `AXIS_LINES` as before. The x label keeps two, since
- * a line of it costs the plot height, which is what is short already.
- */
-const Y_AXIS_LINES = 3
 /** The height of a further line of the label of an axis, in pixels. */
 const AXIS_LINE = 14
 /** The radius of the marker of a study point, in pixels. */
@@ -615,19 +601,6 @@ function wrapLabel(label: string, room: number, fontSize: number, most: number):
   const space = tail.indexOf(' ')
   const end = space >= 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail
   return [...kept, ELLIPSIS + end]
-}
-
-/**
- * Lay the label of the y axis out on the lines of the room it has.
- *
- * @param label the label, with its unit
- * @param room the pixels a line has, the height of the plot
- * @returns the lines of `wrapLabel` on `AXIS_LINES` lines, or on up to
- *   `Y_AXIS_LINES` where those lines hold every word of the label whole
- */
-function yLabelLines(label: string, room: number): string[] {
-  const more = wrapLabel(label, room, LABEL_FONT, Y_AXIS_LINES)
-  return more.join(' ') === label ? more : wrapLabel(label, room, LABEL_FONT, AXIS_LINES)
 }
 
 /**
@@ -1776,7 +1749,7 @@ function yTickClear(ys: number[], log: boolean, box: PlotBox, lines: number): nu
  *
  * Every pass but the last changes one of the four things a fit holds, and each
  * of them only moves one way. The left margin takes one of the
- * `Y_AXIS_LINES` margins of the lines of the y label or one of the room the y
+ * `AXIS_LINES` margins of the lines of the y label or one of the room the y
  * tick labels need (`yTickClear`), which is a function of the lines and of the
  * ticks of the height of the box, of which there are `TICK_COUNTS` counts; an x
  * tick label never asks the plot to start right of `LEFT` (half of the widest
@@ -1793,7 +1766,7 @@ function yTickClear(ys: number[], log: boolean, box: PlotBox, lines: number): nu
  * @returns the most passes a fit takes
  */
 function passBound(entries: number): number {
-  const lefts = Y_AXIS_LINES * (1 + TICK_COUNTS)
+  const lefts = AXIS_LINES * (1 + TICK_COUNTS)
   const ends = lefts * TICK_COUNTS
   return lefts - 1 + (AXIS_LINES - 1) + entries + ends + 1
 }
@@ -1863,7 +1836,7 @@ function fitBox(
       y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
     }
     xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, LABEL_FONT, AXIS_LINES)
-    yLines = yLabelLines(full, box.y1 - TOP)
+    yLines = wrapLabel(full, box.y1 - TOP, LABEL_FONT, AXIS_LINES)
     const reach = tickReach(xs, box.x0, box.x1, edge)
     const clear = yTickClear(ys, spec.logY, box, yLines.length)
     const rows = band.length > 0 ? legendRows(band, box.x1 - box.x0).length : 0

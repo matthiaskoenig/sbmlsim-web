@@ -794,21 +794,29 @@ describe('the label of an axis', () => {
     expect(lines[1]?.endsWith('[mM]')).toBe(true)
   })
 
-  it('takes a third line where it makes the label whole, and keeps every word', () => {
-    // the anti-Xa panel on a phone: its band of three rows leaves the plot 90
-    // px tall, where `anti-Xa activity` (an estimated 105.6 px) shares no line,
-    // so two lines held `anti-Xa` and `…[ng/ml]` and lost the word which
-    // says what is measured. Three lines hold all three words
-    const figure: PlotSpec = {
-      ...spec(1, { width: 316, height: 200, yLabel: 'anti-Xa activity' }),
-      series: [{ ...series(1), label: 'anti-Xa', unit: 'ng/ml' }],
-      declaredLabels: ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly'],
+  // `anti-Xa activity [ng/ml]` beside the 90 px plot of a 316 px figure: two
+  // lines hold it in the browser and not in the estimate of `EM`, which cuts it
+  it.todo(
+    'reads a label whole on two lines where its measured width fits (the measured-width task)',
+  )
+
+  it('keeps the band of the anti-Xa panel where a longer y label would cost it a row', () => {
+    // the y label takes two lines and no more: a third line moves the plot
+    // right by a line, the band then needs a fourth row, which is more of the
+    // height than a legend may take, and the legend goes beside a plot of half
+    // the width with its study labels cut
+    for (let width = 249; width <= 262; width += 1) {
+      const figure: PlotSpec = {
+        ...spec(1, { width, height: 200, yLabel: 'anti-Xa activity' }),
+        series: [{ ...series(1), label: 'anti-Xa', unit: 'ng/ml' }],
+        declaredLabels: ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly'],
+      }
+      const svg = plotSvg(figure)
+      expect({ width, below: svg.includes('class="legend below"') }).toEqual({
+        width,
+        below: true,
+      })
     }
-    const box = plotGeometry(figure).box
-    expect(box.y1 - box.y0).toBe(90)
-    expect(labelLines(plotSvg(figure), false)).toEqual(['anti-Xa', 'activity', '[ng/ml]'])
-    // and the margin holds the line it took
-    expect(box.x0).toBe(64 + 2 * 14)
   })
 
   it('wraps the label of the x axis the same way', () => {
