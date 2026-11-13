@@ -435,6 +435,21 @@ describe('the shell of an app', () => {
     expect(panels(await shell())).toEqual(['panelA'])
   })
 
+  it('keeps the tag it was built with when the elements are registered again', async () => {
+    const before = await shell()
+    try {
+      expect(register('y-panel', 'y-app')).toBe(true)
+      // a page change rebuilds the grid, which is when a tag read on every
+      // render rather than once would change under the shell
+      tabs(before)[1]?.click()
+      await settled()
+      expect(before.shadowRoot.querySelector('y-panel')).toBeNull()
+      expect(panels(before)).toEqual(['panelB', 'panelC'])
+    } finally {
+      register()
+    }
+  })
+
   it('declares no colour of its own, only the tokens of the design', async () => {
     const element = await shell()
     const style = [...element.shadowRoot.querySelectorAll('style')]

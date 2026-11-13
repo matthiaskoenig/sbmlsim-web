@@ -281,7 +281,12 @@ export interface Provenance {
   panel: string
   /** The sha256 of the SBML file which was simulated. */
   model_sha256: string
-  /** The variant of the model, `null` for its default variant. */
+  /**
+   * The name of the SBML which was simulated: the variant the request asked
+   * for, else the one the panel declares, else the first variant of the
+   * project, which is its default. It is resolved, so an answer of a
+   * simulation always names one.
+   */
   variant: string | null
   /** The engine which integrated. */
   engine: string

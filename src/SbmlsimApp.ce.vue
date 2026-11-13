@@ -172,6 +172,16 @@ const panelLevel = computed<number>(() => {
   return Math.min(MOST_HEADING, own + 1)
 })
 
+/**
+ * The tag this shell places its panels under.
+ *
+ * It is read once, when the shell is created, and not on every render: a page
+ * which registers the elements again under other names gets shells of the new
+ * names which place the new panel, while the shells it already has on the page
+ * keep placing the panel they were built with.
+ */
+const panelTag = placedPanelTag()
+
 /** The link of the DOI, `null` for an app which declares none. */
 const doiLink = computed<string | null>(() => {
   const doi = app.value?.doi.trim().replace(DOI_PREFIX, '') ?? ''
@@ -369,7 +379,7 @@ onBeforeUnmount(() => {
       >
         <div v-for="one in current.panels" :key="one" class="cell">
           <component
-            :is="placedPanelTag()"
+            :is="panelTag"
             auto
             :endpoint="props.endpoint"
             :model="props.model"

@@ -112,7 +112,9 @@ function define(tagName: string, build: () => CustomElementConstructor): boolean
  * @param appTagName the tag to register the shell of an app under, `APP_TAG`
  *   without; a class of a custom element belongs to one tag, so another tag is
  *   given a class of its own, built from the same component; the shells place
- *   their panels under `tagName`
+ *   their panels under `tagName`, which a shell reads when it is created, so a
+ *   second call changes what the shells built after it place and leaves the
+ *   ones already on the page as they are
  * @returns whether this call registered either of them; `false` for tags which
  *   are taken already and for an environment without custom elements, in both
  *   of which the call changes nothing
