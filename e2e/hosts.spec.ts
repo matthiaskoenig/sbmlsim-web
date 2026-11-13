@@ -285,7 +285,9 @@ test.describe('the app shell', () => {
     ])
     await expect(app.locator('.nav .tab[aria-current=page]')).toHaveText('Dose')
     expect(apps.urls()).toHaveLength(1)
-    expect(renal.urls()).toHaveLength(1)
+    // the declaration of a panel is read by the shell, for the knobs its page
+    // shares, and by the panel itself
+    expect(renal.urls()).toHaveLength(2)
     // the page is the attribute, so it can be linked to
     await expect(app).toHaveAttribute('page', 'dose')
     // and back: the panels are created again and read their declarations again
@@ -294,6 +296,96 @@ test.describe('the app shell', () => {
     await expect(app.locator('sbmlsim-panel svg path').first()).toBeVisible()
     expect(apps.urls()).toHaveLength(1)
   })
+
+  test('draws one control of a knob the panels of a page share, which moves both plots', async ({
+    page,
+  }) => {
+    const simulations = countSimulations(page)
+    const app = await openApp(page)
+    const panels = app.locator('sbmlsim-panel')
+    await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+    // the renal function and the dose are declared by both panels of the page,
+    // so the page has one control of each and the panels have none
+    await expect(app.locator('.knobs label')).toHaveText(['renal function', 'dose'])
+    await expect(panels.locator('select, input[type=range]')).toHaveCount(0)
+    await expect.poll(simulations.count).toBe(2)
+    const before = [await curves(panels.nth(0)), await curves(panels.nth(1))]
+    await app.locator('.knobs select').first().selectOption({ label: 'impaired' })
+    await expect.poll(() => curves(panels.nth(0))).not.toBe(before[0])
+    await expect.poll(() => curves(panels.nth(1))).not.toBe(before[1])
+    for (const one of await panels.all()) {
+      await expect(one).toHaveAttribute('values', '{"egfr":0.4,"dose":25}')
+    }
+    // the grid of either panel covers the renal function, so the move is read
+    // out of it, and the pause is longer than the debounce of a release
+    await page.waitForTimeout(500)
+    expect(simulations.count()).toBe(2)
+  })
+
+  test('draws a shared knob with the control a panel draws', async ({ page }) => {
+    /** The geometry and the type of the control of the renal function and its label. */
+    const look = (root: Locator): Promise<Record<string, string | number>> =>
+      root.locator('#knob-egfr').evaluate((select) => {
+        const label = select.closest('.knob')?.querySelector('label')
+        if (label === null || label === undefined) {
+          throw new Error('the control has no label')
+        }
+        const of = (one: Element): CSSStyleDeclaration => getComputedStyle(one)
+        return {
+          height: select.getBoundingClientRect().height,
+          font: `${of(select).fontSize} ${of(select).fontFamily}`,
+          border: `${of(select).borderTopWidth} ${of(select).borderTopColor}`,
+          label: label.textContent.trim(),
+          labelHeight: label.getBoundingClientRect().height,
+          labelFont: `${of(label).fontSize} ${of(label).color}`,
+          gap: select.getBoundingClientRect().top - label.getBoundingClientRect().bottom,
+        }
+      })
+    await page.goto('/demo/docs.html')
+    const alone = page.locator('sbmlsim-panel')
+    await expect(alone.locator('svg path').first()).toBeVisible()
+    const drawn = await look(alone)
+    const app = await openApp(page)
+    expect(await look(app.locator('.knobs'))).toEqual(drawn)
+  })
+
+  for (const width of [390, 1024, 1280]) {
+    test(`fits a card to its panel and a shared control to the page at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const app = await openApp(page)
+      await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
+      const sizes = await app.evaluate((element) => {
+        const root = element.shadowRoot
+        const cells = [...(root?.querySelectorAll('.cell') ?? [])].map((cell) => {
+          const style = getComputedStyle(cell)
+          const room =
+            cell.getBoundingClientRect().height -
+            Number.parseFloat(style.paddingTop) -
+            Number.parseFloat(style.paddingBottom) -
+            Number.parseFloat(style.borderTopWidth) -
+            Number.parseFloat(style.borderBottomWidth)
+          const panel = cell.querySelector('sbmlsim-panel')?.getBoundingClientRect().height ?? 0
+          return room - panel
+        })
+        const bar = root?.querySelector('.knobs')
+        const knob = root?.querySelector('.knobs .knob')?.getBoundingClientRect().width ?? 0
+        const inner = bar
+          ? bar.clientWidth -
+            Number.parseFloat(getComputedStyle(bar).paddingLeft) -
+            Number.parseFloat(getComputedStyle(bar).paddingRight)
+          : 0
+        return { cells, knob, inner }
+      })
+      // a card holds its panel and no empty room under it
+      for (const left of sizes.cells) {
+        expect(left).toBeCloseTo(0, 0)
+      }
+      // a control fills a phone and stays at 20rem on a wide page
+      expect(sizes.knob).toBeCloseTo(Math.min(sizes.inner, 320), 0)
+    })
+  }
 
   test('sends the chosen variant to every panel of the page', async ({ page }) => {
     // the HCTZ project has one SBML file, so the app declares one variant; the

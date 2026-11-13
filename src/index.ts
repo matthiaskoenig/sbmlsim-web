@@ -72,8 +72,8 @@ export { APP_TAG, PANEL_TAG }
  * The class of `<sbmlsim-panel>`, a custom element with a shadow root.
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
- * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant` and `auto`
- * and the methods `activate()`, `freeze()` and `reset()`. It dispatches
+ * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant`, `values`
+ * and `auto` and the methods `activate()`, `freeze()` and `reset()`. It dispatches
  * `sbmlsim-error` when a request failed and `sbmlsim-result`, with the
  * `provenance` and the `spec_hash` of the answer, when a simulation succeeded:
  * never for a failure and never for a stored fallback, which is no simulation.

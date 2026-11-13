@@ -42,6 +42,18 @@
  * is aborted, and the answer of a request which is no longer the latest one is
  * dropped.
  *
+ * ## Knobs the host owns
+ *
+ * The attribute `values` hands knobs to the page: a JSON object of knob id to
+ * number, whose knobs the panel sets to those values and draws no control of.
+ * The shell of an app writes it for a knob more than one panel of its page
+ * declares, which it draws one control of above its grid, so the panels of a
+ * page are always of one state; a slide writes it to pin a panel at one dose
+ * with no control at all. A change of it is taken as a release of each knob
+ * which moved, by the rule above: the gridded knob is read out of the grid, any
+ * other one schedules one run which grids over it. Without the attribute, and
+ * with one which cannot be read, the panel draws every control it declares.
+ *
  * ## The readout is a view of the drawn grid and nothing else
  *
  * The crosshair and the readout cost no request and no interpolation of their
@@ -141,6 +153,8 @@ import type {
   SimulateResponse,
 } from './contract'
 import { interpolate } from './interpolate'
+import KnobControl from './KnobControl.ce.vue'
+import { carries, hostValues, keepControlKeys, knobsOf, shortNumber } from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
 import { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
 import type { FontSizes, Limits, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
@@ -294,14 +308,8 @@ const ATTEMPTS = 2
 const RETRIED: ReadonlySet<FailureKind> = new Set<FailureKind>(['network', 'timeout'])
 /** The characters of the spec hash the provenance footer shows. */
 const HASH_SHOWN = 8
-/** The significant digits the value of a knob is shown with. */
-const KNOB_DIGITS = 4
 /** The significant digits the seconds of the provenance footer are shown with. */
 const SECOND_DIGITS = 2
-/** The steps a range knob moves in, which is finer than the grid it reads. */
-const RANGE_STEPS = 100
-/** How far from a whole number of steps a value may lie and still be on a ladder. */
-const ON_LADDER = 1e-6
 /**
  * The level the title of a panel is drawn at unless a page asks for another.
  *
@@ -377,6 +385,23 @@ const props = defineProps({
    * change of it runs the simulation again at the values of the knobs.
    */
   variant: { type: String, default: '' },
+  /**
+   * The knobs the host of the panel owns, a JSON object of knob id to number,
+   * e.g. `{"dose": 25}`; absent or empty is none.
+   *
+   * The panel sets those knobs to those values, draws no control for them, and
+   * follows when the attribute changes, as it follows a release of its own
+   * control of the knob (`takeHostValues`). An id the panel does not declare is
+   * ignored. Text which is no JSON object, or whose values are not all finite
+   * numbers, is said once on the console and leaves the panel as it is without
+   * the attribute. A shell of an app writes it for the knobs more than one
+   * panel of its page declares, which it draws one control of; a slide can pin
+   * a panel at one dose and show no control at all.
+   *
+   * It has no default text, which the element would write onto itself as an
+   * empty attribute: a panel the page gives no `values` carries none.
+   */
+  values: { type: String, default: undefined },
   /** Where the controls go: `auto` (the default), `sidebar`, `stacked` or `toolbar`. */
   layout: { type: String as PropType<LayoutName>, default: 'auto' },
   /**
@@ -515,7 +540,7 @@ const stored = shallowRef<SimulateResponse | null>(null)
 /** Whether what is drawn is the stored answer and not a run of the endpoint. */
 const fromStore = ref(false)
 /** The value of every knob by its id, in the unit of the knob. */
-const values = shallowRef<Record<string, number>>({})
+const knobValues = shallowRef<Record<string, number>>({})
 /**
  * The value of every knob the drawn answer was run at, `{}` until one is.
  *
@@ -583,53 +608,6 @@ let listening = false
  */
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value))
-}
-
-/**
- * Write a number of a label without the digits nobody reads.
- *
- * @param value the number
- * @param digits the significant digits it keeps
- * @returns it as short text, empty for a value which is no finite number
- */
-function shortNumber(value: number, digits: number): string {
-  return Number.isFinite(value) ? String(Number(value.toPrecision(digits))) : ''
-}
-
-/**
- * Get whether a value of a payload carries the fields a field names.
- *
- * @param value the value
- * @param strings the fields which have to be text
- * @returns whether it is an object carrying every one of them
- */
-function carries(value: unknown, strings: string[]): boolean {
-  if (typeof value !== 'object' || value === null) {
-    return false
-  }
-  const fields = value as Record<string, unknown>
-  return strings.every((name) => typeof fields[name] === 'string')
-}
-
-/**
- * Get the knobs of a declaration which can be drawn as a control.
- *
- * The guard of the client refuses a declaration whose knobs are not objects
- * with an id, so this is the second lock of that door: a panel draws no
- * control it cannot build, and a hole in the guard therefore costs a knob and
- * never the element, which has an error line to show.
- *
- * @param declared the declaration, `null` until it was read
- * @returns the knobs which can be drawn, in the order of the declaration
- */
-function knobsOf(declared: PanelDeclaration | null): PanelAxis[] {
-  const given: unknown[] = declared?.axes ?? []
-  return given.filter(
-    (one): one is PanelAxis =>
-      carries(one, ['id', 'label', 'kind']) &&
-      Array.isArray((one as PanelAxis).choices) &&
-      typeof (one as PanelAxis).default === 'number',
-  )
 }
 
 /**
@@ -705,6 +683,19 @@ function sameUnit(one: string | null | undefined, other: string | null | undefin
 /** The knobs of the panel in the order the declaration states them. */
 const axes = computed<PanelAxis[]>(() => knobsOf(declaration.value))
 
+/** What the attribute `values` says, read once per text of it. */
+const hosted = computed(() => hostValues(props.values))
+
+/** The value of every knob the host sets, by its id; ids the panel does not declare among them. */
+const ownedValues = computed<Record<string, number>>(() =>
+  hosted.value.kind === 'given' ? hosted.value.values : {},
+)
+
+/** The knobs the panel draws a control of: the ones its host does not own. */
+const shownAxes = computed<PanelAxis[]>(() =>
+  axes.value.filter((one) => !(one.id in ownedValues.value)),
+)
+
 /** The title of the panel, empty until the declaration was read. */
 const title = computed<string>(() => declaration.value?.panel.title ?? '')
 
@@ -725,12 +716,13 @@ const available = computed<number>(() => (measured.value > 0 ? measured.value : 
  * The layout which is drawn: the one the attribute asks for, or the one the
  * room allows.
  *
- * A panel without a knob - a panel which declares none, and the stored answer
- * of one whose declaration never arrived - has nothing to put beside its
- * figure, so it takes the toolbar whatever was asked for.
+ * A panel without a control of a knob - a panel which declares none, one whose
+ * host owns every knob it declares, and the stored answer of one whose
+ * declaration never arrived - has nothing to put beside its figure, so it
+ * takes the toolbar whatever was asked for.
  */
 const drawnLayout = computed<DrawnLayout>(() => {
-  if (axes.value.length === 0) {
+  if (shownAxes.value.length === 0) {
     return 'toolbar'
   }
   const asked = props.layout
@@ -847,7 +839,7 @@ function drawnValue(id: string): number | null {
   }
   const answer = grid.value
   if (answer === null || answer.dims.some((dim) => dim.id === id)) {
-    const held = values.value[id]
+    const held = knobValues.value[id]
     return held === undefined || !Number.isFinite(held) ? knob.default : held
   }
   const at = drawnValues.value
@@ -1190,7 +1182,7 @@ const plot = computed<PlotSpec | null>(() => {
   if (answer === null) {
     return null
   }
-  const columns = interpolate(answer, values.value)
+  const columns = interpolate(answer, knobValues.value)
   const series = drawnCurves.value.map((one): Series => {
     const drawn = {
       id: one.id,
@@ -1511,89 +1503,6 @@ const dots = computed<Dot[]>(() =>
 )
 
 /**
- * Get the id of a control of a knob, which its label points at.
- *
- * @param axis the knob
- * @returns an id which is unique inside the shadow root of this element
- */
-function controlId(axis: PanelAxis): string {
-  return `knob-${axis.id}`
-}
-
-/**
- * Get the label of a knob.
- *
- * @param axis the knob
- * @returns `<label> [<unit>]` for a range knob, whose readout is a bare
- *   number, as sbmlsim labels the axis of a figure; the label alone for a
- *   choice knob, whose choices carry their units themselves
- */
-function knobLabel(axis: PanelAxis): string {
-  return axis.kind === 'range' && axis.unit !== null && axis.unit !== ''
-    ? `${axis.label} [${axis.unit}]`
-    : axis.label
-}
-
-/**
- * Get the value of a knob as it is shown next to its control.
- *
- * @param axis the knob
- * @returns the value as short text, its unit being part of the label
- */
-function shownValue(axis: PanelAxis): string {
-  const value = values.value[axis.id]
-  return value === undefined ? '' : shortNumber(value, KNOB_DIGITS)
-}
-
-/**
- * Get a step of the ladder 1, 2, 5 near a wanted one.
- *
- * @param wanted the step which is wanted, a positive number
- * @returns the step of the ladder closest above it
- */
-function niceStep(wanted: number): number {
-  const magnitude = 10 ** Math.floor(Math.log10(wanted))
-  const share = wanted / magnitude
-  return (share <= 1.5 ? 1 : share <= 3 ? 2 : share <= 7 ? 5 : 10) * magnitude
-}
-
-/**
- * Get the step a range knob moves in.
- *
- * It is finer than the grid the knob is read from on purpose: the grid is
- * where the simulations are, the knob is where the reader is, and the
- * interpolation between them is what makes a movement cost nothing.
- *
- * The value a knob starts at has to lie on the ladder the step builds, or the
- * browser snaps the control to the nearest value which does and the reader is
- * shown, and told by a screen reader, a number the panel is not simulating. A
- * nice step near a hundredth of the span usually lands on it; where it does
- * not, the distance from the smallest value to the declared one is divided
- * into a whole number of steps of about that size instead.
- *
- * @param axis the knob, of the kind `range`
- * @returns the step, 1 for a knob whose bounds are no span
- */
-function rangeStep(axis: PanelAxis): number {
-  const low = axis.min ?? 0
-  const high = axis.max ?? 0
-  const span = high - low
-  if (!(span > 0)) {
-    return 1
-  }
-  const nice = niceStep(span / RANGE_STEPS)
-  const offset = axis.default - low
-  if (!(offset > 0)) {
-    return nice
-  }
-  const steps = offset / nice
-  if (Math.abs(steps - Math.round(steps)) <= ON_LADDER) {
-    return nice
-  }
-  return offset / Math.max(1, Math.round(steps))
-}
-
-/**
  * Get the points a grid over a knob runs.
  *
  * @param axis the knob
@@ -1647,7 +1556,7 @@ function bodyFor(gridId: string | null): SimulateRequest {
       over[axis.id] = gridPoints(axis)
       continue
     }
-    const value = values.value[axis.id]
+    const value = knobValues.value[axis.id]
     fixed[axis.id] = value === undefined || !Number.isFinite(value) ? axis.default : value
   }
   return props.variant === ''
@@ -1761,7 +1670,7 @@ async function simulate(gridId: string | null): Promise<void> {
   // called again for a second attempt and would otherwise send the state of
   // whatever the controls hold by then, and the answer is drawn at the state
   // it was run at however the controls moved while it was in flight
-  const sent = { ...values.value }
+  const sent = { ...knobValues.value }
   const body = bodyFor(gridId)
   try {
     const answer = await attempt(() =>
@@ -1855,7 +1764,7 @@ async function load(): Promise<void> {
     const declared = await attempt(() => talking.panel(props.model, props.panel, controller.signal))
     flight = null
     declaration.value = declared
-    values.value = Object.fromEntries(knobsOf(declared).map((one) => [one.id, one.default]))
+    knobValues.value = withHost(knobsOf(declared), (one) => one.default)
     logY.value = initialLog(declared)
     await Promise.all([simulate(firstGridded(declared)), loadData(declared)])
   } catch (error) {
@@ -1937,84 +1846,82 @@ function unobserve(): void {
 }
 
 /**
- * Read the value a control carries.
- *
- * @param event the `input` or `change` event of the control
- * @returns the value, `null` for a target which is no control or a value which
- *   is no number
- */
-function controlValue(event: Event): number | null {
-  const target = event.target
-  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) {
-    return null
-  }
-  const value = Number(target.value)
-  return Number.isFinite(value) ? value : null
-}
-
-/**
  * Take the movement of a knob: interpolate and redraw, never fetch.
  *
  * @param axis the knob
- * @param event the `input` event of its control
+ * @param value the value its control was moved to
  */
-function onInput(axis: PanelAxis, event: Event): void {
-  const value = controlValue(event)
-  if (value === null) {
-    return
-  }
-  values.value = { ...values.value, [axis.id]: value }
+function onInput(axis: PanelAxis, value: number): void {
+  knobValues.value = { ...knobValues.value, [axis.id]: value }
 }
 
 /**
  * Take the release of a knob: schedule a simulation unless the grid covers it.
  *
  * @param axis the knob
- * @param event the `change` event of its control
+ * @param value the value its control was released at
  */
-function onChange(axis: PanelAxis, event: Event): void {
-  const value = controlValue(event)
-  if (value === null) {
-    return
-  }
-  values.value = { ...values.value, [axis.id]: value }
+function onChange(axis: PanelAxis, value: number): void {
+  knobValues.value = { ...knobValues.value, [axis.id]: value }
   if (frozen.value || axis.id === gridded.value) {
     return
   }
   schedule(axis.id)
 }
 
-/** The keys a range input and a select act on themselves. */
-const CONTROL_KEYS = new Set([
-  'ArrowLeft',
-  'ArrowRight',
-  'ArrowUp',
-  'ArrowDown',
-  'Home',
-  'End',
-  'PageUp',
-  'PageDown',
-])
+/**
+ * Get the value of every knob the panel declares at the values of its host.
+ *
+ * A knob the host owns takes the value of the host and every other knob the
+ * value it is given, which is its default when the panel starts or is reset
+ * and the value its control holds when the host lets a knob go again.
+ *
+ * @param knobs the knobs of the declaration
+ * @param own the value of every knob which is no knob of the host
+ * @returns the value of every knob by its id
+ */
+function withHost(knobs: PanelAxis[], own: (axis: PanelAxis) => number): Record<string, number> {
+  const given = ownedValues.value
+  return Object.fromEntries(knobs.map((one) => [one.id, given[one.id] ?? own(one)]))
+}
 
 /**
- * Keep the keys a knob acts on to the knob.
+ * Take a change of the knobs the host owns as a release of each of them.
  *
- * A key event leaves the shadow root retargeted at the element, so a host which
- * decides on the target - reveal.js skips a key whose active element is an
- * `input` - sees the element and not the knob, and a deck would turn the slide
- * under a reader who moves a knob with the arrow keys. The event stops here
- * instead, at the knob, and only for the keys the knob uses: every other key
- * reaches the host as it does without the element.
+ * A knob which the host moved is a knob a reader moved somewhere else on the
+ * page, so it is taken as the release of the panel's own control would be:
+ * a knob the drawn grid covers is read out of it and costs nothing, and any
+ * other knob which moved schedules one run, which grids over it, so its next
+ * movement costs nothing either. Several knobs which moved at once are one
+ * run. A host which writes its values on every movement of a slider pays one
+ * run for the first movement of a knob no grid covers and none after it.
  *
- * @param event the `keydown` event of the controls
+ * @param given the value of every knob the host owns, by its id
  */
-function onControlKey(event: KeyboardEvent): void {
-  const target = event.target
-  const isControl =
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLInputElement && target.type === 'range')
-  if (isControl && CONTROL_KEYS.has(event.key)) {
-    event.stopPropagation()
+function takeHostValues(given: Record<string, number>): void {
+  const declared = declaration.value
+  if (declared === null) {
+    return
+  }
+  let changed = false
+  let moved: string | null = null
+  const next = { ...knobValues.value }
+  for (const axis of knobsOf(declared)) {
+    const value = given[axis.id]
+    if (value === undefined || value === next[axis.id]) {
+      continue
+    }
+    next[axis.id] = value
+    changed = true
+    if (axis.id !== gridded.value) {
+      moved = axis.id
+    }
+  }
+  if (changed) {
+    knobValues.value = next
+  }
+  if (moved !== null && !frozen.value) {
+    schedule(moved)
   }
 }
 
@@ -2141,7 +2048,9 @@ function freeze(): void {
 /**
  * Put every knob back to the value its declaration states.
  *
- * The scale of the y axis goes back to the one the curves declare as well. A
+ * A knob the host owns (`values`) is no knob of the panel's to put back and
+ * keeps the value of the host. The scale of the y axis goes back to the one
+ * the curves declare as well. A
  * simulation is only run when the grid is no longer the one the panel started
  * with, since every other case is read out of the grid which is already here.
  */
@@ -2150,7 +2059,7 @@ function reset(): void {
   if (declared === null) {
     return
   }
-  values.value = Object.fromEntries(knobsOf(declared).map((one) => [one.id, one.default]))
+  knobValues.value = withHost(knobsOf(declared), (one) => one.default)
   logY.value = initialLog(declared)
   const first = firstGridded(declared)
   if (!frozen.value && first !== gridded.value) {
@@ -2178,6 +2087,35 @@ watch(
       void loadData(declared)
     }
   },
+)
+
+/*
+ * The knobs of the host move as the host writes them. A text which says the
+ * same values again, and a text which says none, moves nothing, so a host which
+ * writes the attribute of every panel whenever one of its knobs moves costs a
+ * panel which does not declare that knob nothing.
+ */
+watch(ownedValues, (given) => {
+  takeHostValues(given)
+})
+
+/*
+ * An attribute `values` which cannot be read is said once per text, on the
+ * console, as a series the figure leaves out is: it is a mistake of the page
+ * which wrote it and no failure of the panel, which is drawn as it is without
+ * the attribute, so it is no `sbmlsim-error` and no line of the panel.
+ */
+watch(
+  hosted,
+  (read) => {
+    if (read.kind === 'malformed') {
+      console.warn(
+        `sbmlsim-panel ${props.panel}: the attribute "values" ${read.reason}, so it is ` +
+          'ignored; it is a JSON object of knob id to number.',
+      )
+    }
+  },
+  { immediate: true },
 )
 
 /*
@@ -2224,39 +2162,17 @@ defineExpose({ activate, freeze, reset })
         class="controls"
         role="group"
         aria-label="Simulation settings"
-        @keydown="onControlKey($event)"
+        @keydown="keepControlKeys($event)"
       >
-        <div v-for="axis of axes" :key="axis.id" class="knob">
-          <label class="knob-label" :for="controlId(axis)">{{ knobLabel(axis) }}</label>
-          <div v-if="axis.kind === 'range'" class="knob-row">
-            <input
-              :id="controlId(axis)"
-              type="range"
-              :min="axis.min ?? 0"
-              :max="axis.max ?? 1"
-              :step="rangeStep(axis)"
-              :value="values[axis.id] ?? axis.default"
-              :disabled="frozen"
-              @input="onInput(axis, $event)"
-              @change="onChange(axis, $event)"
-            />
-            <output class="knob-value" :for="controlId(axis)" aria-live="off">{{
-              shownValue(axis)
-            }}</output>
-          </div>
-          <select
-            v-else
-            :id="controlId(axis)"
-            class="knob-select"
-            :value="values[axis.id] ?? axis.default"
-            :disabled="frozen"
-            @change="onChange(axis, $event)"
-          >
-            <option v-for="choice of axis.choices" :key="choice.label" :value="choice.value">
-              {{ choice.label }}
-            </option>
-          </select>
-        </div>
+        <KnobControl
+          v-for="axis of shownAxes"
+          :key="axis.id"
+          :axis="axis"
+          :value="knobValues[axis.id] ?? axis.default"
+          :disabled="frozen"
+          @input="onInput(axis, $event)"
+          @change="onChange(axis, $event)"
+        />
         <div class="options">
           <label class="toggle">
             <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
@@ -2438,50 +2354,6 @@ defineExpose({ activate, freeze, reset })
 
 .layout-stacked .figure {
   order: -1;
-}
-
-.knob {
-  display: flex;
-  flex: 1 1 160px;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.knob-label {
-  color: var(--_fg-soft);
-  font-size: var(--_font-size-small);
-}
-
-.knob-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.knob-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-  accent-color: var(--_accent);
-}
-
-.knob-value {
-  min-width: 4ch;
-  color: var(--_fg);
-  font-family: var(--_font-mono);
-  font-size: var(--_font-size-small);
-  text-align: right;
-}
-
-.knob-select {
-  width: 100%;
-  padding: 3px 6px;
-  border: 1px solid var(--_line);
-  border-radius: 6px;
-  background: var(--_bg-card);
-  color: var(--_fg);
-  font-family: inherit;
-  font-size: var(--_font-size);
 }
 
 .options {

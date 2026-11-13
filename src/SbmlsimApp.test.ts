@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 import { FAILURE_MESSAGES } from './client'
 import type {
   AppDeclaration,
+  PanelAxis,
   PanelDeclaration,
   SimulateRequest,
   SimulateResponse,
@@ -80,6 +81,34 @@ function panelDeclaration(id: string): PanelDeclaration {
   }
 }
 
+/** A choice knob, which no grid covers unless a run asks for it. */
+function choiceKnob(id: string): PanelAxis {
+  return {
+    id,
+    label: `knob ${id}`,
+    target: `target${id}`,
+    unit: 'mg',
+    kind: 'choice',
+    min: null,
+    max: null,
+    steps: 5,
+    choices: [
+      { label: 'low', value: 12.5 },
+      { label: 'high', value: 25 },
+    ],
+    default: 25,
+  }
+}
+
+/** A range knob of its own id, which a run grids over by default. */
+function rangeKnob(id: string): PanelAxis {
+  const declared = panelDeclaration('panelA').axes[0]
+  if (declared === undefined) {
+    throw new Error('the declaration has no knob')
+  }
+  return { ...declared, id, label: `knob ${id}`, target: `target${id}` }
+}
+
 /** The answer of a run of a panel. */
 function run(request: SimulateRequest): SimulateResponse {
   return {
@@ -105,6 +134,9 @@ function run(request: SimulateRequest): SimulateResponse {
 
 /** The app the stub answers, `null` for a request which cannot reach it. */
 let declared: AppDeclaration | null = app()
+
+/** The knobs of a panel by its id, for a panel which declares others than `knobA`. */
+let knobsOf: Record<string, PanelAxis[]> = {}
 
 /** Whether the simulations hang until they are stopped, with the signals they were given. */
 let hang: AbortSignal[] | null = null
@@ -174,6 +206,7 @@ function tabs(element: AppElement): HTMLButtonElement[] {
 
 beforeEach(() => {
   declared = app()
+  knobsOf = {}
   calls = []
   hang = null
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
@@ -197,7 +230,11 @@ beforeEach(() => {
       return Promise.resolve(json(run(body ?? {})))
     }
     const id = url.split('/panels/')[1] ?? 'panelA'
-    return Promise.resolve(json(panelDeclaration(id)))
+    const declaredKnobs = knobsOf[id]
+    const answer = panelDeclaration(id)
+    return Promise.resolve(
+      json(declaredKnobs === undefined ? answer : { ...answer, axes: declaredKnobs }),
+    )
   })
   class Observing {
     observe(): void {
@@ -272,6 +309,7 @@ describe('the shell of an app', () => {
   it('passes the chosen variant to every panel of the page', async () => {
     const element = await shell({ page: 'pageB' })
     expect(simulations().map((one) => one.variant)).toEqual(['variantA', 'variantA'])
+    const read = calls.filter((one) => one.url.endsWith('/panels/panelB')).length
     const select = part(element, '.variant-select') as HTMLSelectElement
     expect([...select.options].map((one) => one.value)).toEqual(['variantA', 'variantB'])
     select.value = 'variantB'
@@ -281,7 +319,7 @@ describe('the shell of an app', () => {
     const after = simulations().slice(2)
     expect(after.map((one) => one.variant)).toEqual(['variantB', 'variantB'])
     // the declarations are not read again for a variant, only the SBML changes
-    expect(calls.filter((one) => one.url.endsWith('/panels/panelB')).length).toBe(1)
+    expect(calls.filter((one) => one.url.endsWith('/panels/panelB')).length).toBe(read)
     // and the choice stays while the page changes
     tabs(element)[0]?.click()
     await settled()
@@ -466,5 +504,204 @@ describe('the shell of an app', () => {
     expect((own[own.length - 1]?.textContent ?? '').replace(/\/\*[^]*?\*\//g, '')).not.toMatch(
       /rgb\(|hsl\(|--sbmlsim-/,
     )
+  })
+})
+
+describe('the knobs the panels of a page share', () => {
+  /** Get the shadow root of a panel the shell placed. */
+  function inside(panel: Element): ShadowRoot {
+    if (panel.shadowRoot === null) {
+      throw new Error('the panel has no shadow root')
+    }
+    return panel.shadowRoot
+  }
+
+  /** Get a panel the shell placed by its id. */
+  function placed(element: AppElement, id: string): Element {
+    return part(element, `sbmlsim-panel[panel="${id}"]`)
+  }
+
+  /** Get the ids of the knobs a panel draws a control of. */
+  function panelKnobs(element: AppElement, id: string): string[] {
+    return [...inside(placed(element, id)).querySelectorAll('.knob select, .knob input')].map(
+      (one) => one.id,
+    )
+  }
+
+  /** Get the ids of the knobs the shell draws a control of. */
+  function shellKnobs(element: AppElement): string[] {
+    return [...element.shadowRoot.querySelectorAll('.knobs .knob select, .knobs .knob input')].map(
+      (one) => one.id,
+    )
+  }
+
+  /** The simulations one panel asked for. */
+  function simulationsOf(id: string): SimulateRequest[] {
+    return calls
+      .filter((one) => one.url.endsWith(`/panels/${id}/simulate`))
+      .map((one) => one.body ?? {})
+  }
+
+  it('draws one control of a knob two panels of the page declare, and none in the panels', async () => {
+    const element = await shell({ page: 'pageB' })
+    expect(shellKnobs(element)).toEqual(['knob-knobA'])
+    expect(panelKnobs(element, 'panelB')).toEqual([])
+    expect(panelKnobs(element, 'panelC')).toEqual([])
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
+    // the control is the one the panel draws, with its label, its unit and its value
+    expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob A [mg]')
+    expect(part(element, '.knobs .knob-value').textContent.trim()).toBe('1')
+    const slider = part(element, '#knob-knobA') as HTMLInputElement
+    expect([slider.min, slider.max, slider.step, slider.value]).toEqual(['0', '1', '0.01', '1'])
+    // the page of one panel keeps its knob in its panel
+    tabs(element)[0]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.knobs')).toBeNull()
+    expect(panelKnobs(element, 'panelA')).toEqual(['knob-knobA'])
+    expect(placed(element, 'panelA').hasAttribute('values')).toBe(false)
+  })
+
+  it('moves every panel which declares the knob to one value', async () => {
+    knobsOf = {
+      panelB: [rangeKnob('knobB'), choiceKnob('knobS')],
+      panelC: [choiceKnob('knobS'), rangeKnob('knobC')],
+    }
+    const element = await shell({ page: 'pageB' })
+    expect(shellKnobs(element)).toEqual(['knob-knobS'])
+    const select = part(element, '#knob-knobS') as HTMLSelectElement
+    select.value = '12.5'
+    select.dispatchEvent(new Event('change'))
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobS":12.5}')
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobS":12.5}')
+    // neither panel grids over the shared knob, so each runs once over it, and
+    // what each drew is the state the one control is at
+    expect(simulationsOf('panelB')).toEqual([
+      { values: { knobS: 25 }, grid: { knobB: 3 }, variant: 'variantA' },
+      { values: { knobB: 1 }, grid: { knobS: 2 }, variant: 'variantA' },
+    ])
+    expect(simulationsOf('panelC')).toEqual([
+      { values: { knobS: 25 }, grid: { knobC: 3 }, variant: 'variantA' },
+      { values: { knobC: 1 }, grid: { knobS: 2 }, variant: 'variantA' },
+    ])
+    expect(panelKnobs(element, 'panelB')).toEqual(['knob-knobB'])
+    expect(panelKnobs(element, 'panelC')).toEqual(['knob-knobC'])
+  })
+
+  it('leaves a panel which declares no shared knob alone when one moves', async () => {
+    declared = app({
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'] }],
+    })
+    knobsOf = {
+      panelB: [rangeKnob('knobB'), choiceKnob('knobS')],
+      panelC: [rangeKnob('knobC'), choiceKnob('knobS')],
+      panelD: [rangeKnob('knobD'), choiceKnob('knobT')],
+    }
+    const element = await shell()
+    expect(shellKnobs(element)).toEqual(['knob-knobS'])
+    expect(placed(element, 'panelD').hasAttribute('values')).toBe(false)
+    expect(panelKnobs(element, 'panelD')).toEqual(['knob-knobD', 'knob-knobT'])
+    const select = part(element, '#knob-knobS') as HTMLSelectElement
+    select.value = '12.5'
+    select.dispatchEvent(new Event('change'))
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(simulationsOf('panelB')).toHaveLength(2)
+    expect(simulationsOf('panelD')).toHaveLength(1)
+    expect(placed(element, 'panelD').hasAttribute('values')).toBe(false)
+  })
+
+  it('lists the shared knobs in the order the first panel which declares one lists them', async () => {
+    declared = app({
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'] }],
+    })
+    knobsOf = {
+      panelB: [choiceKnob('knobT'), choiceKnob('knobOwn')],
+      panelC: [choiceKnob('knobS'), choiceKnob('knobT')],
+      panelD: [choiceKnob('knobS')],
+    }
+    const element = await shell()
+    expect(shellKnobs(element)).toEqual(['knob-knobT', 'knob-knobS'])
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobT":25}')
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobT":25,"knobS":25}')
+    expect(placed(element, 'panelD').getAttribute('values')).toBe('{"knobS":25}')
+    expect(panelKnobs(element, 'panelB')).toEqual(['knob-knobOwn'])
+  })
+
+  it('starts the shared knobs at their defaults when the page is shown again', async () => {
+    const element = await shell({ page: 'pageB' })
+    const slider = part(element, '#knob-knobA') as HTMLInputElement
+    slider.value = '0.5'
+    slider.dispatchEvent(new Event('input'))
+    await settled()
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":0.5}')
+    tabs(element)[0]?.click()
+    await settled()
+    tabs(element)[1]?.click()
+    await settled()
+    expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('1')
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
+    // the shell reads a declaration once for its life, a panel once for its own
+    expect(calls.filter((one) => one.url.endsWith('/panels/panelB'))).toHaveLength(3)
+  })
+
+  it('places the panels once it knows the knobs they share', async () => {
+    let answer = (): void => {
+      // replaced by the answer of the first declaration the shell reads
+    }
+    const stub = globalThis.fetch
+    let held = true
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url.endsWith('/panels/panelB') && held) {
+        held = false
+        return new Promise<Response>((resolve) => {
+          answer = () => {
+            resolve(stub(url, init))
+          }
+        })
+      }
+      return stub(url, init)
+    })
+    const element = await shell({ page: 'pageB' })
+    // a panel placed now would start at a state of the shared knob which is
+    // its own, so the cells wait for the declarations without a panel in them
+    expect(element.shadowRoot.querySelectorAll('.cell')).toHaveLength(2)
+    expect(panels(element)).toEqual([])
+    expect(simulations()).toEqual([])
+    answer()
+    await settled()
+    expect(panels(element)).toEqual(['panelB', 'panelC'])
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
+  })
+
+  it('keeps the keys a shared knob uses from the page', async () => {
+    const element = await shell({ page: 'pageB' })
+    const seen: string[] = []
+    document.addEventListener('keydown', (event) => seen.push(event.key))
+    const slider = part(element, '#knob-knobA')
+    for (const key of ['ArrowLeft', 'End', 'n']) {
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, composed: true }))
+    }
+    expect(seen).toEqual(['n'])
+  })
+
+  it('places a panel whose declaration it cannot read on its own', async () => {
+    let refused = true
+    const stub = globalThis.fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (url.endsWith('/panels/panelC') && refused) {
+        refused = false
+        return Promise.resolve({ ok: false, status: 500 } as Response)
+      }
+      return stub(url, init)
+    })
+    const element = await shell({ page: 'pageB' })
+    expect(element.shadowRoot.querySelector('.knobs')).toBeNull()
+    expect(placed(element, 'panelC').hasAttribute('values')).toBe(false)
+    expect(panelKnobs(element, 'panelB')).toEqual(['knob-knobA'])
+    expect(panelKnobs(element, 'panelC')).toEqual(['knob-knobA'])
   })
 })

@@ -1901,6 +1901,117 @@ describe('the variant of the model', () => {
   })
 })
 
+describe('the knobs the host owns', () => {
+  /** The ids of the knobs the panel draws a control of, in their order. */
+  function shownKnobs(element: PanelElement): string[] {
+    return [...shadow(element).querySelectorAll('.knob select, .knob input')].map((one) =>
+      one.id.replace(/^knob-/, ''),
+    )
+  }
+
+  it('carries no attribute values where the page gives none', async () => {
+    // the element writes the default of a prop onto itself, and a default
+    // text would be an attribute `values` on every panel of every page
+    const element = await started()
+    expect(element.hasAttribute('values')).toBe(false)
+    expect(shownKnobs(element)).toEqual(['knobA', 'knobB'])
+  })
+
+  it('sets the knobs it is given and draws no control of exactly those', async () => {
+    const element = await started({ values: '{"knobA": 12.5}' })
+    expect(shownKnobs(element)).toEqual(['knobB'])
+    expect(simulations()).toEqual([{ values: { knobA: 12.5 }, grid: { knobB: 3 } }])
+    // a panel whose host owns every knob it declares has no control to put
+    // beside its figure, as a panel without a knob has none
+    const owned = await started({ values: '{"knobA": 12.5, "knobB": 0.6}' })
+    await resizeTo(800)
+    expect(shownKnobs(owned)).toEqual([])
+    expect(part(owned, '.panel').className).toContain('layout-toolbar')
+    expect(simulations()[1]).toEqual({ values: { knobA: 12.5 }, grid: { knobB: 3 } })
+    // the gridded knob is read out of the grid at the value of the host
+    expect(figure(owned)).not.toBe(figure(element))
+  })
+
+  it('runs again when a knob of the host moves which the grid does not cover', async () => {
+    vi.useFakeTimers()
+    const element = await started({ values: '{"knobA": 25}' })
+    element.setAttribute('values', '{"knobA": 12.5}')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations()).toEqual([
+      { values: { knobA: 25 }, grid: { knobB: 3 } },
+      { values: { knobB: 1 }, grid: { knobA: 2 } },
+    ])
+    expect(shownKnobs(element)).toEqual(['knobB'])
+  })
+
+  it('reads a movement of the host of the gridded knob out of the grid', async () => {
+    vi.useFakeTimers()
+    const element = await started({ values: '{"knobB": 1}' })
+    const before = figure(element)
+    element.setAttribute('values', '{"knobB": 0.4}')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).not.toBe(before)
+    // and the attribute written again with the same values moves nothing
+    const moved = figure(element)
+    element.setAttribute('values', '{ "knobB": 0.4 }')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).toBe(moved)
+  })
+
+  it('ignores an id it does not declare', async () => {
+    vi.useFakeTimers()
+    const element = await started({ values: '{"knobZ": 3}' })
+    expect(shownKnobs(element)).toEqual(['knobA', 'knobB'])
+    element.setAttribute('values', '{"knobZ": 4}')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toEqual([{ values: { knobA: 25 }, grid: { knobB: 3 } }])
+    expect(warnings()).toEqual([])
+  })
+
+  it('is as if it were absent when it cannot be read, and says so once', async () => {
+    for (const text of [
+      'knobA=12.5',
+      '[12.5]',
+      'null',
+      '{"knobA": "12.5"}',
+      '{"knobA": 1e999}',
+      '{"knobA": 12.5, "knobB": null}',
+    ]) {
+      calls = []
+      warned.mockClear()
+      const element = await started({ values: text })
+      expect(shownKnobs(element), text).toEqual(['knobA', 'knobB'])
+      expect(simulations(), text).toEqual([{ values: { knobA: 25 }, grid: { knobB: 3 } }])
+      expect(warnings(), text).toHaveLength(1)
+      expect(warnings()[0], text).toContain('"values"')
+      expect(textOf(element, '.error'), text).toBe('')
+    }
+  })
+
+  it('keeps the knobs of the host on a reset and gives the others their defaults back', async () => {
+    vi.useFakeTimers()
+    const element = await started({ values: '{"knobB": 0.6}' })
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    element.reset()
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(control(element, 'knobA').value).toBe('25')
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toEqual([
+      { values: { knobA: 25 }, grid: { knobB: 3 } },
+      { values: { knobB: 0.6 }, grid: { knobA: 2 } },
+      { values: { knobA: 25 }, grid: { knobB: 3 } },
+      { values: { knobB: 0.6 }, grid: { knobA: 2 } },
+    ])
+  })
+})
+
 describe('the measure of the text', () => {
   /** What the stub of canvas was asked: the fonts it was set to and the texts it measured. */
   interface Canvas {

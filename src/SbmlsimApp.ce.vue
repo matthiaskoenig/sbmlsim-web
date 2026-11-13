@@ -4,11 +4,12 @@
  *
  * A model app is configuration and not code: the element reads the `app/1`
  * declaration of the model once, and draws its title, the navigation of its
- * pages, the switcher of its variants, a grid of `<sbmlsim-panel>` elements of
- * the page which is shown and a provenance footer. That is all it does. It owns
- * no simulation logic: it never fetches the declaration of a panel, never
- * simulates and never reads into the shadow root of a panel, so what a panel
- * shows, and how it fails, is the element of the panel alone.
+ * pages, the switcher of its variants, the controls of the knobs the panels of
+ * a page share, a grid of `<sbmlsim-panel>` elements of the page which is shown
+ * and a provenance footer. That is all it does. It owns no simulation logic: it
+ * reads the declarations of the panels of a page for their knobs and nothing
+ * else, never simulates and never reads into the shadow root of a panel, so
+ * what a panel shows, and how it fails, is the element of the panel alone.
  *
  * It has the shadow root, the tokens and the typography of the panel
  * (`SbmlsimPanel.ce.vue` has the reasons, and `theme.css` the table): it
@@ -47,6 +48,35 @@
  * addresses with it and answer the back button by setting `page` again.
  * The event is for the reader's switch, not for the attribute being set from
  * outside, which the page which set it knows.
+ *
+ * ## The knobs a page shares
+ *
+ * A knob id which more than one panel of the page declares is one knob of the
+ * page: the shell draws one control of it above the grid and every panel which
+ * declares it is set from that control, so the plots of a page are always of
+ * one state of the model and never of two. A knob id one panel of the page
+ * declares stays in that panel. The service refuses an app two of whose panels
+ * of one page declare an id differently, so the declaration of the first panel
+ * which declares it is the declaration of the knob, and its control is
+ * `KnobControl.ce.vue`, the control the panel would have drawn.
+ *
+ * Which knobs those are is read from the declarations of the panels of the
+ * page (`/panels/{panel}`), which the shell reads before it places the panels,
+ * once per panel for the life of the element, so a panel is placed with the
+ * attribute `values` it starts with and never starts at another state of a
+ * shared knob. A declaration the shell cannot read is a panel which shares
+ * nothing: it is placed without `values` and is the panel it is on its own,
+ * which shows its own failure. The controls are listed in the order the first
+ * panel which declares one lists them, start at the declared default, and
+ * start there again whenever the page is shown, as the knobs of its panels do.
+ *
+ * Every panel which declares a shared knob gets the attribute `values`, a JSON
+ * object of exactly the shared knobs it declares, written again on every
+ * movement of a control (`input` and `change` alike); a panel takes it as the
+ * release of its own control, so the knob its grid covers is read out of the
+ * grid while it is dragged and any other one costs one run. A panel which
+ * declares none of them gets no `values`, so a movement of a shared knob
+ * changes nothing of it.
  *
  * ## The variant
  *
@@ -89,7 +119,9 @@ import type { PropType } from 'vue'
 
 import { DEFAULT_TIMEOUT, FAILURE_MESSAGES, PanelClient, failureKind } from './client'
 import type { FailureKind } from './client'
-import type { AppDeclaration, AppPage, Provenance } from './contract'
+import type { AppDeclaration, AppPage, PanelAxis, Provenance } from './contract'
+import KnobControl from './KnobControl.ce.vue'
+import { keepControlKeys, knobsOf } from './knob'
 import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -144,6 +176,22 @@ const announced = ref('')
 /** The controller of the request of the app, so a superseded one is dropped. */
 let flight: AbortController | null = null
 
+/**
+ * The knobs of the panels of the page which is shown, by the id of the panel,
+ * `null` while they are read; the panels are placed once they are there.
+ */
+const pageKnobs = shallowRef<Record<string, PanelAxis[]> | null>(null)
+/** The value of every knob the panels of the page share, by its id. */
+const shared = ref<Record<string, number>>({})
+/**
+ * The knobs of every panel the shell read, by the id of the panel, for the
+ * life of the element and of its endpoint and model: a declaration is the
+ * one of the service, so a page which is shown again is placed at once.
+ */
+const knobCache = new Map<string, PanelAxis[]>()
+/** The controller of the requests of the declarations, so a superseded page is dropped. */
+let reading: AbortController | null = null
+
 /** The page which is shown: the one `page` names, else the first one. */
 const current = computed<AppPage | null>(() => {
   const pages = app.value?.pages ?? []
@@ -158,6 +206,97 @@ const variants = computed(() => {
 
 /** The variant the panels simulate, empty for the one their declaration names. */
 const variantOfPanels = computed<string>(() => (variants.value.length > 0 ? chosen.value : ''))
+
+/**
+ * The knobs the panels of the page share: the ids more than one of its panels
+ * declares, each with the declaration of the first panel which declares it, in
+ * the order that panel lists them.
+ */
+const sharedKnobs = computed<PanelAxis[]>(() => {
+  const knobs = pageKnobs.value
+  const page = current.value
+  if (knobs === null || page === null) {
+    return []
+  }
+  const declaring = new Map<string, number>()
+  for (const id of new Set(page.panels)) {
+    for (const knob of new Set((knobs[id] ?? []).map((one) => one.id))) {
+      declaring.set(knob, (declaring.get(knob) ?? 0) + 1)
+    }
+  }
+  const listed = new Map<string, PanelAxis>()
+  for (const id of page.panels) {
+    for (const knob of knobs[id] ?? []) {
+      if ((declaring.get(knob.id) ?? 0) > 1 && !listed.has(knob.id)) {
+        listed.set(knob.id, knob)
+      }
+    }
+  }
+  return [...listed.values()]
+})
+
+/**
+ * Get the attribute `values` of a panel of the page.
+ *
+ * @param id the id of the panel
+ * @returns the JSON of the shared knobs the panel declares at their values,
+ *   `undefined` for a panel which declares none, which is placed without the
+ *   attribute
+ */
+function valuesOf(id: string): string | undefined {
+  const declared = new Set((pageKnobs.value?.[id] ?? []).map((one) => one.id))
+  const given: Record<string, number> = {}
+  for (const knob of sharedKnobs.value) {
+    const value = shared.value[knob.id]
+    if (declared.has(knob.id) && value !== undefined) {
+      given[knob.id] = value
+    }
+  }
+  return Object.keys(given).length === 0 ? undefined : JSON.stringify(given)
+}
+
+/**
+ * Take a movement of the control of a shared knob.
+ *
+ * @param knob the knob
+ * @param value the value its control was moved to
+ */
+function moveShared(knob: PanelAxis, value: number): void {
+  shared.value = { ...shared.value, [knob.id]: value }
+}
+
+/**
+ * Read the knobs of the panels of a page, and start its shared knobs at their defaults.
+ *
+ * The declarations of the panels already read are not read again. A panel
+ * whose declaration cannot be read shares no knob, see the head of the file.
+ *
+ * @param page the page
+ */
+async function readKnobs(page: AppPage): Promise<void> {
+  reading?.abort()
+  const controller = new AbortController()
+  reading = controller
+  pageKnobs.value = null
+  const client = new PanelClient(props.endpoint, props.timeout)
+  const missing = [...new Set(page.panels)].filter((id) => !knobCache.has(id))
+  await Promise.all(
+    missing.map(async (id) => {
+      try {
+        const declared = await client.panel(props.model, id, controller.signal)
+        knobCache.set(id, knobsOf(declared))
+      } catch {
+        // a panel the shell cannot read is placed on its own and shows its own failure
+      }
+    }),
+  )
+  if (reading !== controller) {
+    return
+  }
+  reading = null
+  pageKnobs.value = Object.fromEntries(page.panels.map((id) => [id, knobCache.get(id) ?? []]))
+  shared.value = Object.fromEntries(sharedKnobs.value.map((one) => [one.id, one.default]))
+}
 
 /** The level of the title of the app, within the levels HTML has. */
 const titleTag = computed<string>(() => {
@@ -313,6 +452,10 @@ watch(
   () => {
     freezeShown()
     answers.value = {}
+    const page = current.value
+    if (page !== null) {
+      void readKnobs(page)
+    }
   },
   { flush: 'pre' },
 )
@@ -326,6 +469,7 @@ watch(
   () => {
     freezeShown()
     answers.value = {}
+    knobCache.clear()
     void load()
   },
 )
@@ -336,6 +480,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   flight?.abort()
+  reading?.abort()
 })
 </script>
 
@@ -369,7 +514,25 @@ onBeforeUnmount(() => {
           </select>
         </label>
       </div>
-      <!-- a region and no main: the page which embeds the shell has its own landmark -->
+      <div
+        v-if="sharedKnobs.length > 0"
+        class="knobs"
+        role="group"
+        aria-label="Simulation settings of the page"
+        @keydown="keepControlKeys($event)"
+      >
+        <KnobControl
+          v-for="knob of sharedKnobs"
+          :key="knob.id"
+          :axis="knob"
+          :value="shared[knob.id] ?? knob.default"
+          @input="moveShared(knob, $event)"
+          @change="moveShared(knob, $event)"
+        />
+      </div>
+      <!-- a region and no main: the page which embeds the shell has its own landmark;
+           `values` is written as the attribute a page writes, and left off a panel
+           which shares no knob -->
       <section
         ref="grid"
         :key="current.id"
@@ -380,6 +543,7 @@ onBeforeUnmount(() => {
         <div v-for="one in current.panels" :key="one" class="cell">
           <component
             :is="panelTag"
+            v-if="pageKnobs !== null"
             auto
             :endpoint="props.endpoint"
             :model="props.model"
@@ -388,6 +552,7 @@ onBeforeUnmount(() => {
             :timeout="props.timeout"
             :heading-level="panelLevel"
             :variant="variantOfPanels"
+            :values.attr="valuesOf(one)"
           ></component>
         </div>
       </section>
@@ -543,6 +708,25 @@ onBeforeUnmount(() => {
   font: inherit;
 }
 
+/* the controls of the knobs the panels of the page share, on a card as the
+ * panels are; a control fills a phone and is no wider than a reader reads a
+ * select at on a wide page */
+.knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-end;
+  padding: 12px 16px;
+  border: 1px solid var(--_line);
+  border-radius: var(--_radius);
+  background: var(--_bg-card);
+  box-shadow: var(--_shadow);
+}
+
+.knobs .knob {
+  max-width: 20rem;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
@@ -553,8 +737,11 @@ onBeforeUnmount(() => {
 .cell {
   min-width: 0;
   /* the card does not grow from its loading line to the panel, which would move
-   * the footer under it */
-  min-height: 24rem;
+   * the footer under it, and is no taller than the smallest panel it holds: a
+   * panel whose knobs the page shares draws no control of them, and a figure is
+   * 0.6 of its width and at least 200px tall, which is a panel of about 23rem at
+   * the narrowest card of two columns and about 19rem on a phone */
+  min-height: 22rem;
   padding: 16px;
   border: 1px solid var(--_line);
   border-radius: var(--_radius);
@@ -622,6 +809,7 @@ onBeforeUnmount(() => {
 /* a figure keeps the room on a phone, where the card is nearly the screen */
 @container (max-width: 480px) {
   .cell {
+    min-height: 18rem;
     padding: 12px;
   }
 }

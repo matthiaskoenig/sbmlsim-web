@@ -1,0 +1,221 @@
+/**
+ * The knobs of a panel as a reader moves them, shared by the panel and the shell.
+ *
+ * A knob is drawn by `KnobControl.ce.vue` wherever it is drawn: inside the
+ * panel which declares it, and above the grid of an app for a knob which more
+ * than one panel of the page declares (`SbmlsimApp.ce.vue`). Its label, its
+ * step, the text of its value and the keys it keeps are therefore stated once,
+ * here, so a reader cannot tell from a control which element drew it.
+ */
+
+import type { PanelAxis, PanelDeclaration } from './contract'
+
+/** The significant digits the value of a knob is shown with. */
+export const KNOB_DIGITS = 4
+/** The steps a range knob moves in, which is finer than the grid it reads. */
+const RANGE_STEPS = 100
+/** How far from a whole number of steps a value may lie and still be on a ladder. */
+const ON_LADDER = 1e-6
+
+/** The keys a range input and a select act on themselves. */
+const CONTROL_KEYS: ReadonlySet<string> = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+])
+
+/**
+ * Write a number of a label without the digits nobody reads.
+ *
+ * @param value the number
+ * @param digits the significant digits it keeps
+ * @returns it as short text, empty for a value which is no finite number
+ */
+export function shortNumber(value: number, digits: number): string {
+  return Number.isFinite(value) ? String(Number(value.toPrecision(digits))) : ''
+}
+
+/**
+ * Get whether a value of a payload carries the fields a field names.
+ *
+ * @param value the value
+ * @param strings the fields which have to be text
+ * @returns whether it is an object carrying every one of them
+ */
+export function carries(value: unknown, strings: string[]): boolean {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const fields = value as Record<string, unknown>
+  return strings.every((name) => typeof fields[name] === 'string')
+}
+
+/**
+ * Get the knobs of a declaration which can be drawn as a control.
+ *
+ * The guard of the client refuses a declaration whose knobs are not objects
+ * with an id, so this is the second lock of that door: a control which cannot
+ * be built is not drawn, and a hole in the guard therefore costs a knob and
+ * never the element, which has an error line to show.
+ *
+ * @param declared the declaration, `null` until it was read
+ * @returns the knobs which can be drawn, in the order of the declaration
+ */
+export function knobsOf(declared: PanelDeclaration | null): PanelAxis[] {
+  const given: unknown[] = declared?.axes ?? []
+  return given.filter(
+    (one): one is PanelAxis =>
+      carries(one, ['id', 'label', 'kind']) &&
+      Array.isArray((one as PanelAxis).choices) &&
+      typeof (one as PanelAxis).default === 'number',
+  )
+}
+
+/**
+ * Get the label of a knob.
+ *
+ * @param axis the knob
+ * @returns `<label> [<unit>]` for a range knob, whose readout is a bare
+ *   number, as sbmlsim labels the axis of a figure; the label alone for a
+ *   choice knob, whose choices carry their units themselves
+ */
+export function knobLabel(axis: PanelAxis): string {
+  return axis.kind === 'range' && axis.unit !== null && axis.unit !== ''
+    ? `${axis.label} [${axis.unit}]`
+    : axis.label
+}
+
+/**
+ * Get a step of the ladder 1, 2, 5 near a wanted one.
+ *
+ * @param wanted the step which is wanted, a positive number
+ * @returns the step of the ladder closest above it
+ */
+function niceStep(wanted: number): number {
+  const magnitude = 10 ** Math.floor(Math.log10(wanted))
+  const share = wanted / magnitude
+  return (share <= 1.5 ? 1 : share <= 3 ? 2 : share <= 7 ? 5 : 10) * magnitude
+}
+
+/**
+ * Get the step a range knob moves in.
+ *
+ * It is finer than the grid the knob is read from on purpose: the grid is
+ * where the simulations are, the knob is where the reader is, and the
+ * interpolation between them is what makes a movement cost nothing.
+ *
+ * The value a knob starts at has to lie on the ladder the step builds, or the
+ * browser snaps the control to the nearest value which does and the reader is
+ * shown, and told by a screen reader, a number the panel is not simulating. A
+ * nice step near a hundredth of the span usually lands on it; where it does
+ * not, the distance from the smallest value to the declared one is divided
+ * into a whole number of steps of about that size instead.
+ *
+ * @param axis the knob, of the kind `range`
+ * @returns the step, 1 for a knob whose bounds are no span
+ */
+export function rangeStep(axis: PanelAxis): number {
+  const low = axis.min ?? 0
+  const high = axis.max ?? 0
+  const span = high - low
+  if (!(span > 0)) {
+    return 1
+  }
+  const nice = niceStep(span / RANGE_STEPS)
+  const offset = axis.default - low
+  if (!(offset > 0)) {
+    return nice
+  }
+  const steps = offset / nice
+  if (Math.abs(steps - Math.round(steps)) <= ON_LADDER) {
+    return nice
+  }
+  return offset / Math.max(1, Math.round(steps))
+}
+
+/**
+ * Read the value a control carries.
+ *
+ * @param event the `input` or `change` event of the control
+ * @returns the value, `null` for a target which is no control or a value which
+ *   is no number
+ */
+export function controlValue(event: Event): number | null {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) {
+    return null
+  }
+  const value = Number(target.value)
+  return Number.isFinite(value) ? value : null
+}
+
+/**
+ * Keep the keys a knob acts on to the knob.
+ *
+ * A key event leaves the shadow root retargeted at the element, so a host which
+ * decides on the target - reveal.js skips a key whose active element is an
+ * `input` - sees the element and not the knob, and a deck would turn the slide
+ * under a reader who moves a knob with the arrow keys. The event stops here
+ * instead, at the knob, and only for the keys the knob uses: every other key
+ * reaches the host as it does without the element.
+ *
+ * @param event the `keydown` event of the controls
+ */
+export function keepControlKeys(event: KeyboardEvent): void {
+  const target = event.target
+  const isControl =
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLInputElement && target.type === 'range')
+  if (isControl && CONTROL_KEYS.has(event.key)) {
+    event.stopPropagation()
+  }
+}
+
+/** What the attribute `values` of a panel says. */
+export type HostValues =
+  /** The attribute is absent, or empty, which is what an absent one is read as. */
+  | { kind: 'absent' }
+  /** The attribute cannot be read; the panel is as if it were absent. */
+  | { kind: 'malformed'; reason: string }
+  /** The values the host sets, by the id of the knob. */
+  | { kind: 'given'; values: Record<string, number> }
+
+/**
+ * Read the attribute `values` of a panel: the knobs the host of the panel owns.
+ *
+ * It is a JSON object of knob id to number. Text which is no JSON, JSON which
+ * is no object, and an object one of whose values is no finite number are read
+ * as nothing at all, so a host which writes it wrong gets the panel it gets
+ * without it and not a panel of some of its knobs. Which ids are knobs of the
+ * panel is not decided here: the panel ignores an id it does not declare.
+ *
+ * @param text the text of the attribute, `undefined` for an absent one
+ * @returns what it says
+ */
+export function hostValues(text: string | undefined): HostValues {
+  if (text === undefined || text === '') {
+    return { kind: 'absent' }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { kind: 'malformed', reason: 'is no JSON' }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { kind: 'malformed', reason: 'is no JSON object' }
+  }
+  const values: Record<string, number> = {}
+  for (const [id, value] of Object.entries(parsed)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return { kind: 'malformed', reason: `gives the knob '${id}' no finite number` }
+    }
+    values[id] = value
+  }
+  return { kind: 'given', values }
+}
