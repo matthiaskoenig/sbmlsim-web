@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { plotGeometry, plotSvg } from './plot'
+import { marginFits, plotGeometry, plotSvg } from './plot'
 import type { PlotSpec, Points, Series } from './plot'
 
 // Every id below is a neutral one: a curve, a series and a knob are data of a
@@ -888,5 +888,215 @@ describe('the room the tick labels keep', () => {
     expect(plotGeometry(minutes(600)).box).toEqual(
       plotGeometry(minutes(600, { x: [0, 1, 2, 3] })).box,
     )
+  })
+})
+
+describe('the band of rows below the plot', () => {
+  /** The padding of a figure, the renderer's. */
+  const PAD = 8
+  /** The height of a row of a legend, the renderer's. */
+  const ROW = 18
+  /** The size of the font of a legend entry, the renderer's. */
+  const SMALL_FONT = 11
+
+  /**
+   * The figure of the urine panel of a renal page with its study series drawn.
+   *
+   * The height is the one the element gives a figure of this width, so the
+   * sweeps below are the figures a host shows and not sizes made up for them.
+   */
+  function urine(width: number, yLabel: string, height?: number): PlotSpec {
+    const grid = Array.from({ length: 50 }, (_, index) => (index * 1440) / 49)
+    return {
+      x: grid,
+      xLabel: 'time [min]',
+      yLabel,
+      series: [
+        {
+          id: 'curve1',
+          label: 'urine',
+          unit: 'µmol',
+          scale: 'linear',
+          values: grid.map((at) => at / 30),
+        },
+      ],
+      width,
+      height: height ?? Math.round(Math.min(420, Math.max(200, width * 0.6))),
+      logY: false,
+      declaredLabels: ['Beermann 1976'],
+      points: [{ id: 's0', label: 'Beermann 1976', curve: 'curve1', x: [720], y: [10] }],
+    }
+  }
+
+  /** The pixel every row of the legend below the plot is centred on, in their order. */
+  function bandRows(svg: string): number[] {
+    const band = /<g class="legend below"[\s\S]*$/.exec(svg)?.[0] ?? ''
+    const ys = [...band.matchAll(/<text [^>]*\sy="([^"]*)"/g)].map((one) => Number(one[1]))
+    return [...new Set(ys)]
+  }
+
+  /**
+   * What is wrong with the band of a figure whose every declared series is drawn.
+   *
+   * The rows the layout reserves end at the padding of the figure, so a band
+   * of as many rows as it reserved has its last row centred half a row above
+   * that padding; a row which is drawn and was not reserved is below it, and
+   * the glyphs of a row reach half a font size either side of its centre.
+   */
+  function bandProblem(figure: PlotSpec): string | null {
+    const rows = bandRows(plotSvg(figure))
+    const last = rows.at(-1)
+    if (last === undefined) {
+      return null
+    }
+    const height = figure.height
+    if (last !== height - PAD - ROW / 2 || last + SMALL_FONT / 2 > height) {
+      return `${String(figure.width)}x${String(height)} ${figure.yLabel}: rows at ${rows.join(', ')}`
+    }
+    return null
+  }
+
+  it('reserves the rows it draws at the size where it once drew one more', () => {
+    // the urine panel at 255 px: the label of the y axis wraps, which narrows
+    // the plot, and the row of `urine` and `Beermann 1976` which fits a room
+    // counted without that does not fit the plot it is drawn under
+    const figure = urine(255, 'amount in urine', 200)
+    const rows = bandRows(plotSvg(figure))
+    expect(rows.length).toBeGreaterThan(0)
+    expect(bandProblem(figure)).toBeNull()
+    expect((rows.at(-1) ?? 0) + SMALL_FONT / 2).toBeLessThanOrEqual(200)
+  })
+
+  it('reserves the rows it draws at every size, with a short and a wrapped y label', () => {
+    // the rows are counted against the width of the plot box the fit returns,
+    // which is the width they are drawn into, so the band and its rows are one
+    // measurement and no estimate of the margins can open a gap between them
+    const problems: string[] = []
+    let banded = 0
+    for (const yLabel of ['amount', 'amount in urine']) {
+      for (let width = 220; width <= 1400; width += 1) {
+        for (const height of new Set([urine(width, yLabel).height, 200])) {
+          const figure = urine(width, yLabel, height)
+          banded += bandRows(plotSvg(figure)).length > 0 ? 1 : 0
+          const problem = bandProblem(figure)
+          if (problem !== null) {
+            problems.push(problem)
+          }
+        }
+      }
+    }
+    expect(banded).toBeGreaterThan(1000)
+    expect(problems).toEqual([])
+  })
+})
+
+describe('the fit of the margins', () => {
+  /** The padding of a figure, the renderer's. */
+  const PAD = 8
+  /** The size of the font of a tick label, the estimate of the renderer. */
+  const SMALL_FONT = 11
+  /** The width of one character of that font, the estimate of the renderer. */
+  const EM = 0.55
+  /** What the two decimals of a coordinate of the figure may round a pixel by. */
+  const WRITTEN = 0.005
+
+  /** The ranges of x a figure is swept over: short and long labels, both signs. */
+  const RANGES: [number, number][] = [
+    [0, 3],
+    [0, 1440],
+    [0, 15000],
+    [0, 150000],
+    [-170000, 0],
+    [0, 1e-4],
+    [0, 0.75],
+    [-1500, 1500],
+    [0, 2880],
+    [1e6, 1.2e6],
+  ]
+
+  /** A figure over a range, with a band of a curve and a study series or a curve alone. */
+  function figure(
+    range: [number, number],
+    width: number,
+    height: number,
+    yLabel: string,
+    study: boolean,
+  ): PlotSpec {
+    const [low, high] = range
+    const grid = Array.from({ length: 50 }, (_, index) => low + ((high - low) * index) / 49)
+    const curve = {
+      ...series(
+        1,
+        grid.map((_, index) => index),
+      ),
+      label: 'urine',
+    }
+    const base = spec(1, { x: grid, xLabel: 'time [min]', yLabel, width, height, series: [curve] })
+    return study
+      ? {
+          ...base,
+          declaredLabels: ['Beermann 1976'],
+          points: [
+            { id: 's0', label: 'Beermann 1976', curve: 'curve1', x: [grid[25] ?? 0], y: [1] },
+          ],
+        }
+      : base
+  }
+
+  /** The pixels every tick label of the x axis spans. */
+  function xTickSpans(svg: string): { from: number; to: number }[] {
+    const axis = svg.split('<g class="axis ')[1] ?? ''
+    const group = axis.split('<g class="data"')[0] ?? ''
+    return [
+      ...group.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+    ].map((one) => {
+      const half = ((one[2] ?? '').length * SMALL_FONT * EM) / 2
+      return { from: Number(one[1]) - half, to: Number(one[1]) + half }
+    })
+  }
+
+  /** The pixel the column of a legend beside the plot starts at, the figure without one. */
+  function columnStart(svg: string): number {
+    if (svg.includes('class="legend below"') || !svg.includes('class="legend"')) {
+      return Number.POSITIVE_INFINITY
+    }
+    const found = /<g class="legend"[\s\S]*?<line class="swatch" [^>]*\sx1="([^"]*)"/.exec(svg)
+    return Number(found?.[1] ?? Number.NaN)
+  }
+
+  it('ends on a pass which measured the box it returns, within its bound', () => {
+    // the fit ends on the first pass which asks for nothing, so the tick labels
+    // of the box it returns are inside the room of the plot to the rounding of
+    // the written coordinates: inside the padding of the figure, where nothing
+    // is right of the plot, and left of the column of a legend beside it
+    const problems: string[] = []
+    let most = 0
+    for (const range of RANGES) {
+      for (let width = 200; width <= 1600; width += 13) {
+        for (const height of [120, 200, 300]) {
+          for (const yLabel of ['amount', 'amount in urine']) {
+            for (const study of [false, true]) {
+              const one = figure(range, width, height, yLabel, study)
+              const svg = plotSvg(one)
+              const name = `${String(range)} ${String(width)}x${String(height)} ${yLabel}`
+              for (const fit of marginFits(one)) {
+                most = Math.max(most, fit.passes)
+                if (!fit.settled) {
+                  problems.push(`${name}: unsettled after ${String(fit.passes)} passes`)
+                }
+              }
+              const right = Math.min(width - PAD, columnStart(svg))
+              for (const span of xTickSpans(svg)) {
+                if (span.from < PAD - WRITTEN || span.to > right + WRITTEN) {
+                  problems.push(`${name}: a tick label at ${String(span.from)}..${String(span.to)}`)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+    expect(most).toBeGreaterThan(1)
   })
 })

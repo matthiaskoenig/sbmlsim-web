@@ -236,16 +236,6 @@ const LEGEND_LINE = 13
 const LEGEND_LINES = 2
 /** The most lines the label of an axis is given before its last line is cut. */
 const AXIS_LINES = 2
-/**
- * The passes which fit the margins of a figure to what it draws.
- *
- * A pass counts the lines of the labels and the overhang of the tick labels
- * against the box of the pass before it and grows the margins by what they
- * need, so one more pass than the margins can grow in settles them: a label
- * takes at most `AXIS_LINES` lines and either side takes the overhang of its
- * tick labels once, which is the third pass.
- */
-const PASSES = 3
 /** The height of a further line of the label of an axis, in pixels. */
 const AXIS_LINE = 14
 /** The radius of the marker of a study point, in pixels. */
@@ -1601,6 +1591,8 @@ interface Layout {
   barLabelRoom: number
   /** The colour of the curve of an id, the soft foreground for an unknown one. */
   colourOf: (id: string) => string
+  /** The fits the layout chose between, the one beside the plot first. */
+  fits: Fitted[]
 }
 
 /**
@@ -1655,6 +1647,14 @@ interface Fitted {
   bottomRoom: number
   /** The pixels right of the box, which the legend or the colour bar has. */
   column: number
+  /** The pixels below the room of the x axis a legend there takes, its rows. */
+  under: number
+  /** The passes the fit took. */
+  passes: number
+  /** The most passes it may take, `passBound`. */
+  bound: number
+  /** Whether it ended on a pass which asked for nothing. */
+  settled: boolean
 }
 
 /**
@@ -1668,56 +1668,94 @@ function boxArea(box: PlotBox): number {
 }
 
 /**
- * Get what the tick labels of an x axis need beyond the room it was given.
+ * Get the box the tick labels of an x axis leave room for.
  *
- * A tick label is centred on its tick, so the label of a tick at either end of
- * the axis reaches half its width past that end. The ticks of an axis are the
- * ticks of a box, so this is asked of the box the margins of a pass left, and
- * what comes back is what the next pass has to grow them by.
+ * A tick label is centred on its tick, so the label of a tick near either end
+ * of the axis reaches half its width past that end. A tick sits at its share of
+ * the axis, `from + share * (to - from)`, so the end of the box at which its
+ * label just reaches the room of the plot is solved for and not chased: for the
+ * ticks of this box, an axis which ends at the returned `to` or before it and
+ * starts at the returned `from` or after it writes every label inside.
  *
  * @param xs the values the axis covers
  * @param from the pixel its lower limit is at
  * @param to the pixel of its upper limit
  * @param edge the pixel the room of the plot ends at, which is the figure
  *   without its padding and without the column of a legend or a colour bar
- * @returns the pixels the labels reach left of `PAD` and right of `edge`, 0 on
- *   a side they stay inside of
+ * @returns the smallest pixel the axis may start at and the largest it may end
+ *   at, `-Infinity` and `Infinity` on a side no label constrains
  */
-function tickOverhang(
+function tickReach(
   xs: number[],
   from: number,
   to: number,
   edge: number,
-): { left: number; right: number } {
+): { from: number; to: number } {
   const axis = axisOf(xs, false, from, to, tickCount(to - from, X_TICK_ROOM))
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
-  let left = 0
-  let right = 0
+  const span = axis.limits.high - axis.limits.low
+  let least = Number.NEGATIVE_INFINITY
+  let most = Number.POSITIVE_INFINITY
   for (const value of axis.ticks) {
     if (!axis.drawable(value)) {
       continue
     }
     const half = labelRoom(formatNumber(value, decimals, exponential), SMALL_FONT) / 2
-    const at = axis.position(value)
-    left = Math.max(left, PAD - (at - half))
-    right = Math.max(right, at + half - edge)
+    // the share of `axisOf`, so the solved end puts the tick where it is drawn
+    const share = span > 0 ? (value - axis.limits.low) / span : 0.5
+    if (share > 0) {
+      most = Math.min(most, from + (edge - half - from) / share)
+    }
+    if (share < 1) {
+      least = Math.max(least, (PAD + half - share * to) / (1 - share))
+    }
   }
-  return { left: Math.max(0, left), right: Math.max(0, right) }
+  return { from: least, to: most }
+}
+
+/**
+ * Get the passes after which the fit of the margins of a figure has settled.
+ *
+ * Every pass but the last changes one of the four things a fit holds, and each
+ * of them only moves one way: the left margin takes one of the `AXIS_LINES`
+ * margins of the lines of the y label, as a tick label never asks the plot to
+ * start right of `LEFT` (half of the widest is about 39 px, thirteen characters
+ * of `toFixed(6)`, and `LEFT - PAD` is 56, while a tick right of the start of
+ * the plot only needs less); the room below the plot one of the
+ * `AXIS_LINES` margins of the x label; the band one of the row counts of its
+ * entries; and the right end of the plot is solved from the left margin and
+ * the ticks of the box alone, of which there are `MOST_TICKS - LEAST_TICKS + 1`
+ * counts, so it takes one of that many values per left margin. Their changes
+ * and the pass which changes nothing are the bound.
+ *
+ * @param entries the entries of the band, 0 for a legend beside the plot
+ * @returns the most passes a fit takes
+ */
+function passBound(entries: number): number {
+  const margins = 2 * (AXIS_LINES - 1)
+  const ends = AXIS_LINES * (MOST_TICKS - LEAST_TICKS + 1)
+  return margins + entries + ends + 1
 }
 
 /**
  * Fit the plot box of a figure into the room beside and below it.
  *
  * The label of an axis takes the length of that axis, which the margin the
- * other label needs is part of, and the tick labels of the x axis reach half
- * their width past either end of it. The passes settle them: the lines and the
- * ticks are counted against the box the margins of the pass before left, and a
- * margin only grows, so the room a pass counts against is never larger than the
- * room the next one leaves and the box the last pass returns holds everything
- * the passes asked for. The two sides are counted apart, so the label of the
- * last tick moves the right edge of the plot and never its left edge, and a
- * margin which needs nothing is the margin of the layout.
+ * other label needs is part of, the tick labels of the x axis reach half their
+ * width past either end of it, and the rows of a legend below the plot are the
+ * entries packed into its width, which is the width they are drawn into. Each
+ * pass measures all of them on the box the margins leave and grows a margin by
+ * what it asks for, never shrinks one: the lines, the rows and the room below
+ * only grow as the box narrows, and the ends of the plot are solved for the
+ * ticks of the box (`tickReach`). The fit ends on the first pass which asks for
+ * nothing, so the box it returns is the box that pass measured: its own tick
+ * labels lie inside the room of the plot and its own band has the rows it
+ * draws. It cannot oscillate, since nothing it holds moves back, and it ends
+ * within `passBound`, since everything it holds takes one of a few values. The
+ * two sides are counted apart, so the label of the last tick moves the right
+ * edge of the plot and never its left edge, and a margin which needs nothing is
+ * the margin of the layout.
  *
  * @param spec the figure
  * @param full the label of the y axis with the unit of its curves
@@ -1725,8 +1763,8 @@ function tickOverhang(
  * @param width the width of the figure in whole pixels
  * @param height its height in whole pixels
  * @param column the pixels right of the plot, 0 for a figure with nothing there
- * @param under the pixels below it a legend there takes, 0 for one beside it
- * @returns the box with the lines and the margins it was fitted into
+ * @param band the entries of a legend below the plot, none for one beside it
+ * @returns the box with the lines, the margins and the band it was fitted into
  */
 function fitBox(
   spec: PlotSpec,
@@ -1735,38 +1773,45 @@ function fitBox(
   width: number,
   height: number,
   column: number,
-  under: number,
+  band: Entry[],
 ): Fitted {
   const edge = width - PAD - column
-  let left = LEFT
-  let rightRoom = PAD
-  let overLeft = 0
+  const bound = passBound(band.length)
+  let x0 = LEFT
+  let x1 = edge
   let bottomRoom = BOTTOM
+  let under = 0
+  let box: PlotBox = { x0, y0: TOP, x1, y1: height - bottomRoom }
   let xLines: string[] = [spec.xLabel]
   let yLines: string[] = [full]
-  for (let pass = 0; pass < PASSES; pass += 1) {
-    const right = Math.max(left + MIN_PLOT, width - rightRoom - column)
-    const foot = Math.max(TOP + MIN_PLOT, height - bottomRoom - under)
-    xLines = wrapLabel(spec.xLabel, right - left, LABEL_FONT, AXIS_LINES)
-    yLines = wrapLabel(full, foot - TOP, LABEL_FONT, AXIS_LINES)
-    const needed = tickOverhang(xs, left, right, edge)
-    overLeft = Math.max(overLeft, needed.left)
-    rightRoom = Math.max(rightRoom, PAD + needed.right)
-    left = LEFT + (yLines.length - 1) * AXIS_LINE + overLeft
-    bottomRoom = BOTTOM + (xLines.length - 1) * AXIS_LINE
-  }
-  return {
-    box: {
-      x0: left,
+  let passes = 0
+  let settled = false
+  while (!settled && passes < bound) {
+    passes += 1
+    box = {
+      x0,
       y0: TOP,
-      x1: Math.max(left + MIN_PLOT, width - rightRoom - column),
+      x1: Math.max(x0 + MIN_PLOT, x1),
       y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
-    },
-    xLines,
-    yLines,
-    bottomRoom,
-    column,
+    }
+    xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, LABEL_FONT, AXIS_LINES)
+    yLines = wrapLabel(full, box.y1 - TOP, LABEL_FONT, AXIS_LINES)
+    const reach = tickReach(xs, box.x0, box.x1, edge)
+    const rows = band.length > 0 ? legendRows(band, box.x1 - box.x0).length : 0
+    const next = {
+      x0: Math.max(x0, LEFT + (yLines.length - 1) * AXIS_LINE, reach.from),
+      x1: Math.min(x1, reach.to),
+      bottomRoom: Math.max(bottomRoom, BOTTOM + (xLines.length - 1) * AXIS_LINE),
+      under: Math.max(under, rows * ROW),
+    }
+    settled =
+      next.x0 === x0 && next.x1 === x1 && next.bottomRoom === bottomRoom && next.under === under
+    x0 = next.x0
+    x1 = next.x1
+    bottomRoom = next.bottomRoom
+    under = next.under
   }
+  return { box, xLines, yLines, bottomRoom, column, under, passes, bound, settled }
 }
 
 /**
@@ -1839,24 +1884,20 @@ function layoutFor(spec: PlotSpec): Layout {
   // plot with a legend under it is still a plot and not a legend with a strip
   // of plot over it
   const columnOf = (wanted: number): number => (wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0)
-  // the band spans the plot box, so its rows are counted against the narrowest
-  // box the margins of the figure can leave, which is the one whose y axis
-  // label takes every line it may: the room a row really has is then never
-  // smaller than the room it was counted against, so the band never grows out
-  // of the height it was given, and at worst it keeps one row it does not need
-  const bandRoom = width - PAD - columnOf(barRoom) - LEFT - (AXIS_LINES - 1) * AXIS_LINE
-  const belowHeight = held.length > 0 ? legendRows(held, bandRoom).length * ROW : 0
-  const roomy =
-    legendRoom > 0 &&
-    belowHeight <= height * BELOW_SHARE &&
-    height - BOTTOM - belowHeight - TOP >= MIN_PLOT
   const full = axisLabel(spec.yLabel, sharedUnit(series))
   // the ticks of the x axis are the ticks of the values the figure draws over,
   // so the margins of the box are fitted to them and not to the box alone
   const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
-  const beside = fitBox(spec, full, xs, width, height, columnOf(Math.max(legendRoom, barRoom)), 0)
-  const under = roomy ? fitBox(spec, full, xs, width, height, columnOf(barRoom), belowHeight) : null
-  const fitted = under !== null && boxArea(under.box) > boxArea(beside.box) ? under : beside
+  const beside = fitBox(spec, full, xs, width, height, columnOf(Math.max(legendRoom, barRoom)), [])
+  // the band spans the plot box, so its rows are counted in the fit, against
+  // the box they are drawn under, and the height it reserves is those rows
+  const under =
+    held.length > 0 ? fitBox(spec, full, xs, width, height, columnOf(barRoom), held) : null
+  const roomy =
+    under !== null &&
+    under.under <= height * BELOW_SHARE &&
+    height - BOTTOM - under.under - TOP >= MIN_PLOT
+  const fitted = roomy && boxArea(under.box) > boxArea(beside.box) ? under : beside
   const below = fitted !== beside
   const { box, xLines, yLines, bottomRoom, column } = fitted
 
@@ -1894,7 +1935,8 @@ function layoutFor(spec: PlotSpec): Layout {
     entries,
     hasColourbar,
     belowRows: below ? legendRows(entries, box.x1 - box.x0) : [],
-    belowHeight: below ? belowHeight : 0,
+    belowHeight: below ? fitted.under : 0,
+    fits: under === null ? [beside] : [beside, under],
     xLines,
     yLines,
     bottomRoom,
@@ -1925,6 +1967,21 @@ export function plotGeometry(spec: PlotSpec): PlotGeometry {
     yAt: layout.y.position,
     drawable: layout.y.drawable,
   }
+}
+
+/**
+ * Get how the fits of the margins of a figure ended, for the tests of the renderer.
+ *
+ * It is no part of the API of the library, which `index.ts` does not export it
+ * from: a fit which reaches its bound has ended on a box it did not measure,
+ * which `passBound` says cannot happen, and this is how the tests check it.
+ *
+ * @param spec the figure
+ * @returns every fit the layout chose between, the one beside the plot first,
+ *   with the passes it took, its bound and whether it ended on a measurement
+ */
+export function marginFits(spec: PlotSpec): { passes: number; bound: number; settled: boolean }[] {
+  return layoutOf(spec).fits.map(({ passes, bound, settled }) => ({ passes, bound, settled }))
 }
 
 /**
