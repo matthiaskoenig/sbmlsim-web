@@ -27,9 +27,10 @@
  *   it may show (`declaredLabels`) and drawn with the ones it has, so an entry
  *   which comes and goes does not move the box either,
  * - the label of an axis wraps at its words onto at most `AXIS_LINES` lines of
- *   the length of that axis, which is `_fit_margins` and `_wrap_label` of
- *   `sbmlsim.plot.serialization_matplotlib`; the margin of the figure grows by
- *   the lines it takes,
+ *   the length of that axis (`Y_AXIS_LINES` for the y axis), which is
+ *   `_fit_margins` and `_wrap_label` of `sbmlsim.plot.serialization_matplotlib`;
+ *   the margin of the figure grows by the lines it takes and by what the tick
+ *   labels of either axis need beyond it,
  * - a line takes its colour from the colour map at its position, viridis over
  *   its first 85 % (`COLORMAP` and `_COLORMAP_END` of `sbmlsim.plot.points`),
  *   which `RAMP` carries as six anchors a `color-mix` reads between, so the
@@ -234,8 +235,22 @@ const ROW = 18
 const LEGEND_LINE = 13
 /** The most lines a legend entry is given before its last line is cut. */
 const LEGEND_LINES = 2
-/** The most lines the label of an axis is given before its last line is cut. */
+/** The most lines the label of the x axis is given before its last line is cut. */
 const AXIS_LINES = 2
+/**
+ * The most lines the label of the y axis is given where they make it whole.
+ *
+ * The y label runs along the height of the plot, which a band of legend rows
+ * below it shortens, and a phone gives a figure little of it: a label of three
+ * words whose first two do not share a line there, e.g. `anti-Xa activity
+ * [ng/ml]` beside a plot 90 px tall, is cut to its first and last word on two
+ * lines and reads whole on three. A further line costs the plot `AXIS_LINE` of
+ * its width, so it is taken only where the label then reads whole, every word
+ * of it on a line and none cut (`yLabelLines`); a label which three lines do
+ * not make whole is cut on `AXIS_LINES` as before. The x label keeps two, since
+ * a line of it costs the plot height, which is what is short already.
+ */
+const Y_AXIS_LINES = 3
 /** The height of a further line of the label of an axis, in pixels. */
 const AXIS_LINE = 14
 /** The radius of the marker of a study point, in pixels. */
@@ -264,6 +279,8 @@ const Y_TICK_ROOM = 50
 const LEAST_TICKS = 3
 /** The most ticks an axis gets whatever its length. */
 const MOST_TICKS = 8
+/** The counts of ticks an axis can get, which are the tick sets of its limits. */
+const TICK_COUNTS = MOST_TICKS - LEAST_TICKS + 1
 /** The smallest plot box a figure keeps whatever its size, in pixels. */
 const MIN_PLOT = 24
 /** The size a figure falls back to for a width or a height which is no size. */
@@ -598,6 +615,19 @@ function wrapLabel(label: string, room: number, fontSize: number, most: number):
   const space = tail.indexOf(' ')
   const end = space >= 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail
   return [...kept, ELLIPSIS + end]
+}
+
+/**
+ * Lay the label of the y axis out on the lines of the room it has.
+ *
+ * @param label the label, with its unit
+ * @param room the pixels a line has, the height of the plot
+ * @returns the lines of `wrapLabel` on `AXIS_LINES` lines, or on up to
+ *   `Y_AXIS_LINES` where those lines hold every word of the label whole
+ */
+function yLabelLines(label: string, room: number): string[] {
+  const more = wrapLabel(label, room, LABEL_FONT, Y_AXIS_LINES)
+  return more.join(' ') === label ? more : wrapLabel(label, room, LABEL_FONT, AXIS_LINES)
 }
 
 /**
@@ -1589,6 +1619,8 @@ interface Layout {
   legendLabels: number
   /** The pixels a label of the colour bar has. */
   barLabelRoom: number
+  /** The pixel the column of the legend or of the colour bar starts at. */
+  columnX: number
   /** The colour of the curve of an id, the soft foreground for an unknown one. */
   colourOf: (id: string) => string
   /** The fits the layout chose between, the one beside the plot first. */
@@ -1715,27 +1747,55 @@ function tickReach(
 }
 
 /**
+ * Get where the plot has to start for the tick labels of its y axis to keep their room.
+ *
+ * A y tick label is written right-aligned `TICK + LABEL_GAP` left of the plot,
+ * and the lines of the y label run from `PAD` rightwards, one `AXIS_LINE` each,
+ * so the widest tick label of the axis of a box and a `LABEL_GAP` between it and
+ * the last line of the label are what the left margin has to hold. Its ticks
+ * are the ticks of the height of the box, which is why it is asked of a box.
+ *
+ * @param ys the values the y axis covers
+ * @param log whether it is logarithmic
+ * @param box the box whose height decides its ticks
+ * @param lines the lines of the y label
+ * @returns the smallest pixel the plot may start at
+ */
+function yTickClear(ys: number[], log: boolean, box: PlotBox, lines: number): number {
+  const axis = axisOf(ys, log, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM))
+  const decimals = tickDecimals(axis.ticks)
+  const exponential = exponentialTicks(axis.ticks)
+  const labels = axis.ticks
+    .filter((value) => axis.drawable(value))
+    .map((value) => formatNumber(value, decimals, exponential))
+  return PAD + lines * AXIS_LINE + LABEL_GAP + widest(labels) + LABEL_GAP + TICK
+}
+
+/**
  * Get the passes after which the fit of the margins of a figure has settled.
  *
  * Every pass but the last changes one of the four things a fit holds, and each
- * of them only moves one way: the left margin takes one of the `AXIS_LINES`
- * margins of the lines of the y label, as a tick label never asks the plot to
- * start right of `LEFT` (half of the widest is about 39 px, thirteen characters
- * of `toFixed(6)`, and `LEFT - PAD` is 56, while a tick right of the start of
- * the plot only needs less); the room below the plot one of the
- * `AXIS_LINES` margins of the x label; the band one of the row counts of its
- * entries; and the right end of the plot is solved from the left margin and
- * the ticks of the box alone, of which there are `MOST_TICKS - LEAST_TICKS + 1`
- * counts, so it takes one of that many values per left margin. Their changes
- * and the pass which changes nothing are the bound.
+ * of them only moves one way. The left margin takes one of the
+ * `Y_AXIS_LINES` margins of the lines of the y label or one of the room the y
+ * tick labels need (`yTickClear`), which is a function of the lines and of the
+ * ticks of the height of the box, of which there are `TICK_COUNTS` counts; an x
+ * tick label never asks the plot to start right of `LEFT` (half of the widest
+ * is about 39 px, thirteen characters of `toFixed(6)`, and `LEFT - PAD` is 56,
+ * while a tick right of the start of the plot only needs less), and a left
+ * margin grown by the y axis is larger still. The room below the plot takes
+ * one of the `AXIS_LINES` margins of the x label, the band one of the row
+ * counts of its entries, and the right end of the plot is solved from the left
+ * margin and the ticks of the width of the box alone, so it takes one of
+ * `TICK_COUNTS` values per left margin. Their changes and the pass which
+ * changes nothing are the bound.
  *
  * @param entries the entries of the band, 0 for a legend beside the plot
  * @returns the most passes a fit takes
  */
 function passBound(entries: number): number {
-  const margins = 2 * (AXIS_LINES - 1)
-  const ends = AXIS_LINES * (MOST_TICKS - LEAST_TICKS + 1)
-  return margins + entries + ends + 1
+  const lefts = Y_AXIS_LINES * (1 + TICK_COUNTS)
+  const ends = lefts * TICK_COUNTS
+  return lefts - 1 + (AXIS_LINES - 1) + entries + ends + 1
 }
 
 /**
@@ -1743,23 +1803,27 @@ function passBound(entries: number): number {
  *
  * The label of an axis takes the length of that axis, which the margin the
  * other label needs is part of, the tick labels of the x axis reach half their
- * width past either end of it, and the rows of a legend below the plot are the
- * entries packed into its width, which is the width they are drawn into. Each
- * pass measures all of them on the box the margins leave and grows a margin by
- * what it asks for, never shrinks one: the lines, the rows and the room below
- * only grow as the box narrows, and the ends of the plot are solved for the
- * ticks of the box (`tickReach`). The fit ends on the first pass which asks for
- * nothing, so the box it returns is the box that pass measured: its own tick
- * labels lie inside the room of the plot and its own band has the rows it
- * draws. It cannot oscillate, since nothing it holds moves back, and it ends
- * within `passBound`, since everything it holds takes one of a few values. The
- * two sides are counted apart, so the label of the last tick moves the right
- * edge of the plot and never its left edge, and a margin which needs nothing is
- * the margin of the layout.
+ * width past either end of it, the tick labels of the y axis take their width
+ * between the plot and the lines of its label, and the rows of a legend below
+ * the plot are the entries packed into its width, which is the width they are
+ * drawn into. Each pass measures all of them on the box the margins leave and
+ * grows a margin by what it asks for, never shrinks one: the lines, the rows
+ * and the room below only grow as the box narrows, the ends of the plot are
+ * solved for the x ticks of the box (`tickReach`) and its start is pushed past
+ * the widest y tick of the box (`yTickClear`). The fit ends on the first pass
+ * which asks for nothing, so the box it returns is the box that pass measured:
+ * its own tick labels lie inside the room of the plot and its own band has the
+ * rows it draws. It cannot oscillate, since nothing it holds moves back, and it
+ * ends within `passBound`, since everything it holds takes one of a few values.
+ * The two sides are counted apart, so the label of the last x tick moves the
+ * right edge of the plot and never its left edge, a y tick label moves the left
+ * edge and never the room the right one is solved in, and a margin which needs
+ * nothing is the margin of the layout.
  *
  * @param spec the figure
  * @param full the label of the y axis with the unit of its curves
  * @param xs the values the x axis covers, which decide its ticks
+ * @param ys the values the y axis covers, which decide its ticks
  * @param width the width of the figure in whole pixels
  * @param height its height in whole pixels
  * @param column the pixels right of the plot, 0 for a figure with nothing there
@@ -1770,6 +1834,7 @@ function fitBox(
   spec: PlotSpec,
   full: string,
   xs: number[],
+  ys: number[],
   width: number,
   height: number,
   column: number,
@@ -1788,6 +1853,9 @@ function fitBox(
   let settled = false
   while (!settled && passes < bound) {
     passes += 1
+    // a solve which asks for less than `MIN_PLOT` of width is clamped wider, so
+    // its tick labels run past the figure while the fit reports it settled:
+    // that is a figure of 105 px or less, and the element draws none below 220
     box = {
       x0,
       y0: TOP,
@@ -1795,11 +1863,12 @@ function fitBox(
       y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
     }
     xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, LABEL_FONT, AXIS_LINES)
-    yLines = wrapLabel(full, box.y1 - TOP, LABEL_FONT, AXIS_LINES)
+    yLines = yLabelLines(full, box.y1 - TOP)
     const reach = tickReach(xs, box.x0, box.x1, edge)
+    const clear = yTickClear(ys, spec.logY, box, yLines.length)
     const rows = band.length > 0 ? legendRows(band, box.x1 - box.x0).length : 0
     const next = {
-      x0: Math.max(x0, LEFT + (yLines.length - 1) * AXIS_LINE, reach.from),
+      x0: Math.max(x0, LEFT + (yLines.length - 1) * AXIS_LINE, reach.from, clear),
       x1: Math.min(x1, reach.to),
       bottomRoom: Math.max(bottomRoom, BOTTOM + (xLines.length - 1) * AXIS_LINE),
       under: Math.max(under, rows * ROW),
@@ -1884,23 +1953,8 @@ function layoutFor(spec: PlotSpec): Layout {
   // plot with a legend under it is still a plot and not a legend with a strip
   // of plot over it
   const columnOf = (wanted: number): number => (wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0)
-  const full = axisLabel(spec.yLabel, sharedUnit(series))
-  // the ticks of the x axis are the ticks of the values the figure draws over,
-  // so the margins of the box are fitted to them and not to the box alone
-  const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
-  const beside = fitBox(spec, full, xs, width, height, columnOf(Math.max(legendRoom, barRoom)), [])
-  // the band spans the plot box, so its rows are counted in the fit, against
-  // the box they are drawn under, and the height it reserves is those rows
-  const under =
-    held.length > 0 ? fitBox(spec, full, xs, width, height, columnOf(barRoom), held) : null
-  const roomy =
-    under !== null &&
-    under.under <= height * BELOW_SHARE &&
-    height - BOTTOM - under.under - TOP >= MIN_PLOT
-  const fitted = roomy && boxArea(under.box) > boxArea(beside.box) ? under : beside
-  const below = fitted !== beside
-  const { box, xLines, yLines, bottomRoom, column } = fitted
-
+  // the y axis holds the frame of the spec or what the figure draws, and its
+  // tick labels are fitted into the left margin, so it is known before the box
   const frame = spec.yLimits
   const ys: number[] = frame === undefined ? [] : [frame.low, frame.high]
   if (frame === undefined) {
@@ -1922,6 +1976,31 @@ function layoutFor(spec: PlotSpec): Layout {
       }
     }
   }
+  const full = axisLabel(spec.yLabel, sharedUnit(series))
+  // the ticks of the x axis are the ticks of the values the figure draws over,
+  // so the margins of the box are fitted to them and not to the box alone
+  const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
+  const beside = fitBox(
+    spec,
+    full,
+    xs,
+    ys,
+    width,
+    height,
+    columnOf(Math.max(legendRoom, barRoom)),
+    [],
+  )
+  // the band spans the plot box, so its rows are counted in the fit, against
+  // the box they are drawn under, and the height it reserves is those rows
+  const under =
+    held.length > 0 ? fitBox(spec, full, xs, ys, width, height, columnOf(barRoom), held) : null
+  const roomy =
+    under !== null &&
+    under.under <= height * BELOW_SHARE &&
+    height - BOTTOM - under.under - TOP >= MIN_PLOT
+  const fitted = roomy && boxArea(under.box) > boxArea(beside.box) ? under : beside
+  const below = fitted !== beside
+  const { box, xLines, yLines, bottomRoom, column } = fitted
 
   return {
     width,
@@ -1942,6 +2021,10 @@ function layoutFor(spec: PlotSpec): Layout {
     bottomRoom,
     legendLabels: column - COLUMN_GAP - SWATCH - LABEL_GAP * 2,
     barLabelRoom: column - COLUMN_GAP - COLOURBAR_BAR - TICK - LABEL_GAP,
+    // the column is where the layout gave it its room and not where the plot
+    // ends: a plot whose last tick label needed room ends before that, and the
+    // label reaches past its end towards the column, which holds still
+    columnX: Math.max(box.x1, width - PAD - column) + COLUMN_GAP,
     colourOf,
   }
 }
@@ -2053,6 +2136,7 @@ export function plotSvg(spec: PlotSpec): string {
     bottomRoom,
     legendLabels,
     barLabelRoom,
+    columnX,
     colourOf,
   } = layoutOf(spec)
 
@@ -2110,7 +2194,6 @@ export function plotSvg(spec: PlotSpec): string {
     )
     .join('')
 
-  const columnX = box.x1 + COLUMN_GAP
   const underneath = belowRows.length > 0
   // a figure gets wrapped labels when the wrapped legend fits the room it has
   // and single-line labels, cut with an ellipsis, when it does not: the

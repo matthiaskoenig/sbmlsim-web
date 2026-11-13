@@ -884,6 +884,35 @@ describe('the figure', () => {
     expect(figure(element)).not.toContain('1e-8')
   })
 
+  it('opens on the scale its curves declare and leaves the toggle to the reader', async () => {
+    // a quantity of four decades is declared on a logarithmic axis, and the
+    // panel opens on it; the toggle is the reader's from then on, and the reset
+    // puts the declared scale back
+    served.panel = () =>
+      Promise.resolve({
+        ...declaration(),
+        curves: declaration().curves.map((one) => ({ ...one, scale: 'log' as const })),
+      })
+    served.simulate = () => Promise.resolve(decades())
+    const element = await started()
+    const toggle = shadow(element).querySelector('.toggle input')
+    if (!(toggle instanceof HTMLInputElement)) {
+      throw new Error('the panel has no toggle of the scale of its y axis')
+    }
+    expect(toggle.checked).toBe(true)
+    expect(figure(element)).toContain('>1e-6<')
+    toggle.checked = false
+    toggle.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(figure(element)).not.toContain('>1e-6<')
+    element.reset()
+    await nextTick()
+    expect(figure(element)).toContain('>1e-6<')
+    // and a panel of linear curves opens linear
+    served.panel = () => Promise.resolve(declaration())
+    expect(figure(await started())).not.toContain('>1e-6<')
+  })
+
   it('keeps the title and the role of the figure and names its axes', async () => {
     const element = await started()
     expect(figure(element)).toContain('role="img"')
@@ -970,6 +999,60 @@ describe('the frame of the value axis', () => {
     expect(simulations()).toHaveLength(1)
     expect(figure(element)).toContain('class="points" data-series="seriesA"')
     expect(valueAxis(element)).toBe(axis)
+  })
+
+  it('is held open by a series the knobs it does not grid over are at, and by no other', async () => {
+    // the run grids over the range knob and the series was measured at the
+    // other choice of the choice knob: it is data of another quantity, e.g. of
+    // another dose, and the frame of this one does not reach for it. Moving
+    // that knob is a new answer, which grids over it, and its frame holds the
+    // series of every choice of it, wherever the knob then moves inside it
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
+    served.simulate = (body) =>
+      Promise.resolve(body.grid?.knobA === undefined ? run() : choiceRun())
+    served.data = () => Promise.resolve(studyData({ y: [0, 400, 900] }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    const axis = valueAxis(element)
+    // the curves reach 20 and the axis stops there
+    expect(axis).toContain('>20<')
+    expect(axis).not.toContain('>800<')
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations().at(-1)?.grid).toHaveProperty('knobA')
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    const held = valueAxis(element)
+    expect(held).toContain('>800<')
+    // the choice knob is the gridded one now: its move is read out of the
+    // answer, hides the series and leaves the frame where it is
+    move(control(element, 'knobA'), '25', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toHaveLength(2)
+    expect(figure(element)).not.toContain('class="points"')
+    expect(valueAxis(element)).toBe(held)
+  })
+
+  it('reads a state without the knob the run grids over, on both sides of the rule', async () => {
+    // the part of a state which names the gridded knob decides where a series
+    // is drawn and nothing of the frame: a series of the other knob's choice
+    // the reader is at holds the axis open wherever the gridded knob is, and a
+    // series of a choice the reader is not at holds nothing open even where
+    // the gridded knob is at its value
+    vi.useFakeTimers()
+    served.data = () => Promise.resolve(studyData({ y: [0, 400, 900] }))
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 25, knobB: 0.2 } }))
+    const counted = await started()
+    expect(figure(counted)).not.toContain('class="points"')
+    const axis = valueAxis(counted)
+    expect(axis).toContain('>800<')
+    move(control(counted, 'knobB'), '0.2', 'input')
+    await nextTick()
+    expect(figure(counted)).toContain('class="points" data-series="seriesA"')
+    expect(valueAxis(counted)).toBe(axis)
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5, knobB: 1 } }))
+    const hidden = await started()
+    expect(valueAxis(hidden)).not.toContain('>800<')
   })
 
   /** Get the plot box of the figure, which is where its two axis lines run. */

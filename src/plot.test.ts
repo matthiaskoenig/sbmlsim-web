@@ -794,6 +794,23 @@ describe('the label of an axis', () => {
     expect(lines[1]?.endsWith('[mM]')).toBe(true)
   })
 
+  it('takes a third line where it makes the label whole, and keeps every word', () => {
+    // the anti-Xa panel on a phone: its band of three rows leaves the plot 90
+    // px tall, where `anti-Xa activity` (an estimated 105.6 px) shares no line,
+    // so two lines held `anti-Xa` and `…[ng/ml]` and lost the word which
+    // says what is measured. Three lines hold all three words
+    const figure: PlotSpec = {
+      ...spec(1, { width: 316, height: 200, yLabel: 'anti-Xa activity' }),
+      series: [{ ...series(1), label: 'anti-Xa', unit: 'ng/ml' }],
+      declaredLabels: ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly'],
+    }
+    const box = plotGeometry(figure).box
+    expect(box.y1 - box.y0).toBe(90)
+    expect(labelLines(plotSvg(figure), false)).toEqual(['anti-Xa', 'activity', '[ng/ml]'])
+    // and the margin holds the line it took
+    expect(box.x0).toBe(64 + 2 * 14)
+  })
+
   it('wraps the label of the x axis the same way', () => {
     const label = 'time after the administration of the dose [h]'
     const lines = labelLines(plotSvg(spec(1, { xLabel: label, width: 300, height: 220 })), true)
@@ -1098,5 +1115,129 @@ describe('the fit of the margins', () => {
     }
     expect(problems).toEqual([])
     expect(most).toBeGreaterThan(1)
+  })
+})
+
+describe('the room the y tick labels keep', () => {
+  /** The padding of a figure, the renderer's. */
+  const PAD = 8
+  /** The size of the font of a tick label and of an axis label, the renderer's. */
+  const SMALL_FONT = 11
+  const LABEL_FONT = 12
+  /** The width of one character of a font, a share of its size, the renderer's estimate. */
+  const EM = 0.55
+
+  /** A figure whose y axis covers `low..high`, over a grid of four x. */
+  function valued(low: number, high: number, more: Partial<PlotSpec> = {}): PlotSpec {
+    const values = [low, low + (high - low) / 3, low + (2 * (high - low)) / 3, high]
+    return spec(1, { series: [{ ...series(1, values), label: 'urine' }], ...more })
+  }
+
+  /** The pixel every y tick label starts at, its right end less its estimated width. */
+  function yTickStarts(svg: string): number[] {
+    const axis = (svg.split('<g class="axis ')[2] ?? '').split('<g class="data"')[0] ?? ''
+    return [
+      ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+    ].map((one) => Number(one[1]) - (one[2] ?? '').length * SMALL_FONT * EM)
+  }
+
+  /** The pixel the glyphs of the last line of the y label end at. */
+  function labelEnd(svg: string): number {
+    const axis = (svg.split('<g class="axis ')[2] ?? '').split('<g class="data"')[0] ?? ''
+    const xs = [...axis.matchAll(/<text class="axis-label"[^>]*\sx="([^"]*)"/g)].map((one) =>
+      Number(one[1]),
+    )
+    return Math.max(...xs) + LABEL_FONT
+  }
+
+  /** The ranges of the y axis swept: one character to a seven character exponent. */
+  const RANGES: [number, number][] = [
+    [0, 3],
+    [0, 1.2e-4],
+    [0, 0.0012],
+    [0, 150000],
+    [-170000, 0],
+    [0, 1440],
+  ]
+
+  it('keeps every y tick label inside the figure and clear of the label of its axis', () => {
+    // a y tick label is written right-aligned left of the plot and the lines of
+    // the y label run from the left edge of the figure: the left margin grows by
+    // what the widest tick label needs beyond the lines, as the right margin
+    // grows by what the last x tick label needs
+    const problems: string[] = []
+    for (const [low, high] of RANGES) {
+      for (const yLabel of ['amount', 'amount in urine of a long name']) {
+        for (let width = 240; width <= 1500; width += 7) {
+          for (const height of [160, 300]) {
+            const svg = plotSvg(valued(low, high, { width, height, yLabel }))
+            const clear = Math.max(labelEnd(svg), PAD)
+            for (const start of yTickStarts(svg)) {
+              if (start < clear - 0.005) {
+                problems.push(
+                  `${String(high)} ${String(width)}x${String(height)} ${yLabel}: ${String(start)} < ${String(clear)}`,
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+  })
+
+  it('moves the left edge for its labels and leaves the right one where it was', () => {
+    // the two sides are counted apart: a wide y tick label moves where the plot
+    // starts and never where it ends
+    const wide = plotGeometry(valued(0, 1.2e-4, { width: 600 })).box
+    const narrow = plotGeometry(valued(0, 4, { width: 600 })).box
+    expect(wide.x0).toBeGreaterThan(narrow.x0)
+    expect(wide.x1).toBe(narrow.x1)
+  })
+
+  it('leaves the margins of the layout where its labels fit', () => {
+    // two characters and five characters both fit the room `LEFT` leaves beside
+    // one line of the y label, so neither figure moves
+    expect(plotGeometry(valued(0, 40)).box).toEqual(plotGeometry(valued(0, 4)).box)
+    expect(plotGeometry(valued(0, 0.004)).box).toEqual(plotGeometry(valued(0, 4)).box)
+  })
+})
+
+describe('the column beside the plot', () => {
+  it('stays where the layout gave it its room when the last tick label narrows the plot', () => {
+    // a plot whose last x tick label needs room ends before the column, and the
+    // label reaches past the end of the plot towards it: the column holds still
+    // and the label ends a gap before it. Over 0..143000 the last tick, 1.5e+5,
+    // sits a pixel inside the end of the axis and half its label beyond it
+    const grid = Array.from({ length: 50 }, (_, index) => (index * 143000) / 49)
+    const figure = columnLegend([], { x: grid, width: 480, height: 400 })
+    const svg = plotSvg(figure)
+    expect(svg).not.toContain('class="legend below"')
+    const swatch = Number(
+      /<g class="legend"[\s\S]*?<line class="swatch" [^>]*\sx1="([^"]*)"/.exec(svg)?.[1],
+    )
+    const axis = svg.split('<g class="axis ')[1] ?? ''
+    const ends = [
+      ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+    ].map((one) => Number(one[1]) + ((one[2] ?? '').length * 11 * 0.55) / 2)
+    const box = plotGeometry(figure).box
+    // the plot was narrowed for its last label, which reaches past its end
+    expect(Math.max(...ends)).toBeGreaterThan(box.x1 + 12)
+    expect(Math.max(...ends) + 12).toBeLessThanOrEqual(swatch + 0.005)
+  })
+})
+
+describe('a row of the band below the plot', () => {
+  it('is centred by the swatch, its gap and its label, with nothing after the label', () => {
+    // a row is centred on the plot as the label of the x axis is: the width it
+    // is centred by ends where its last label ends, so a row of one entry has
+    // its swatch and its label at the same distance from the two ends of the plot
+    const figure = spec(1, { width: 390, series: [{ ...series(1), label: 'urine' }] })
+    const svg = plotSvg(figure)
+    expect(svg).toContain('class="legend below"')
+    const start = Number(/<line class="swatch" [^>]*\sx1="([^"]*)"/.exec(svg)?.[1])
+    const end = start + 18 + 6 + 'urine'.length * 11 * 0.55
+    const box = plotGeometry(figure).box
+    expect(Math.abs((start + end) / 2 - (box.x0 + box.x1) / 2)).toBeLessThan(0.01)
   })
 })

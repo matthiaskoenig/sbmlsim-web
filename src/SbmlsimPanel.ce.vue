@@ -823,6 +823,29 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
 }
 
 /**
+ * Get whether the knobs a run does not grid over are at the state a series names.
+ *
+ * It is the half of `atState` the frame of the value axis reads: the knob a run
+ * grids over moves inside one answer and the frame has to hold still across
+ * that movement, so the part of a state which names it is left out, while every
+ * other knob is a state the reader chose and its answer is a quantity of its
+ * own.
+ *
+ * @param declared the declaration of the series, `undefined` for a series the
+ *   declaration does not carry
+ * @param swept the ids of the knobs the drawn answer grids over
+ * @returns whether every knob the series names, other than those, is at the
+ *   value it names; a series which names none is at every state
+ */
+function admitted(declared: PanelDataDeclaration | undefined, swept: Set<string>): boolean {
+  const state = declared?.at
+  if (state === undefined || state === null) {
+    return true
+  }
+  return Object.entries(state).every(([id, value]) => swept.has(id) || drawnValue(id) === value)
+}
+
+/**
  * The study data of the panel, resolved against the answer.
  *
  * A series sits under the curve its declaration names, its own id without one,
@@ -838,9 +861,9 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
  * A series which was measured under a state of the knobs (`at`) is none of the
  * three: it is data of a condition the figure does not show right now, not a
  * series the panel cannot draw, so nothing is said about it, it stays in
- * `resolved`, which holds the frame of the value axis and the legend open for
- * it, and `drawnData` below is where the state of the knobs decides whether it
- * is drawn (`drawnValue`).
+ * `resolved`, which holds the legend open for it, and `drawnData` below is
+ * where the state of the knobs decides whether it is drawn (`drawnValue`) and
+ * `frame` whether it holds the value axis open (`admitted`).
  *
  * This is a view of the answer and nothing else: it reads no knob, so it runs
  * once per answer and not once per movement of a knob. What a reader is told
@@ -974,11 +997,15 @@ watch(
  * moves and the figure redraws pixel for pixel the same curve with other
  * numbers on its axis. The frame is therefore taken over the whole answer -
  * every point of the grid of every drawn curve - and over every series of the
- * study data the panel can draw, whether or not the knobs are at the state it
- * was measured under, so a line moves inside an axis which holds still and a
- * series which appears at its condition neither moves the axis nor sits outside
- * of it. A line which is drawn is a weighted mean of the points of the grid
- * which bound it, so it is always inside the frame.
+ * study data the panel can draw whose state the knobs the answer does not grid
+ * over are at, whatever its state of the gridded knob (`admitted`), so a line
+ * moves inside an axis which holds still and a series which appears as the
+ * gridded knob reaches its condition neither moves the axis nor sits outside of
+ * it. A series of a state another knob is not at is data of another quantity
+ * of the figure, e.g. of another dose, and holds nothing open: the reader moved
+ * that knob, the answer is a new one, and so is its frame. A line which is
+ * drawn is a weighted mean of the points of the grid which bound it, so it is
+ * always inside the frame.
  *
  * A new answer is a new frame, which is right: a grid covers the knob which is
  * being moved, and the axis has to hold still across that movement and not
@@ -993,9 +1020,10 @@ watch(
  * curve below the box.
  *
  * It is computed once per answer: it reads the answer, the curves of the
- * declaration and the scale of the axis, and no knob. Where the knobs are
- * decides which series are drawn (`drawnData`) and nothing of the frame, so
- * moving a knob is one interpolation and not a pass over the whole grid.
+ * declaration, the scale of the axis and the state the answer was run at, and
+ * no control. Where the gridded knob is decides which series are drawn
+ * (`drawnData`) and nothing of the frame, so moving it is one interpolation and
+ * not a pass over the whole grid.
  */
 const frame = computed<Limits | null>(() => {
   const answer = grid.value
@@ -1042,7 +1070,12 @@ const frame = computed<Limits | null>(() => {
     }
   }
   const clipped = Number.isFinite(first) && Number.isFinite(last)
+  const swept = new Set(answer.dims.map((dim) => dim.id))
+  const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
   for (const one of resolvedData.value.resolved) {
+    if (!admitted(declared.get(one.id), swept)) {
+      continue
+    }
     for (const [index, value] of one.y.entries()) {
       const at = one.x[index]
       if (clipped && (at === undefined || !Number.isFinite(at) || at < first || at > last)) {
