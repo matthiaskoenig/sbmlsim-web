@@ -43,6 +43,12 @@ function paths(svg: string, className: string): string[] {
   return [...found].map((one) => one[1] ?? '')
 }
 
+/** Get the pixel the plot box ends at, which is the right end of the x axis. */
+function plotRight(svg: string): number {
+  const found = /<line class="axis-line"[^>]*\sx2="([^"]*)"/.exec(svg)
+  return Number(found?.[1] ?? Number.NaN)
+}
+
 /** Get the text of every `<text>` of the figure. */
 function texts(svg: string): string[] {
   return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((one) => one[1] ?? '')
@@ -123,9 +129,32 @@ describe('plotSvg', () => {
   })
 
   it('takes its colours from the --sbmlsim tokens and not from hard coded hex', () => {
-    const svg = plotSvg(spec(2, { points: [{ id: 'curve1', label: 'Series A', x: [0], y: [1] }] }))
+    // the figure of the assertion draws everything which carries a colour at
+    // once: the curves, the colour bar above ten of them, the legend of the
+    // study data, its markers and its error bars
+    const svg = plotSvg(
+      spec(11, {
+        points: [{ id: 'curve1', label: 'Series A', x: [0, 1], y: [1, 2], yerr: [0.1, 0.2] }],
+      }),
+    )
     expect(svg).not.toMatch(/#[0-9a-f]{6}/i)
-    expect(svg).toContain('var(--sbmlsim-')
+    const values = [
+      ...svg.matchAll(/(?:^|[;"\s])(?:fill|stroke|stop-color|color)\s*[:=]\s*"?([^;"]*)/g),
+    ].map((one) => one[1] ?? '')
+    expect(values.length).toBeGreaterThan(30)
+    for (const value of values) {
+      const token = /^(var\(--sbmlsim-|color-mix\(in srgb, var\(--sbmlsim-)/.test(value)
+      expect(value === 'none' || value.startsWith('url(#') || token).toBe(true)
+    }
+  })
+
+  it('paints the colour bar as bands of its own tokens and not as a shared gradient', () => {
+    const svg = plotSvg(spec(11))
+    expect(svg).not.toContain('linearGradient')
+    expect(svg).not.toContain('url(#sbmlsim-plot-ramp')
+    const bands = /<g class="bar">(.*?)<\/g>/.exec(svg)?.[1] ?? ''
+    expect(occurrences(bands, '<rect')).toBeGreaterThan(16)
+    expect(bands).toContain('var(--sbmlsim-ramp-')
   })
 
   it('renders at the requested size without a canvas', () => {
@@ -164,6 +193,83 @@ describe('plotSvg', () => {
     )
     expect(plotSvg(spec(1, { series: [series(1, [2, 2, 2, 2])] }))).not.toContain('NaN')
     expect(plotSvg(spec(1, { width: 10, height: 10 }))).not.toContain('NaN')
+  })
+
+  it('gives the column right of the plot the room its labels need and no more', () => {
+    const short = plotSvg(spec(3))
+    const long = plotSvg({
+      ...spec(3),
+      series: spec(3).series.map((one) => ({ ...one, label: `${one.label} of a study` })),
+    })
+    expect(plotRight(long)).toBeLessThan(plotRight(short))
+    expect(texts(short)).toContain('Curve 1')
+    expect(texts(long)).toContain('Curve 1 of a study')
+  })
+
+  it('cuts a legend entry which does not fit its column with an ellipsis', () => {
+    const svg = plotSvg(
+      spec(1, {
+        series: [{ ...series(1), label: 'A very long legend entry indeed, and then some' }],
+      }),
+    )
+    const entry = texts(svg).find((one) => one.startsWith('A very long'))
+    expect(entry?.endsWith('…')).toBe(true)
+    expect(entry?.length).toBeLessThan(30)
+  })
+
+  it('cuts the labels of a colour bar which does not fit its column with an ellipsis', () => {
+    const wide = spec(12, { width: 300, height: 220 })
+    const svg = plotSvg({
+      ...wide,
+      series: wide.series.map((one, index) => ({
+        ...one,
+        label: `${String(0.125 * (index + 1))} mg/kg body weight`,
+      })),
+    })
+    expect(svg).toContain('class="colourbar"')
+    const cut = texts(svg).filter((one) => one.endsWith('…'))
+    expect(cut.length).toBeGreaterThan(0)
+    for (const label of texts(svg)) {
+      expect(label.length).toBeLessThan(20)
+    }
+  })
+
+  it('writes one notation on an axis and does not mix them', () => {
+    const svg = plotSvg(spec(1, { series: [series(1, [0, -50000, -120000, -170000])] }))
+    expect(texts(svg)).toContain('-5e+4')
+    expect(texts(svg)).not.toContain('-50000')
+    expect(texts(svg)).toContain('0')
+  })
+
+  it('caps an error bar only where it ends inside the axis', () => {
+    const inside = plotSvg(
+      spec(1, {
+        series: [series(1, [1, 2, 3, 4])],
+        logY: true,
+        points: [{ id: 'curve1', label: 'Series A', x: [1], y: [4], yerr: [1] }],
+      }),
+    )
+    const clipped = plotSvg(
+      spec(1, {
+        series: [series(1, [1, 2, 3, 4])],
+        logY: true,
+        points: [{ id: 'curve1', label: 'Series A', x: [1], y: [4], yerr: [9] }],
+      }),
+    )
+    expect(occurrences(paths(inside, 'errorbar')[0] ?? '', 'M')).toBe(3)
+    expect(occurrences(paths(clipped, 'errorbar')[0] ?? '', 'M')).toBe(2)
+  })
+
+  it('gives a flat series on a log axis the decade around it', () => {
+    const svg = plotSvg(
+      spec(1, { x: [100, 200, 300, 400], series: [series(1, [5, 5, 5, 5])], logY: true }),
+    )
+    expect(texts(svg)).toContain('1')
+    expect(texts(svg)).toContain('10')
+  })
+
+  it('paints no surface behind a figure unless a host asks for one', () => {
+    expect(plotSvg(spec(1))).toContain('fill:var(--sbmlsim-figure-bg, transparent)')
   })
 
   it('draws the axes, their ticks and the background of every figure', () => {

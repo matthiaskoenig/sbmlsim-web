@@ -24,6 +24,12 @@
 :root {
   /* surfaces and text */
   --sbmlsim-bg: rgb(255 255 255);
+  /*
+   * The background of a figure, which is no surface of the design system: a
+   * figure is part of the page it sits in - a slide, a documentation page, a
+   * course - so it paints nothing behind itself unless a host asks for it.
+   */
+  --sbmlsim-figure-bg: transparent;
   --sbmlsim-bg-soft: rgb(246 247 249);
   --sbmlsim-bg-card: rgb(255 255 255);
   --sbmlsim-fg: rgb(27 31 36);

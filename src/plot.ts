@@ -24,7 +24,10 @@
  * - a line takes its colour from the colour map at its position, viridis over
  *   its first 85 % (`COLORMAP` and `_COLORMAP_END` of `sbmlsim.plot.points`),
  *   which `RAMP` carries as six anchors a `color-mix` reads between, so the
- *   curves, the legend swatches and the colour bar are one ramp of six tokens,
+ *   curves, the legend swatches and the colour bar are one ramp of six tokens;
+ *   reading between six anchors is up to 12 of 255 per channel away from
+ *   `viridis(linspace(0, 0.85, n))`, which is the price of a ramp a host moves
+ *   with six values and not of a table of colours nobody can move,
  * - the label of an axis is `<label> [<unit>]`, the `name` of an `Axis`.
  *
  * Numbers are short and stable: a coordinate is rounded to `COORD_DECIMALS`
@@ -113,7 +116,7 @@ const RAMP = [
 
 /** The fallback of every other token, the value of the sbmlsim report style. */
 const TOKENS = {
-  bg: 'rgb(255 255 255)',
+  'figure-bg': 'transparent',
   fg: 'rgb(27 31 36)',
   'fg-soft': 'rgb(91 100 114)',
   font: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
@@ -134,10 +137,21 @@ const LEFT = 64
 const TOP = 14
 /** The room below the plot for the x label and its tick labels, in pixels. */
 const BOTTOM = 42
-/** The room right of the plot for a legend, in pixels. */
-const LEGEND_WIDTH = 132
-/** The room right of the plot for a colour bar without a legend, in pixels. */
-const COLOURBAR_WIDTH = 58
+/**
+ * The share of the width of a figure the column of a legend or of a colour bar
+ * may take. A label is given the room its characters need and no more, and this
+ * is where that stops: past about a third of the figure the plot is the thing
+ * which suffers, so the labels are cut with an ellipsis instead.
+ */
+const COLUMN_SHARE = 0.35
+/**
+ * The width of a character of a label, a share of its font size. It is an
+ * estimate of the mean character of the font of the design system and no
+ * measurement, so a label is placed and the column is sized without a dom; a
+ * host which sets `--sbmlsim-font-size-small` or `--sbmlsim-font` well away
+ * from their values gets the ellipsis a little early or a little late.
+ */
+const EM = 0.55
 /** The width of the bar of a colour bar, in pixels. */
 const COLOURBAR_BAR = 12
 /** The gap between the plot and the column right of it, in pixels. */
@@ -164,9 +178,16 @@ const MIN_PLOT = 24
 const DEFAULT_SIZE = 240
 /** The gap between a tick and its label, in pixels. */
 const LABEL_GAP = 3
-
-/** The id of the gradient of the colour bar, the same ramp in every figure. */
-const RAMP_ID = 'sbmlsim-plot-ramp'
+/** The bands the colour bar is painted as, one colour of the ramp each. */
+const BAR_BANDS = 32
+/** The overlap of two bands of a colour bar, which closes their seam, in pixels. */
+const BAND_SEAM = 0.5
+/** The size of the font of a tick, a legend entry and a label of a colour bar. */
+const SMALL_FONT = 11
+/** What a sum of pixels may be off by and still count as the same room. */
+const ROUNDING = 1e-9
+/** What a label which does not fit its room ends with. */
+const ELLIPSIS = '\u2026'
 
 /** The lower and the upper limit of an axis. */
 interface Limits {
@@ -244,7 +265,7 @@ function rampColour(share: number): string {
   if (part >= 1) {
     return anchor(first + 1)
   }
-  const percent = formatNumber((1 - part) * 100, 2)
+  const percent = formatNumber((1 - part) * 100, 2, false)
   return `color-mix(in srgb, ${anchor(first)} ${percent}%, ${anchor(first + 1)})`
 }
 
@@ -292,21 +313,21 @@ function coord(value: number): string {
  *
  * @param value the number
  * @param decimals the decimals it carries, at most six
+ * @param exponential whether it is written in the exponential form, which is
+ *   decided for a whole axis and not for one of its ticks
  * @returns it without trailing zeros, in the exponential form of three
- *   significant digits outside of `[1e-3, 1e5)`
+ *   significant digits where that is asked for; 0 is `0` in either form
  */
-function formatNumber(value: number, decimals: number): string {
+function formatNumber(value: number, decimals: number, exponential: boolean): string {
   if (!Number.isFinite(value)) {
     return '0'
   }
   if (value === 0) {
     return '0'
   }
-  const magnitude = Math.abs(value)
-  const text =
-    magnitude >= 1e5 || magnitude < 1e-3
-      ? value.toExponential(2)
-      : value.toFixed(clamp(Math.round(decimals), 0, 6))
+  const text = exponential
+    ? value.toExponential(2)
+    : value.toFixed(clamp(Math.round(decimals), 0, 6))
   const short = text.replace(/(\.\d*?)0+(?=$|e)/, '$1').replace(/\.(?=$|e)/, '')
   return short === '-0' ? '0' : short
 }
@@ -346,6 +367,41 @@ function tag(
   return children === undefined
     ? `<${name}${written}/>`
     : `<${name}${written}>${children}</${name}>`
+}
+
+/**
+ * Get the room a label needs, an estimate and no measurement.
+ *
+ * @param label the label
+ * @param fontSize the size of its font in pixels
+ * @returns the pixels its characters are given
+ */
+function labelRoom(label: string, fontSize: number): number {
+  return label.length * fontSize * EM
+}
+
+/**
+ * Cut a label to the room it has.
+ *
+ * @param label the label
+ * @param room the pixels it has
+ * @param fontSize the size of its font in pixels
+ * @returns the label where it fits, else as many of its characters as fit with
+ *   an ellipsis in the place of the last of them, so a cut label says that it
+ *   was cut; nothing at all where not even the ellipsis fits
+ */
+function fittingLabel(label: string, room: number, fontSize: number): string {
+  if (labelRoom(label, fontSize) <= room + ROUNDING) {
+    return label
+  }
+  const characters = Math.floor(room / (fontSize * EM))
+  if (label.length <= characters) {
+    return label
+  }
+  if (characters < 1) {
+    return ''
+  }
+  return label.slice(0, characters - 1) + ELLIPSIS
 }
 
 /**
@@ -475,13 +531,31 @@ function linearLimits(values: number[]): Limits {
 }
 
 /**
+ * Get the decade below and the decade above a value.
+ *
+ * @param value the value, which is positive
+ * @returns the powers of ten around it; a value which is a power of ten itself
+ *   gets the one below and the one above it, as `_decade_less` and
+ *   `_decade_greater` of matplotlib give them
+ */
+function decadeAround(value: number): Limits {
+  const exponent = Math.log10(value)
+  const below = 10 ** Math.floor(exponent)
+  const above = 10 ** Math.ceil(exponent)
+  return { low: below < value ? below : below / 10, high: above > value ? above : above * 10 }
+}
+
+/**
  * Get the limits of a logarithmic axis, the rule of sbmlsim's `log_limits`.
  *
  * The steps of an integrator start tiny, and with them the values of a curve
  * which starts at zero; data which spans more than `LOG_DECADES` below its
  * largest value is cut to these decades, so the figure shows the data and not
  * the approach of the first steps to zero. Data within the decades keeps its
- * own limits. Both carry the margin `AXIS_MARGIN` of the decades they span.
+ * own limits. Data of one value alone takes the decade below it and the decade
+ * above it, which is `LogLocator.nonsingular` of matplotlib, so a flat curve
+ * sits in the middle of its decade and not at the edge of a made up span. All
+ * of them carry the margin `AXIS_MARGIN` of the decades they span.
  *
  * @param values the values the axis covers
  * @returns the limits, both positive; `[0.1, 1]` for data without a positive
@@ -500,11 +574,9 @@ function logLimits(values: number[]): Limits {
     return { low: 0.1, high: 1 }
   }
   const bottom = Math.max(smallest, largest / 10 ** LOG_DECADES)
-  if (!(largest > bottom)) {
-    return { low: bottom / Math.sqrt(10), high: largest * Math.sqrt(10) }
-  }
-  const margin = 10 ** (AXIS_MARGIN * Math.log10(largest / bottom))
-  return { low: bottom / margin, high: largest * margin }
+  const span = largest > bottom ? { low: bottom, high: largest } : decadeAround(largest)
+  const margin = 10 ** (AXIS_MARGIN * Math.log10(span.high / span.low))
+  return { low: span.low / margin, high: span.high * margin }
 }
 
 /**
@@ -535,6 +607,24 @@ function axisOf(values: number[], log: boolean, from: number, to: number, count:
       return clamp(pixel, Math.min(from, to) - overshoot, Math.max(from, to) + overshoot)
     },
   }
+}
+
+/**
+ * Get whether the ticks of an axis are written in the exponential form.
+ *
+ * The notation belongs to the axis and not to one of its ticks: an axis over 0
+ * to -1.7e5 writes `0`, `-5e+4`, `-1e+5` and `-1.5e+5`, and never mixes
+ * `-50000` into them, as matplotlib does not either.
+ *
+ * @param ticks the ticks of the axis
+ * @returns whether one of them is large or small enough that the whole axis
+ *   leaves the plain form, i.e. is outside of `[1e-3, 1e5)`
+ */
+function exponentialTicks(ticks: number[]): boolean {
+  return ticks.some((value) => {
+    const magnitude = Math.abs(value)
+    return value !== 0 && Number.isFinite(value) && (magnitude >= 1e5 || magnitude < 1e-3)
+  })
 }
 
 /**
@@ -575,6 +665,16 @@ function tickPositions(count: number): number[] {
     positions.push(index)
   }
   return positions
+}
+
+/**
+ * Get the room the longest of a set of labels needs.
+ *
+ * @param labels the labels
+ * @returns the pixels of the longest of them, 0 without a label
+ */
+function widest(labels: string[]): number {
+  return labels.reduce((most, one) => Math.max(most, labelRoom(one, SMALL_FONT)), 0)
 }
 
 /**
@@ -641,7 +741,9 @@ function pathOf(xs: number[], values: number[], x: Axis, y: Axis): string {
  * @param x the x axis
  * @param y the y axis
  * @returns the `d` of one path of every bar with its caps, empty for a series
- *   without an error
+ *   without an error; a bar whose lower end is outside of the axis - a
+ *   logarithmic axis cuts the decades below its limits away - ends at the limit
+ *   and gets no cap there, so it is not read as a measured bound
  */
 function errorsOf(points: Points, x: Axis, y: Axis): string {
   const errors = points.yerr
@@ -665,14 +767,17 @@ function errorsOf(points: Points, x: Axis, y: Axis): string {
     if (!y.drawable(high)) {
       continue
     }
+    const reaches = y.drawable(low) && low >= y.limits.low
     const px = coord(x.position(at))
+    const left = coord(x.position(at) - CAP)
+    const right = coord(x.position(at) + CAP)
     const top = coord(y.position(high))
-    const bottom = coord(y.position(y.drawable(low) ? low : y.limits.low))
+    const bottom = coord(y.position(reaches ? low : y.limits.low))
     parts.push(`M${px} ${top} L${px} ${bottom}`)
-    parts.push(`M${coord(x.position(at) - CAP)} ${top} L${coord(x.position(at) + CAP)} ${top}`)
-    parts.push(
-      `M${coord(x.position(at) - CAP)} ${bottom} L${coord(x.position(at) + CAP)} ${bottom}`,
-    )
+    parts.push(`M${left} ${top} L${right} ${top}`)
+    if (reaches) {
+      parts.push(`M${left} ${bottom} L${right} ${bottom}`)
+    }
   }
   return parts.join(' ')
 }
@@ -724,6 +829,7 @@ function axisGroup(
   label: string,
 ): string {
   const decimals = tickDecimals(axis.ticks)
+  const exponential = exponentialTicks(axis.ticks)
   const line = horizontal
     ? tag('line', {
         class: 'axis-line',
@@ -757,14 +863,14 @@ function axisGroup(
             y2: coord(at),
           })
       const written = horizontal
-        ? text(formatNumber(value, decimals), {
+        ? text(formatNumber(value, decimals, exponential), {
             style: `fill:${token('fg-soft')};stroke:none`,
             x: coord(at),
             y: coord(box.y1 + TICK + LABEL_GAP),
             'text-anchor': 'middle',
             'dominant-baseline': 'hanging',
           })
-        : text(formatNumber(value, decimals), {
+        : text(formatNumber(value, decimals, exponential), {
             style: `fill:${token('fg-soft')};stroke:none`,
             x: coord(box.x0 - TICK - LABEL_GAP),
             y: coord(at),
@@ -810,9 +916,10 @@ function axisGroup(
  * @param entries the entries, in their order
  * @param x the pixel the column of the legend starts at
  * @param y the pixel its first row is centred on
+ * @param room the pixels a label has, which cuts one which is longer
  * @returns the group of the legend, empty for no entry at all
  */
-function legendGroup(entries: Entry[], x: number, y: number): string {
+function legendGroup(entries: Entry[], x: number, y: number, room: number): string {
   if (entries.length === 0) {
     return ''
   }
@@ -835,7 +942,7 @@ function legendGroup(entries: Entry[], x: number, y: number): string {
             x2: coord(x + SWATCH),
             y2: coord(at),
           })
-      const written = text(entry.label, {
+      const written = text(fittingLabel(entry.label, room, SMALL_FONT), {
         x: coord(x + SWATCH + LABEL_GAP * 2),
         y: coord(at),
         'dominant-baseline': 'central',
@@ -856,22 +963,42 @@ function legendGroup(entries: Entry[], x: number, y: number): string {
 /**
  * Write the colour bar of a figure of more series than get a legend.
  *
+ * The bar is painted as `BAR_BANDS` bands of the ramp and not as a gradient of
+ * a `<linearGradient>`: a gradient is referenced by an id, two figures of one
+ * document share it, and a host which overrides the ramp for one of them would
+ * move its curves (whose `color-mix` resolves on their own elements) while its
+ * bar kept the colours of the other figure. A band resolves its own tokens, so
+ * a bar always shows the ramp of the curves next to it.
+ *
  * @param series the series the bar stands for
  * @param x the pixel the column of the bar starts at
  * @param top the pixel its top is at
  * @param bottom the pixel its bottom is at
+ * @param room the pixels a label has, which cuts one which is longer
  * @returns the group of the colour bar, the first series at its bottom
  */
-function colourbarGroup(series: Series[], x: number, top: number, bottom: number): string {
+function colourbarGroup(
+  series: Series[],
+  x: number,
+  top: number,
+  bottom: number,
+  room: number,
+): string {
   const height = Math.max(1, bottom - top)
-  const bar = tag('rect', {
-    class: 'bar',
-    x: coord(x),
-    y: coord(top),
-    width: COLOURBAR_BAR,
-    height: coord(height),
-    fill: `url(#${RAMP_ID})`,
-  })
+  const slice = height / BAR_BANDS
+  const bands: string[] = []
+  for (let index = 0; index < BAR_BANDS; index += 1) {
+    bands.push(
+      tag('rect', {
+        x: coord(x),
+        y: coord(top + index * slice),
+        width: COLOURBAR_BAR,
+        height: coord(slice + (index < BAR_BANDS - 1 ? BAND_SEAM : 0)),
+        style: `fill:${rampColour(1 - (index + 0.5) / BAR_BANDS)}`,
+      }),
+    )
+  }
+  const bar = tag('g', { class: 'bar' }, bands.join(''))
   const labels = tickPositions(series.length)
     .map((position) => {
       const one = series[position]
@@ -887,7 +1014,7 @@ function colourbarGroup(series: Series[], x: number, top: number, bottom: number
         x2: coord(x + COLOURBAR_BAR + TICK),
         y2: coord(at),
       })
-      const written = text(one.label, {
+      const written = text(fittingLabel(one.label, room, SMALL_FONT), {
         style: `fill:${token('fg-soft')}`,
         x: coord(x + COLOURBAR_BAR + TICK + LABEL_GAP),
         y: coord(at),
@@ -904,21 +1031,6 @@ function colourbarGroup(series: Series[], x: number, top: number, bottom: number
 }
 
 /**
- * Write the gradient of the colour bar, the anchors of the ramp.
- *
- * @returns the `defs` of the figure
- */
-function rampDefs(): string {
-  const stops = RAMP.map((_, index) =>
-    tag('stop', {
-      offset: formatNumber(index / (RAMP.length - 1), 4),
-      style: `stop-color:${anchor(index)}`,
-    }),
-  ).join('')
-  return tag('defs', {}, tag('linearGradient', { id: RAMP_ID, x1: 0, y1: 1, x2: 0, y2: 0 }, stops))
-}
-
-/**
  * Draw a figure as one inline SVG element.
  *
  * The element carries its `viewBox` next to its `width` and its `height`, so it
@@ -928,7 +1040,15 @@ function rampDefs(): string {
  * `points`, `errorbar`, `marker`, `curve`, `legend`, `legend-entry`,
  * `colourbar`, `swatch`, `bar` - and every colour, font and stroke width is a
  * token of the design system with the value of the sbmlsim report as its
- * fallback.
+ * fallback; the figure paints `--sbmlsim-figure-bg` behind itself, which is
+ * `transparent` until a host asks for a surface, so a figure is part of its
+ * page and not a white box on a slide.
+ *
+ * The column right of the plot, the legend or the colour bar, is as wide as the
+ * characters of its longest label need (`EM`, an estimate of the font and no
+ * measurement) and at most `COLUMN_SHARE` of the figure; a label which does not
+ * fit that is cut with an ellipsis, since a cut label is worse than a narrower
+ * plot and an ellipsis is better than either.
  *
  * The plot box is clipped, so a value outside of the limits of an axis - the
  * decades a logarithmic axis cuts away - leaves the box instead of drawing over
@@ -971,7 +1091,16 @@ export function plotSvg(spec: PlotSpec): string {
     entries.push({ id: one.id, label: one.label, colour: colourOf(one.id), marker: true })
   }
 
-  const column = entries.length > 0 ? LEGEND_WIDTH : hasColourbar ? COLOURBAR_WIDTH : 0
+  const barLabels = hasColourbar
+    ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
+    : []
+  const legendRoom =
+    entries.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(entries.map((one) => one.label)) : 0
+  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
+  const wanted = Math.max(legendRoom, barRoom)
+  const column = wanted > 0 ? Math.min(COLUMN_GAP + wanted, Math.round(width * COLUMN_SHARE)) : 0
+  const legendLabels = column - COLUMN_GAP - SWATCH - LABEL_GAP * 2
+  const barLabelRoom = column - COLUMN_GAP - COLOURBAR_BAR - TICK - LABEL_GAP
   const box = {
     x0: LEFT,
     y0: TOP,
@@ -1061,9 +1190,14 @@ export function plotSvg(spec: PlotSpec): string {
   const columnX = box.x1 + COLUMN_GAP
   const barBottom = box.y1 - (entries.length > 0 ? entries.length * ROW + ROW : 0)
   const side = hasColourbar
-    ? colourbarGroup(series, columnX, box.y0 + MARKER, Math.max(box.y0 + MIN_PLOT, barBottom)) +
-      legendGroup(entries, columnX, Math.max(box.y0 + MIN_PLOT, barBottom) + ROW)
-    : legendGroup(entries, columnX, box.y0 + ROW / 2)
+    ? colourbarGroup(
+        series,
+        columnX,
+        box.y0 + MARKER,
+        Math.max(box.y0 + MIN_PLOT, barBottom),
+        barLabelRoom,
+      ) + legendGroup(entries, columnX, Math.max(box.y0 + MIN_PLOT, barBottom) + ROW, legendLabels)
+    : legendGroup(entries, columnX, box.y0 + ROW / 2, legendLabels)
 
   const label = axisLabel(spec.yLabel, sharedUnit(series))
   const title = tag('title', {}, escape(`${label} over ${spec.xLabel}`))
@@ -1073,10 +1207,10 @@ export function plotSvg(spec: PlotSpec): string {
     y: 0,
     width,
     height,
-    style: `fill:${token('bg')}`,
+    style: `fill:${token('figure-bg')}`,
   })
   const body =
-    `${title}${hasColourbar ? rampDefs() : ''}${defs}${background}` +
+    `${title}${defs}${background}` +
     `${axisGroup(x, true, box, spec.xLabel)}${axisGroup(y, false, box, label)}` +
     tag('g', { class: 'data', 'clip-path': `url(#${clip})` }, drawnPoints + drawnSeries) +
     side
