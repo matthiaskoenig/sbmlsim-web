@@ -2043,10 +2043,16 @@ interface Fitted {
   column: number
   /** The pixels below the room of the x axis a legend there takes, its rows. */
   under: number
+  /** The ticks the x axis of the box draws, held from the settled fit. */
+  xTicks: XTicks
+  /** The ticks the y axis of the box asks for, held from the settled fit. */
+  yCount: number
   /** The passes the fit took. */
   passes: number
   /** The most passes it may take, `passBound`. */
   bound: number
+  /** Whether the solve of its ends left the plot `MIN_PLOT` of width or more. */
+  wide: boolean
   /** Whether it ended on a pass which asked for nothing. */
   settled: boolean
 }
@@ -2061,31 +2067,70 @@ function boxArea(box: PlotBox): number {
   return Math.max(0, box.x1 - box.x0) * Math.max(0, box.y1 - box.y0)
 }
 
+/** The ticks an x axis draws: the count it asks for and every how many of them it draws. */
+interface XTicks {
+  /** The ticks the axis asks for, which give the ticks of its limits. */
+  count: number
+  /** Every how many of those ticks it draws, from the first; 1 draws all, 0 the last alone. */
+  stride: number
+}
+
 /**
- * Get the x axis of a plot whose tick labels keep a gap between them.
+ * Get the x axis of the ticks it draws.
+ *
+ * @param xs the values the axis covers
+ * @param from the pixel its lower limit is at
+ * @param to the pixel of its upper limit
+ * @param ticks the ticks it asks for and every how many it draws
+ * @returns the axis with the ticks it draws
+ */
+function xAxisOf(xs: number[], from: number, to: number, ticks: XTicks): Axis {
+  const axis = axisOf(xs, false, from, to, ticks.count)
+  if (ticks.stride === 0) {
+    return { ...axis, ticks: axis.ticks.slice(-1) }
+  }
+  return ticks.stride > 1
+    ? { ...axis, ticks: axis.ticks.filter((_, index) => index % ticks.stride === 0) }
+    : axis
+}
+
+/**
+ * Get the ticks an x axis draws so that its tick labels keep a gap.
  *
  * The ticks an axis asks for are its length over `X_TICK_ROOM`, at least
  * `LEAST_TICKS`, which a narrow plot of wide labels does not hold: two labels
- * of neighbouring ticks centred on them would overlap. The axis asks for one
- * tick fewer until every two neighbouring labels, measured, keep `TICK_GAP`
- * between them, down to a single tick, which overlaps nothing.
+ * of neighbouring ticks centred on them would overlap. The axis then draws
+ * every second, third, ... of those ticks, the fewest it has to leave out for
+ * every two neighbouring labels, measured, to keep `TICK_GAP` between them,
+ * and only a stride which ends on the last tick, so it always draws the first
+ * and the last tick of its ticks. Those are the ticks whose labels reach past
+ * the ends of the plot, so leaving ticks out never moves where the box ends:
+ * a box which draws fewer ticks is not larger than one which draws them all,
+ * and a figure which grows into drawing more does not lose plot. Where even
+ * the first and the last collide, the last is drawn alone, which keeps the end
+ * its label reaches past, while the first never asks for more than the room
+ * of the y label (`passBound`).
  *
  * @param xs the values the axis covers
  * @param from the pixel its lower limit is at
  * @param to the pixel of its upper limit
  * @param type the lettering of the figure
- * @returns the axis of the most ticks up to the count of its length whose
- *   labels keep their gap
+ * @returns the count it asks for and the stride it draws them at; the ticks of
+ *   a count depend on the limits alone, so an axis of these ticks which is
+ *   longer keeps the gap as well
  */
-function xAxisOf(xs: number[], from: number, to: number, type: Lettering): Axis {
-  let axis = axisOf(xs, false, from, to, tickCount(to - from, X_TICK_ROOM))
-  for (let count = tickCount(to - from, X_TICK_ROOM); count >= 1; count -= 1) {
-    axis = axisOf(xs, false, from, to, count)
-    if (tickLabelsClear(axis, type)) {
-      return axis
+function xTicksOf(xs: number[], from: number, to: number, type: Lettering): XTicks {
+  const count = tickCount(to - from, X_TICK_ROOM)
+  const all = axisOf(xs, false, from, to, count).ticks.length
+  for (let stride = 1; stride < all; stride += 1) {
+    if ((all - 1) % stride !== 0) {
+      continue
+    }
+    if (tickLabelsClear(xAxisOf(xs, from, to, { count, stride }), type)) {
+      return { count, stride }
     }
   }
-  return axis
+  return { count, stride: all > 1 ? 0 : 1 }
 }
 
 /**
@@ -2123,6 +2168,7 @@ function tickLabelsClear(axis: Axis, type: Lettering): boolean {
  * starts at the returned `from` or after it writes every label inside.
  *
  * @param xs the values the axis covers
+ * @param ticks the ticks the axis draws (`xTicksOf`)
  * @param from the pixel its lower limit is at
  * @param to the pixel of its upper limit
  * @param edge the pixel the room of the plot ends at, which is the figure
@@ -2133,12 +2179,13 @@ function tickLabelsClear(axis: Axis, type: Lettering): boolean {
  */
 function tickReach(
   xs: number[],
+  ticks: XTicks,
   from: number,
   to: number,
   edge: number,
   type: Lettering,
 ): { from: number; to: number } {
-  const axis = xAxisOf(xs, from, to, type)
+  const axis = xAxisOf(xs, from, to, ticks)
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
   const span = axis.limits.high - axis.limits.low
@@ -2168,11 +2215,12 @@ function tickReach(
  * and the lines of the y label run from `PAD` rightwards, one line of the label each,
  * so the widest tick label of the axis of a box and a `LABEL_GAP` between it and
  * the last line of the label are what the left margin has to hold. Its ticks
- * are the ticks of the height of the box, which is why it is asked of a box.
+ * are the ones of a count, the count the height of a box asks for, and depend
+ * on the limits alone.
  *
  * @param ys the values the y axis covers
  * @param log whether it is logarithmic
- * @param box the box whose height decides its ticks
+ * @param count the ticks the axis asks for
  * @param lines the lines of the y label
  * @param type the lettering of the figure
  * @returns the smallest pixel the plot may start at
@@ -2180,11 +2228,11 @@ function tickReach(
 function yTickClear(
   ys: number[],
   log: boolean,
-  box: PlotBox,
+  count: number,
   lines: number,
   type: Lettering,
 ): number {
-  const axis = axisOf(ys, log, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM))
+  const axis = axisOf(ys, log, 1, 0, count)
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
   const labels = axis.ticks
@@ -2218,9 +2266,12 @@ function yTickClear(
  * counts of its largest legend (the most rows of any legend it holds, each of
  * which only grows as the box narrows, so their maximum only grows as well),
  * and the right end of the plot is solved from the left margin and the ticks
- * of the width of the box alone, which are one of `MOST_TICKS` counts asked
- * for, so it takes one of `MOST_TICKS` values per left margin. Their changes
- * and the pass which changes nothing are the bound.
+ * of the width of the box alone, which are one of `TICK_COUNTS` counts drawn
+ * at one of fewer strides than a count has ticks, which `niceStep` makes at
+ * most one and a half times the count and one more, under `2 * MOST_TICKS`,
+ * so it takes one of those values per left margin. Their changes and the
+ * pass which changes nothing are the bound; the solve of the box for the
+ * ticks the settled fit draws comes after it and is no pass of it.
  *
  * @param entries the entries of the longest legend of the band, 0 for a legend
  *   beside the plot
@@ -2228,7 +2279,7 @@ function yTickClear(
  */
 function passBound(entries: number): number {
   const lefts = AXIS_LINES * (1 + TICK_COUNTS)
-  const ends = lefts * MOST_TICKS
+  const ends = lefts * TICK_COUNTS * 2 * MOST_TICKS
   return lefts - 1 + (AXIS_LINES - 1) + entries + ends + 1
 }
 
@@ -2301,8 +2352,10 @@ function fitBox(
     }
     xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, type.label, AXIS_LINES, type.measure)
     yLines = wrapLabel(full, box.y1 - type.top, type.label, AXIS_LINES, type.measure)
-    const reach = tickReach(xs, box.x0, box.x1, edge, type)
-    const clear = yTickClear(ys, spec.logY, box, yLines.length, type)
+    const xTicks = xTicksOf(xs, box.x0, box.x1, type)
+    const reach = tickReach(xs, xTicks, box.x0, box.x1, edge, type)
+    const yCount = tickCount(box.y1 - box.y0, Y_TICK_ROOM)
+    const clear = yTickClear(ys, spec.logY, yCount, yLines.length, type)
     // the band holds the legend of any state, so it reserves the most rows any
     // of them packs into the width of this box
     const rows = Math.max(0, ...bands.map((band) => legendRows(band, box.x1 - box.x0, type).length))
@@ -2319,7 +2372,58 @@ function fitBox(
     bottomRoom = next.bottomRoom
     under = next.under
   }
-  return { box, xLines, yLines, bottomRoom, column, under, passes, bound, settled }
+  // the margins of the loop only grow, which is what makes it end, so a limit
+  // which a tick set of an earlier pass set stays when a narrower box draws
+  // fewer or narrower ticks. The box is therefore solved once more for the
+  // tick sets the settled box draws, held: its left end where its y tick
+  // labels and the lines of its y label need it, its right end where its last
+  // x tick label meets the room, the band of the rows the width packs and the
+  // room below of the lines the x label is drawn on. Each end only moves
+  // outwards from the settled box, so its held ticks are further apart than
+  // the box found them, its labels still fit their lines and its band holds
+  // the rows it draws; it is one pass and no iteration, so the loop above and
+  // its bound are what they were
+  const xTicks = xTicksOf(xs, box.x0, box.x1, type)
+  const yCount = tickCount(box.y1 - box.y0, Y_TICK_ROOM)
+  let left = Math.max(
+    type.left + (yLines.length - 1) * type.axisLine,
+    yTickClear(ys, spec.logY, yCount, yLines.length, type),
+  )
+  let right = Math.min(edge, tickReach(xs, xTicks, left, box.x1, edge, type).to)
+  // a first x tick label never asks the plot to start further right than the
+  // room of the y label does (`passBound`), and where a font makes it, the end
+  // is solved again from that start
+  const first = tickReach(xs, xTicks, left, right, edge, type).from
+  if (first > left) {
+    left = first
+    right = Math.min(edge, tickReach(xs, xTicks, left, right, edge, type).to)
+  }
+  const wide = Math.max(left + MIN_PLOT, right)
+  // a solve which asks for less than `MIN_PLOT` of width is clamped wider, so
+  // its tick labels run past the room; the layout says so (`wide`) and is no
+  // candidate where another one can be drawn
+  const rows = Math.max(0, ...bands.map((band) => legendRows(band, wide - left, type).length))
+  const room = type.bottom + (xLines.length - 1) * type.axisLine
+  const solved: PlotBox = {
+    x0: left,
+    y0: type.top,
+    x1: wide,
+    y1: Math.max(type.top + MIN_PLOT, height - room - rows * type.row),
+  }
+  return {
+    box: solved,
+    xLines,
+    yLines,
+    bottomRoom: room,
+    column,
+    under: rows * type.row,
+    wide: right >= left + MIN_PLOT - ROUNDING,
+    xTicks,
+    yCount,
+    passes,
+    bound,
+    settled,
+  }
 }
 
 /**
@@ -2443,11 +2547,15 @@ function layoutFor(spec: PlotSpec): Layout {
       ? fitBox(spec, full, xs, ys, width, height, columnOf(barRoom), held, type)
       : null
   // a band whose rows leave no plot of `MIN_PLOT` cannot be drawn in the
-  // figure at all, which is no preference but where its rows would end
-  const candidates =
-    under !== null && height - under.bottomRoom - under.under - type.top >= MIN_PLOT
-      ? [beside, under]
-      : [beside]
+  // figure at all, which is no preference but where its rows would end, and a
+  // layout whose tick labels leave its plot less than `MIN_PLOT` of width
+  // cannot either, since its box is clamped wider and its labels pass the
+  // room; the figure of neither falls back to the column
+  const drawable = [beside, ...(under === null ? [] : [under])].filter(
+    (one) =>
+      one.wide && (one === beside || height - one.bottomRoom - one.under - type.top >= MIN_PLOT),
+  )
+  const candidates = drawable.length > 0 ? drawable : [beside]
   const fitted = candidates.reduce((best, one) =>
     boxArea(one.box) > boxArea(best.box) ? one : best,
   )
@@ -2458,8 +2566,8 @@ function layoutFor(spec: PlotSpec): Layout {
     width,
     height,
     box,
-    x: xAxisOf(xs, box.x0, box.x1, type),
-    y: axisOf(ys, spec.logY, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM)),
+    x: xAxisOf(xs, box.x0, box.x1, fitted.xTicks),
+    y: axisOf(ys, spec.logY, box.y1, box.y0, fitted.yCount),
     points,
     shapes,
     colours,

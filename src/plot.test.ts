@@ -1579,8 +1579,14 @@ describe('the measure of the text', () => {
 describe('the choice of the legend', () => {
   /** The labels of three studies, the anti-Xa panel's. */
   const STUDIES = ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']
-  /** The labels of four arms of one study, drawn together. */
-  const ARMS = ['Frost 2013, 2.5 mg', 'Frost 2013, 5 mg', 'Frost 2013, 10 mg', 'Frost 2013, 25 mg']
+  /** The labels of five arms of one study, drawn together. */
+  const ARMS = [
+    'Frost 2013, 2.5 mg',
+    'Frost 2013, 5 mg',
+    'Frost 2013, 10 mg',
+    'Frost 2013, 25 mg',
+    'Frost 2013, 50 mg',
+  ]
 
   /** A figure over `x` whose y axis covers `low..high`, with the studies declared. */
   function figure(
@@ -1643,15 +1649,15 @@ describe('the choice of the legend', () => {
 
   it('keeps the band of a narrow figure whose y tick labels grow by a character', () => {
     // a seven character y tick label (`-1.5e+5`) moves the plot right, and the
-    // band of the four arms of a study takes four rows, which is more than a
+    // band of the five arms of a study takes six rows, which is more than a
     // third of the height and still the larger plot: the band stays, where a
-    // cap on its share put the legend beside a plot of a third less area
-    for (const width of [283, 286, 289, 292]) {
+    // cap on its share put the legend beside a plot of less area
+    for (const width of [229, 232, 235]) {
       for (const y of [
         [0, 3],
         [-170000, 0],
       ] as [number, number][]) {
-        const one = { ...figure(width, 200, [0, 143000], y, ARMS), measure: chromeLike }
+        const one = { ...figure(width, 300, [0, 143000], y, ARMS), measure: chromeLike }
         expect({ width, y, below: plotSvg(one).includes('class="legend below"') }).toEqual({
           width,
           y,
@@ -1947,5 +1953,219 @@ describe('a band which cannot be drawn', () => {
     }
     expect(problems).toEqual([])
     expect(beside).toBeGreaterThan(0)
+  })
+})
+
+describe('the box solved for the ticks it draws', () => {
+  /** The padding of a figure, the renderer's. */
+  const PAD = 8
+  /** The sizes a host sets the tokens of the figure to. */
+  const LARGE = { label: 16, small: 14 }
+  /** The three studies of the anti-Xa panel. */
+  const STUDIES = ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']
+
+  /** A figure over `0..span` whose y axis covers `low..high`. */
+  function over(
+    span: number,
+    [low, high]: [number, number],
+    width: number,
+    height: number,
+    more: Partial<PlotSpec> = {},
+  ): PlotSpec {
+    const grid = Array.from({ length: 50 }, (_, index) => (span * index) / 49)
+    const values = grid.map((_, index) => low + ((high - low) * index) / 49)
+    return {
+      ...spec(1, { x: grid, width, height, xLabel: 'time (min)', yLabel: 'plasma concentration' }),
+      series: [{ ...series(1, values), label: 'plasma', unit: 'uM' }],
+      ...more,
+    }
+  }
+
+  /** The room of the plot of a figure: its right end and the pixel its tick labels may reach. */
+  function room(svg: string, width: number): number {
+    if (svg.includes('class="legend below"') || !svg.includes('class="legend"')) {
+      return width - PAD
+    }
+    // the column starts a gap after the room, and its first label after its swatch
+    return Number(/<g class="legend"[\s\S]*?<text x="([^"]*)"/.exec(svg)?.[1]) - 18 - 6 - 12
+  }
+
+  /** The pixel the label of the last x tick ends at, by a measure at a size. */
+  function lastTickEnd(svg: string, measure: TextMeasure, size: number): number {
+    const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
+    const ends = [
+      ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+    ].map((one) => Number(one[1]) + measure(one[2] ?? '', size) / 2)
+    return Math.max(...ends)
+  }
+
+  /** The area of the plot box of a figure. */
+  function area(figure: PlotSpec): number {
+    const box = plotGeometry(figure).box
+    return (box.x1 - box.x0) * (box.y1 - box.y0)
+  }
+
+  it('ends the plot where the room or its last drawn tick label needs it, and no sooner', () => {
+    // a figure of 232 px over 0..143000 in 16 and 14 px drew 0 and 1e+5 and
+    // ended its plot 22 px before the room, held there for a 1.5e+5 a pass of
+    // the fit had and the figure no longer drew: the box is solved once more
+    // for the ticks it draws, so one of the two ends where the other allows
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (const width of [232, 233, 240, 260, 300]) {
+        const figure = { ...over(143000, [0, 3], width, 200, { fontSizes: LARGE }), measure }
+        const svg = plotSvg(figure)
+        const box = plotGeometry(figure).box
+        const edge = room(svg, width)
+        const slack = Math.min(edge - box.x1, edge - lastTickEnd(svg, measure, LARGE.small))
+        expect({ measure: measure.name, width, slack: slack <= 0.01 }).toEqual({
+          measure: measure.name,
+          width,
+          slack: true,
+        })
+      }
+    }
+  })
+
+  it('starts the plot where its drawn y tick labels and the lines of its label need it', () => {
+    // the left end only grew in the fit, so a narrower set of y tick labels than
+    // an earlier pass had kept the plot further right than they need; it is the
+    // widest drawn label, its gaps and the lines of the y label, or the room of
+    // one line, whichever is larger
+    for (const sizes of [{ label: 12, small: 11 }, LARGE]) {
+      for (const [width, height] of [
+        [468, 281],
+        [482, 289],
+        [300, 200],
+      ] as [number, number][]) {
+        const figure = { ...over(1440, [1e-6, 1.2e-4], width, height), fontSizes: sizes }
+        const svg = plotSvg(figure)
+        const axis = (svg.split('<g class="axis ')[2] ?? '').split('<g class="data"')[0] ?? ''
+        const lines = [...axis.matchAll(/class="axis-label"/g)].length
+        const widest = Math.max(
+          ...[...axis.matchAll(/<g class="tick">.*?<text[^>]*>([^<]*)<\/text>/g)].map((one) =>
+            tableMeasure(one[1] ?? '', sizes.small),
+          ),
+        )
+        const line = sizes.label + 2
+        const needed = Math.max(
+          64 + (sizes.label - 12) + (lines - 1) * line,
+          PAD + lines * line + 3 + widest + 3 + 4,
+        )
+        expect({ width, x0: plotGeometry(figure).box.x0 }).toEqual({
+          width,
+          x0: expect.closeTo(needed, 6) as number,
+        })
+      }
+    }
+  })
+
+  it('never gives a wider figure a smaller plot at a height, in the sizes of a host and the design', () => {
+    // a tick set which a narrow axis thins keeps its first and its last tick,
+    // whose labels are the ones which reach past the ends, so a figure which
+    // grows into drawing more ticks does not lose the plot their ends cost; and
+    // the box is solved for the ticks it draws, so no end of an earlier pass
+    // holds it in
+    const problems: string[] = []
+    for (const sizes of [undefined, LARGE]) {
+      for (const span of [1440, 143000, 3]) {
+        for (const declared of [[], [['Beermann 1976 (5 mg, oral)']], [STUDIES]]) {
+          let last = 0
+          for (let width = 220; width <= 640; width += 1) {
+            const figure = {
+              ...over(
+                span,
+                [0, 3],
+                width,
+                200,
+                declared.length > 0 ? { declaredLegends: declared } : {},
+              ),
+              ...(sizes === undefined ? {} : { fontSizes: sizes }),
+            }
+            const now = area(figure)
+            if (now < last - 1e-6) {
+              problems.push(
+                `${String(sizes?.label ?? 12)} ${String(span)} ${String(declared.length)} ${String(width)}: ${String(last)} -> ${String(now)}`,
+              )
+            }
+            last = now
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+    // the case of the review: three studies, 0..1440, 297 and 298 px
+    const at = (width: number): number =>
+      area({ ...over(1440, [0, 3], width, 200, { declaredLegends: [STUDIES] }), fontSizes: LARGE })
+    expect(at(298)).toBeGreaterThanOrEqual(at(297))
+  })
+
+  it('draws the ticks the box was solved for and not the ones of the solved box', () => {
+    // at 331 x 300 in 16 and 14 px over 0..96 the fit settles on a box which
+    // asks for 0, 50 and 100, and the box is solved for them: it is wider than
+    // the box of the fit and would ask for 0 to 100 by 20, whose ends the solve
+    // did not see, so the figure draws the ticks it was solved for
+    const figure = over(96, [1e-6, 1.2e-4], 331, 300, { fontSizes: LARGE })
+    const axis =
+      (plotSvg(figure).split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
+    const drawn = [...axis.matchAll(/<g class="tick">.*?<text[^>]*>([^<]*)<\/text>/g)].map(
+      (one) => one[1],
+    )
+    expect(drawn).toEqual(['0', '50', '100'])
+  })
+
+  it('reserves the rows the band draws under the solved box', () => {
+    // the solved box is wider than the box of the fit, where the legend packs
+    // into fewer rows: the band is as tall as the rows it draws there
+    const label = 'Beermann 1976 (5 mg, oral)'
+    const figure = over(1440, [1e-6, 1.2e-4], 370, 300, {
+      fontSizes: LARGE,
+      declaredLegends: [[label]],
+      points: [{ id: 'study0', label, curve: 'curve1', x: [720], y: [1e-4] }],
+    })
+    const band = /<g class="legend below"[\s\S]*$/.exec(plotSvg(figure))?.[0] ?? ''
+    const rows = [
+      ...new Set([...band.matchAll(/<text [^>]*\sy="([^"]*)"/g)].map((one) => Number(one[1]))),
+    ]
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.at(-1)).toBe(300 - PAD - (LARGE.small + 7) / 2)
+  })
+
+  it('thins the ticks of a narrow axis to ones which keep its first and its last', () => {
+    // 0..143000 asks for 0, 5e+4, 1e+5 and 1.5e+5, whose labels in 14 px do not
+    // fit a plot of 120 px: it draws the first and the last of them
+    const figure = over(143000, [0, 3], 240, 200, { fontSizes: LARGE })
+    const axis =
+      (plotSvg(figure).split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
+    const drawn = [...axis.matchAll(/<g class="tick">.*?<text[^>]*>([^<]*)<\/text>/g)].map(
+      (one) => one[1],
+    )
+    expect(drawn).toEqual(['0', '1.5e+5'])
+  })
+
+  it('draws a layout whose plot keeps its least width where another one is too narrow', () => {
+    // in 16 and 14 px a column of four arms leaves a plot narrower than its
+    // last tick label needs: that layout is clamped wider and its labels pass
+    // the room, so the figure takes the band, which it can draw
+    const arms = [
+      'Frost 2013, 2.5 mg',
+      'Frost 2013, 5 mg',
+      'Frost 2013, 10 mg',
+      'Frost 2013, 25 mg',
+    ]
+    const figure = over(143000, [-170000, -1], 220, 200, {
+      fontSizes: LARGE,
+      declaredLegends: [arms],
+      points: arms.map((label, index) => ({
+        id: `arm${String(index)}`,
+        label,
+        curve: 'curve1',
+        x: [70000],
+        y: [-1],
+      })),
+    })
+    const svg = plotSvg(figure)
+    expect(svg).toContain('class="legend below"')
+    expect(lastTickEnd(svg, tableMeasure, LARGE.small)).toBeLessThanOrEqual(220 - PAD + 0.01)
+    expect(marginFits(figure).map((fit) => fit.candidate)).toEqual([false, true])
   })
 })
