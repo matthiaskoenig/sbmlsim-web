@@ -189,19 +189,18 @@ interface DroppedSeries {
   wanted: string | null
 }
 
-/** The study data of the panel, split into what is drawn and what is not. */
+/** The study data of the panel, resolved against the answer and the curves. */
 interface ResolvedData {
   /**
    * The series the panel can draw, whatever the knobs are at, in the order of
    * the answer.
    *
-   * It is what the frame of the value axis is held open by: a series which
-   * appears when a reader reaches the state it was measured under must not move
-   * the axis when it appears, and must not be outside of it before it does.
+   * It is what the frame of the value axis and the room of the legend are held
+   * open by: a series which appears when a reader reaches the state it was
+   * measured under must not move the axis or the plot box when it appears, and
+   * must not be outside of the axis before it does.
    */
   resolved: Points[]
-  /** The ones of them which are drawn now, i.e. at the state of the knobs. */
-  drawn: Points[]
   /** The ones which are drawn under no state, with the reason. */
   dropped: DroppedSeries[]
 }
@@ -824,7 +823,7 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
 }
 
 /**
- * The study data split into what is drawn and what is not.
+ * The study data of the panel, resolved against the answer.
  *
  * A series sits under the curve its declaration names, its own id without one,
  * and is drawn only where the endpoint delivered it on the scale of that curve
@@ -836,27 +835,28 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
  * declares one of its own, so a series which does not match is one of another
  * scale, which a figure of one y axis cannot draw without lying about it.
  *
- * A series which was measured under a state of the knobs (`at`) is left out of
- * `drawn` while the figure is not at it, and is none of the three: it is data
- * of a condition the figure does not show right now, not a series the panel
- * cannot draw, so nothing is said about it, it stays in `resolved`, which holds
- * the frame of the value axis open for it, and it comes back with the answer of
- * its state (`drawnValue`).
+ * A series which was measured under a state of the knobs (`at`) is none of the
+ * three: it is data of a condition the figure does not show right now, not a
+ * series the panel cannot draw, so nothing is said about it, it stays in
+ * `resolved`, which holds the frame of the value axis and the legend open for
+ * it, and `drawnData` below is where the state of the knobs decides whether it
+ * is drawn (`drawnValue`).
  *
- * This is a view of the answer and nothing else. What a reader is told about a
- * dropped series is said by the watcher below, where a side effect runs once.
+ * This is a view of the answer and nothing else: it reads no knob, so it runs
+ * once per answer and not once per movement of a knob. What a reader is told
+ * about a dropped series is said by the watcher below, where a side effect runs
+ * once.
  */
 const resolvedData = computed<ResolvedData>(() => {
   const answer = grid.value
   if (answer === null || props.data === 'off') {
-    return { resolved: [], drawn: [], dropped: [] }
+    return { resolved: [], dropped: [] }
   }
   const given = dataOf(declaration.value)
   const declared = new Map(given.map((one) => [one.id, one]))
   const ranks = declaredRanks(given)
   const units = new Map(drawnCurves.value.map((one) => [one.id, one.unit]))
   const resolved: Points[] = []
-  const drawn: Points[] = []
   const dropped: DroppedSeries[] = []
   for (const one of seriesOf(study.value)) {
     const curve = declared.get(one.id)?.curve ?? one.id
@@ -885,15 +885,27 @@ const resolvedData = computed<ResolvedData>(() => {
       points.yerr = errors.map((value) => (typeof value === 'number' ? value : Number.NaN))
     }
     resolved.push(points)
-    if (atState(declared.get(one.id))) {
-      drawn.push(points)
-    }
   }
-  return { resolved, drawn, dropped }
+  return { resolved, dropped }
 })
 
-/** The study data as it is drawn, empty while there is none to draw. */
-const drawnData = computed<Points[]>(() => resolvedData.value.drawn)
+/**
+ * The study data as it is drawn, empty while there is none to draw.
+ *
+ * It is the only part of the study data which depends on where the knobs are,
+ * which is why it is a computed of its own: the resolution above it runs once
+ * per answer, this one filter runs per movement of a knob.
+ */
+const drawnData = computed<Points[]>(() => {
+  const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
+  return resolvedData.value.resolved.filter((one) => atState(declared.get(one.id)))
+})
+
+/** The labels of the series which are not drawn now, which hold the legend open. */
+const reservedLabels = computed<string[]>(() => {
+  const drawn = new Set(drawnData.value.map((one) => one.id))
+  return resolvedData.value.resolved.filter((one) => !drawn.has(one.id)).map((one) => one.label)
+})
 
 /** The series which were already reported, so each is reported once per element. */
 const reported = new Set<string>()
@@ -968,7 +980,17 @@ watch(
  * across a simulation of another state.
  *
  * A series beyond the x of the curves is no point of the figure, as the
- * renderer has it, so it holds nothing open either.
+ * renderer has it, so it holds nothing open either, and the error of a point is
+ * part of it, since the bar is drawn and an axis which cuts a bar is an axis
+ * which lies. A value which is not positive is no value of a logarithmic frame:
+ * a curve of a dose starts at zero, and a frame which held that zero would hold
+ * one positive value and fall back to the decade around it, which puts the
+ * curve below the box.
+ *
+ * It is computed once per answer: it reads the answer, the curves of the
+ * declaration and the scale of the axis, and no knob. Where the knobs are
+ * decides which series are drawn (`drawnData`) and nothing of the frame, so
+ * moving a knob is one interpolation and not a pass over the whole grid.
  */
 const frame = computed<Limits | null>(() => {
   const answer = grid.value
@@ -991,22 +1013,34 @@ const frame = computed<Limits | null>(() => {
   const failed = new Set(answer.status.failed)
   for (const one of drawnCurves.value) {
     const rows = answer.curves[one.id] ?? []
-    for (const [index, row] of rows.entries()) {
+    for (let index = 0; index < rows.length; index += 1) {
       if (failed.has(index)) {
         continue
       }
-      for (const value of row) {
+      // the row is read by its index, as `interpolate` reads it: the payload
+      // types a row as a list of numbers and nulls, a hand written answer may
+      // carry something else where a row belongs, and a figure which draws the
+      // rows it can read is worth more there than one which blanks
+      for (const value of rows[index] ?? []) {
         hold(value)
       }
     }
   }
-  const times = answer.x.filter((at) => Number.isFinite(at))
-  const first = Math.min(...times)
-  const last = Math.max(...times)
+  // the x the curves cover, which is what the renderer clips a series to
+  // (`curveRange`): a figure whose answer carries no x clips nothing
+  let first = Number.POSITIVE_INFINITY
+  let last = Number.NEGATIVE_INFINITY
+  for (const at of answer.x) {
+    if (Number.isFinite(at)) {
+      first = Math.min(first, at)
+      last = Math.max(last, at)
+    }
+  }
+  const clipped = Number.isFinite(first) && Number.isFinite(last)
   for (const one of resolvedData.value.resolved) {
     for (const [index, value] of one.y.entries()) {
       const at = one.x[index]
-      if (at === undefined || !Number.isFinite(at) || at < first || at > last) {
+      if (clipped && (at === undefined || !Number.isFinite(at) || at < first || at > last)) {
         continue
       }
       hold(value)
@@ -1048,7 +1082,9 @@ const plot = computed<PlotSpec | null>(() => {
     ...(held === null ? {} : { yLimits: held }),
   }
   const points = drawnData.value
-  return points.length > 0 ? { ...spec, points } : spec
+  const reserve = reservedLabels.value
+  const whole = reserve.length > 0 ? { ...spec, legendReserve: reserve } : spec
+  return points.length > 0 ? { ...whole, points } : whole
 })
 
 /**

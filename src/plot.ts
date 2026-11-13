@@ -21,10 +21,11 @@
  * - the lines of a dimension get a legend up to `LEGEND_LIMIT` of them and a
  *   colour bar above it (`COLORBAR_FROM = 11` of `sbmlsim.plot.points`), whose
  *   tick labels are every point up to `MAX_TICKS` and every k-th above it,
- * - a legend whose column would take more than `COLUMN_SHARE` of the width goes
- *   below the plot and packs its entries into rows, which is the width a phone
- *   has: a column wider than a third of the figure is a legend with a plot
- *   beside it,
+ * - a legend sits beside the plot or below it, packed into rows, whichever of
+ *   the two leaves the larger plot box, so a figure which grows never loses
+ *   plot at a width where the two trade places; it is laid out over the labels
+ *   it may show (`legendReserve`) and drawn with the ones it has, so an entry
+ *   which comes and goes does not move the box either,
  * - the label of an axis wraps at its words onto at most `AXIS_LINES` lines of
  *   the length of that axis, which is `_fit_margins` and `_wrap_label` of
  *   `sbmlsim.plot.serialization_matplotlib`; the margin of the figure grows by
@@ -118,6 +119,19 @@ export interface PlotSpec {
    * line. A figure which does not carry it takes its limits from what it draws.
    */
   yLimits?: Limits
+  /**
+   * The labels the legend keeps room for besides the ones it draws.
+   *
+   * It is what a caller passes whose entries come and go while the figure stays
+   * the same figure: a series which is drawn only under some condition is named
+   * here, the legend reserves the width of its column and the rows of a legend
+   * below the plot for it, and nothing is drawn for it. The plot box is then a
+   * function of what the caller may show and not of what it happens to show, so
+   * a curve is not redrawn in a box of another size when a condition is met,
+   * which is the rule the frame of the value axis follows as well. The cost is
+   * a legend which sometimes reserves room it does not use.
+   */
+  legendReserve?: string[]
   /** The width of the figure in pixels. */
   width: number
   /** The height of the figure in pixels. */
@@ -181,10 +195,10 @@ const BOTTOM = 42
  * The share of the width of a figure the column of a legend or of a colour bar
  * may take. A label is given the room its characters need and no more, and this
  * is where that stops: past about a third of the figure the plot is the thing
- * which suffers. A legend which wants more goes below the plot, where it has
- * the width of the figure for its entries; a colour bar, which is an axis of
- * the figure and is read against the height of the plot, keeps its column and
- * has its labels cut with an ellipsis.
+ * which suffers, and a label which wants more is cut there. Whether the legend
+ * is beside the plot at all is decided by the box the two layouts leave and not
+ * by this cap; a colour bar, which is an axis of the figure and is read against
+ * the height of the plot, keeps its column either way.
  */
 const COLUMN_SHARE = 0.35
 /**
@@ -1555,6 +1569,8 @@ interface Layout {
   hasColourbar: boolean
   /** The rows of the legend below the plot, empty for a legend beside it. */
   belowRows: Entry[][]
+  /** The pixels below the plot the legend has there, the reserved rows included. */
+  belowHeight: number
   /** The label of the x axis on the lines it wraps to. */
   xLines: string[]
   /** The label of the y axis, with the unit of its curves, on its lines. */
@@ -1609,6 +1625,80 @@ function layoutOf(spec: PlotSpec): Layout {
   return layout
 }
 
+/** A plot box with the margins it was fitted into. */
+interface Fitted {
+  /** The box. */
+  box: PlotBox
+  /** The label of the x axis on the lines it wraps to. */
+  xLines: string[]
+  /** The label of the y axis on the lines it wraps to. */
+  yLines: string[]
+  /** The pixels below the box, which the x axis writes in. */
+  bottomRoom: number
+  /** The pixels right of the box, which the legend or the colour bar has. */
+  column: number
+}
+
+/**
+ * Get the area of a plot box in square pixels.
+ *
+ * @param box the box
+ * @returns its area, 0 for a box of no extent
+ */
+function boxArea(box: PlotBox): number {
+  return Math.max(0, box.x1 - box.x0) * Math.max(0, box.y1 - box.y0)
+}
+
+/**
+ * Fit the plot box of a figure into the room beside and below it.
+ *
+ * The label of an axis takes the length of that axis, which the margin the
+ * other label needs is part of. Two passes settle both: the lines are counted
+ * against the margins of the pass before, a count only grows as a margin does,
+ * and a count which grew is at `AXIS_LINES`, which is where it stops.
+ *
+ * @param spec the figure
+ * @param full the label of the y axis with the unit of its curves
+ * @param width the width of the figure in whole pixels
+ * @param height its height in whole pixels
+ * @param column the pixels right of the plot, 0 for a figure with nothing there
+ * @param under the pixels below it a legend there takes, 0 for one beside it
+ * @returns the box with the lines and the margins it was fitted into
+ */
+function fitBox(
+  spec: PlotSpec,
+  full: string,
+  width: number,
+  height: number,
+  column: number,
+  under: number,
+): Fitted {
+  let left = LEFT
+  let bottomRoom = BOTTOM
+  let xLines: string[] = [spec.xLabel]
+  let yLines: string[] = [full]
+  for (let pass = 0; pass < 2; pass += 1) {
+    const right = Math.max(left + MIN_PLOT, width - PAD - column)
+    const foot = Math.max(TOP + MIN_PLOT, height - bottomRoom - under)
+    xLines = wrapLabel(spec.xLabel, right - left, LABEL_FONT, AXIS_LINES)
+    yLines = wrapLabel(full, foot - TOP, LABEL_FONT, AXIS_LINES)
+    left = LEFT + (yLines.length - 1) * AXIS_LINE
+    bottomRoom = BOTTOM + (xLines.length - 1) * AXIS_LINE
+  }
+  return {
+    box: {
+      x0: left,
+      y0: TOP,
+      x1: Math.max(left + MIN_PLOT, width - PAD - column),
+      y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
+    },
+    xLines,
+    yLines,
+    bottomRoom,
+    column,
+  }
+}
+
 /**
  * Lay a figure out, whatever was laid out before it.
  *
@@ -1655,48 +1745,36 @@ function layoutFor(spec: PlotSpec): Layout {
   const barLabels = hasColourbar
     ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
     : []
-  const legendRoom =
-    entries.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(entries.map((one) => one.label)) : 0
+  // the legend is laid out over every label it may have to show and drawn with
+  // the ones it shows now, so a figure keeps its plot box when an entry which
+  // is drawn under a condition arrives or leaves
+  const held: Entry[] = [
+    ...entries,
+    ...(spec.legendReserve ?? []).map((label) => ({ id: '', label, colour: '', shape: null })),
+  ]
+  const legendRoom = held.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(held.map((o) => o.label)) : 0
   const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
   const cap = Math.round(width * COLUMN_SHARE)
-  // a legend which wants more than the share of the width a column may have
-  // goes below the plot, where a row is as wide as the figure, unless the rows
-  // it needs there take more of the height than a legend may: a plot with a
-  // legend under it is still a plot, a plot with a legend over half of it is not
-  const belowRows = entries.length > 0 ? legendRows(entries, width - PAD * 2) : []
-  const belowHeight = belowRows.length * ROW
-  const below =
+  // a legend sits beside the plot or below it, where a row is as wide as the
+  // figure: whichever of the two leaves the larger plot box is the one the
+  // figure gets. Comparing the two is what keeps the choice monotone - a wider
+  // figure never gets a smaller plot - where a rule on the width alone has a
+  // step in it, at which a figure a little wider loses a third of its plot.
+  // A legend may not take more of the height than `BELOW_SHARE` of it, so a
+  // plot with a legend under it is still a plot and not a legend with a strip
+  // of plot over it
+  const belowHeight = held.length > 0 ? legendRows(held, width - PAD * 2).length * ROW : 0
+  const roomy =
     legendRoom > 0 &&
-    COLUMN_GAP + legendRoom > cap &&
     belowHeight <= height * BELOW_SHARE &&
     height - BOTTOM - belowHeight - TOP >= MIN_PLOT
-  const wanted = below ? barRoom : Math.max(legendRoom, barRoom)
-  const column = wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0
-  const under = below ? belowHeight : 0
-
-  // the label of an axis takes the length of that axis, which the margin the
-  // other label needs is part of. Two passes settle both: the lines are counted
-  // against the margins of the pass before, a count only grows as a margin does,
-  // and a count which grew is at `AXIS_LINES`, which is where it stops
+  const columnOf = (wanted: number): number => (wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0)
   const full = axisLabel(spec.yLabel, sharedUnit(series))
-  let left = LEFT
-  let bottomRoom = BOTTOM
-  let xLines: string[] = [spec.xLabel]
-  let yLines: string[] = [full]
-  for (let pass = 0; pass < 2; pass += 1) {
-    const right = Math.max(left + MIN_PLOT, width - PAD - column)
-    const foot = Math.max(TOP + MIN_PLOT, height - bottomRoom - under)
-    xLines = wrapLabel(spec.xLabel, right - left, LABEL_FONT, AXIS_LINES)
-    yLines = wrapLabel(full, foot - TOP, LABEL_FONT, AXIS_LINES)
-    left = LEFT + (yLines.length - 1) * AXIS_LINE
-    bottomRoom = BOTTOM + (xLines.length - 1) * AXIS_LINE
-  }
-  const box: PlotBox = {
-    x0: left,
-    y0: TOP,
-    x1: Math.max(left + MIN_PLOT, width - PAD - column),
-    y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
-  }
+  const beside = fitBox(spec, full, width, height, columnOf(Math.max(legendRoom, barRoom)), 0)
+  const under = roomy ? fitBox(spec, full, width, height, columnOf(barRoom), belowHeight) : null
+  const fitted = under !== null && boxArea(under.box) > boxArea(beside.box) ? under : beside
+  const below = fitted !== beside
+  const { box, xLines, yLines, bottomRoom, column } = fitted
 
   const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
   const frame = spec.yLimits
@@ -1732,7 +1810,8 @@ function layoutFor(spec: PlotSpec): Layout {
     colours,
     entries,
     hasColourbar,
-    belowRows: below ? belowRows : [],
+    belowRows: below ? legendRows(entries, width - PAD * 2) : [],
+    belowHeight: below ? belowHeight : 0,
     xLines,
     yLines,
     bottomRoom,
@@ -1782,15 +1861,22 @@ export function plotGeometry(spec: PlotSpec): PlotGeometry {
  *
  * The column right of the plot, the legend or the colour bar, is as wide as the
  * characters of its longest label need (`EM`, an estimate of the font and no
- * measurement) and at most `COLUMN_SHARE` of the figure. A legend which wants
- * more than that goes below the plot instead (`class="legend below"`), packed
- * into rows of the width of the figure, which is what a figure on a phone does:
- * a column wider than a third of the figure leaves a plot nobody can read. A
- * colour bar keeps its column whatever its labels need, since it is an axis of
- * the figure and is read against the height of the plot, and its labels are cut
+ * measurement) and at most `COLUMN_SHARE` of the figure. The legend sits there
+ * or below the plot (`class="legend below"`), packed into rows of the width of
+ * the figure: the figure is laid out both ways and keeps the one whose plot box
+ * is larger, which is a column on a figure which is wide and short and a band
+ * of rows on the figure of a panel, where a column of labels costs more plot
+ * than a row of them. Comparing the two is what makes the choice monotone: a
+ * figure which grows never ends up with a smaller plot than it had, which a
+ * rule on the width alone does at the width where it changes its mind. A legend
+ * whose rows would take more than `BELOW_SHARE` of the height, which is a
+ * legend of many long labels, stays beside the plot and is cut there. A colour
+ * bar keeps its column whatever its labels need, since it is an axis of the
+ * figure and is read against the height of the plot, and its labels are cut
  * with an ellipsis there; a figure of both keeps the bar beside the plot and
- * puts the legend of its study data below. A legend whose rows would take more
- * than `BELOW_SHARE` of the height stays beside the plot and is cut.
+ * puts the legend of its study data below. The legend is laid out over the
+ * labels of `legendReserve` as well and drawn without them, so a figure whose
+ * entries come and go keeps its plot box where it is.
  *
  * The plot box is clipped, so a value outside of the limits of an axis - the
  * decades a logarithmic axis cuts away - leaves the box instead of drawing over
@@ -1818,6 +1904,7 @@ export function plotSvg(spec: PlotSpec): string {
     entries,
     hasColourbar,
     belowRows,
+    belowHeight,
     xLines,
     yLines,
     bottomRoom,
@@ -1909,7 +1996,7 @@ export function plotSvg(spec: PlotSpec): string {
   const under = belowLegendGroup(
     belowRows,
     PAD,
-    height - PAD - belowRows.length * ROW + ROW / 2,
+    height - PAD - belowHeight + ROW / 2,
     width - PAD * 2,
   )
 

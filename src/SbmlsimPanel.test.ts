@@ -972,6 +972,79 @@ describe('the frame of the value axis', () => {
     expect(valueAxis(element)).toBe(axis)
   })
 
+  /** Get the plot box of the figure, which is where its two axis lines run. */
+  function plotBox(element: PanelElement): string[] {
+    return [...figure(element).matchAll(/<line class="axis-line"[^>]*>/g)].map((one) => one[0])
+  }
+
+  it('leaves the zero a curve starts at out of a logarithmic frame', async () => {
+    // every curve of a dose starts at zero and every panel has the toggle of
+    // the scale, so this is the figure of a panel and not an edge of one: a
+    // zero is no value of a logarithmic axis, and a frame which holds it holds
+    // nothing, which puts the curve below the box the figure draws
+    served.simulate = () =>
+      Promise.resolve(
+        run('knobB', [
+          [0, 1e-3, 1e-2],
+          [0, 1e-2, 1e-1],
+          [0, 0.1, 1],
+        ]),
+      )
+    const element = await started()
+    const toggle = shadow(element).querySelector('.toggle input')
+    if (!(toggle instanceof HTMLInputElement)) {
+      throw new Error('the panel has no toggle of the scale of its y axis')
+    }
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change'))
+    await nextTick()
+    // the frame is the positive values of the answer, 0.001 to 10 of the second
+    // curve, and the curve which is drawn is inside it
+    const axis = valueAxis(element)
+    expect(axis).toContain('>0.001<')
+    expect(figure(element)).not.toContain('NaN')
+    expect(curve(element)).not.toBe('')
+  })
+
+  it('holds the frame open for the error of a series, not only for its value', async () => {
+    served.panel = () => Promise.resolve(withData())
+    served.data = () => Promise.resolve(studyData({ y: [1, 2, 3], yerr: [0, 0, 50] }))
+    const element = await started()
+    // the bar of the last point runs from -47 to 53, past every curve of the
+    // answer at both ends, and the axis holds both of them
+    const axis = valueAxis(element)
+    expect(axis).toContain('>40<')
+    expect(axis).toContain('>-40<')
+  })
+
+  it('keeps the plot box where it is when a series the knobs reach appears', async () => {
+    // the geometry of a figure is a function of what the panel declares and not
+    // of what is drawn right now: a legend which has to hold a long label holds
+    // it before the series of that label arrives
+    served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 12.5 } }))
+    served.simulate = () => Promise.resolve(choiceRun())
+    served.data = () =>
+      Promise.resolve(studyData({ label: 'Beermann 1976, 5 mg oral, healthy volunteers (n = 4)' }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    const box = plotBox(element)
+    move(control(element, 'knobA'), '12.5', 'change')
+    await nextTick()
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    expect(plotBox(element)).toEqual(box)
+  })
+
+  it('clips a series to the x of an answer which has one, and to nothing without', async () => {
+    // the renderer clips a series to the x the curves cover and clips nothing
+    // where they cover none (`curveRange`), and the frame is taken over what
+    // the figure draws, so the two agree on an answer which carries no x
+    served.panel = () => Promise.resolve(withData())
+    served.simulate = () => Promise.resolve({ ...run(), x: [] })
+    served.data = () => Promise.resolve(studyData({ x: [0, 1, 2], y: [1, 2, 300] }))
+    const element = await started()
+    expect(valueAxis(element)).toContain('>300<')
+  })
+
   it('keeps the decades of a logarithmic axis over the whole answer', async () => {
     served.simulate = () =>
       Promise.resolve(
@@ -1008,6 +1081,31 @@ describe('a payload which cannot be read', () => {
     expect(textOf(element, '.error')).not.toBe('')
     expect(figure(element)).toContain('<svg')
     expect(textOf(element, '.provenance')).toContain('stored')
+  })
+
+  it('draws the rows it can read of an answer which carries a row that is none', async () => {
+    // the payload types a row as a list of numbers and nulls and a failed point
+    // as a row of nulls, so a row which is `null` is off contract. A stored
+    // answer is written by hand, which is where such a row comes from, and a
+    // figure which draws what it can is worth more there than one which blanks
+    served.simulate = () => {
+      const answer = run()
+      const rows = answer.curves.curveA ?? []
+      return Promise.resolve({
+        ...answer,
+        curves: { ...answer.curves, curveA: [null, ...rows.slice(1)] },
+      })
+    }
+    const element = await started()
+    expect(figure(element)).toContain('<path class="curve"')
+    expect(figure(element)).not.toContain('NaN')
+    expect(textOf(element, '.error')).toBe('')
+    // the knob of the row which is none is read like any other: the line of
+    // that point is the one the renderer breaks, and the figure stays a figure
+    move(control(element, 'knobB'), '0.2', 'input')
+    await nextTick()
+    expect(figure(element)).toContain('<path class="curve"')
+    expect(textOf(element, '.error')).toBe('')
   })
 
   it('leaves out a knob it cannot draw and keeps the rest of the panel', async () => {

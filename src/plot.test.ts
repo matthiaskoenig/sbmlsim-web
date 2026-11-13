@@ -98,14 +98,16 @@ function texts(svg: string): string[] {
 }
 
 /**
- * The figure of a small spec as the renderer drew it before there was a frame
- * for the value axis.
+ * The figure of a small spec, byte for byte.
  *
- * It is the pin of every caller which does not hand one over: a spec without
- * `yLimits` has to draw the bytes it drew before the field existed, so the
- * field cannot move a figure of a page which never passes it.
+ * It is the pin of every caller which hands the renderer nothing but what it
+ * draws: a spec without `yLimits` and without `legendReserve` draws these
+ * bytes, so neither field can move the figure of a page which never passes
+ * them, and nothing else drifts under them unnoticed either. It is re-taken
+ * when the renderer changes its geometry on purpose, which the figure of the
+ * change then has to show.
  */
-const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-153_65-118"><rect x="64" y="14" width="89.65" height="104"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="118" x2="153.65" y2="118"/><g class="tick"><line x1="68.08" y1="118" x2="68.08" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="68.08" y="125" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="95.24" y1="118" x2="95.24" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="95.24" y="125" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="122.41" y1="118" x2="122.41" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.41" y="125" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="149.57" y1="118" x2="149.57" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="149.57" y="125" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="108.83" y="149" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="118"/><g class="tick"><line x1="60" y1="113.27" x2="64" y2="113.27"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="113.27" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="81.76" x2="64" y2="81.76"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="81.76" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="50.24" x2="64" y2="50.24"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="50.24" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="18.73" x2="64" y2="18.73"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="18.73" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="66" transform="rotate(-90 8 66)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-153_65-118)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M68.08 113.27 L95.24 81.76 L122.41 50.24 L149.57 18.73"/></g><g class="legend" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="165.65" y1="23" x2="183.65" y2="23"/><text x="189.65" y="23" dominant-baseline="central">Curve 1</text></g></g></svg>`
+const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="71.64" y="107" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.55" y="107" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="173.45" y="107" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="224.36" y="107" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96.09" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70.03" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="43.97" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="17.91" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="8" y1="143" x2="26" y2="143"/><text x="32" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
 
 /** The spec `PINNED` was drawn from. */
 function pinned(): PlotSpec {
@@ -121,7 +123,7 @@ function pinned(): PlotSpec {
 }
 
 describe('plotSvg', () => {
-  it('draws the figure it drew before there was a frame for the value axis', () => {
+  it('draws the figure it is pinned to, byte for byte', () => {
     expect(plotSvg(pinned())).toBe(PINNED)
   })
 
@@ -203,10 +205,10 @@ describe('plotSvg', () => {
   })
 
   it('draws a legend up to ten series and a colour bar above ten', () => {
-    expect(plotSvg(spec(10))).toContain('class="legend"')
+    expect(plotSvg(spec(10))).toMatch(/class="legend( below)?"/)
     expect(plotSvg(spec(10))).not.toContain('class="colourbar"')
     expect(plotSvg(spec(11))).toContain('class="colourbar"')
-    expect(plotSvg(spec(11))).not.toContain('class="legend"')
+    expect(plotSvg(spec(11))).not.toContain('class="legend')
   })
 
   it('draws the study points with their error bars under the curves', () => {
@@ -374,17 +376,23 @@ describe('plotSvg', () => {
   })
 
   it('gives the column right of the plot the room its labels need and no more', () => {
-    const short = plotSvg(spec(3))
-    const long = plotSvg({
-      ...spec(3),
-      series: spec(3).series.map((one) => ({ ...one, label: `${one.label} of a study` })),
-    })
+    // a figure wide enough that a column costs it less plot than a row below it
+    const wide = { width: 1100, height: 160 }
+    const short = plotSvg(spec(3, wide))
+    const long = plotSvg(
+      spec(3, {
+        ...wide,
+        series: spec(3).series.map((o) => ({ ...o, label: `${o.label} of a study` })),
+      }),
+    )
+    expect(short).not.toContain('class="legend below"')
+    expect(long).not.toContain('class="legend below"')
     expect(plotRight(long)).toBeLessThan(plotRight(short))
     expect(texts(short)).toContain('Curve 1')
     expect(texts(long)).toContain('Curve 1 of a study')
   })
 
-  it('puts a legend which wants more than a third of the width below the plot', () => {
+  it('puts a legend below the plot where that leaves the larger plot box', () => {
     // the figure of a panel at the width of a phone: a column of these labels
     // would leave a plot nobody can read, so the legend goes under the plot,
     // which gets the whole width, and the labels are written out in full
@@ -403,11 +411,13 @@ describe('plotSvg', () => {
     expect(legendEntries(svg)).toEqual(['hydrochlorothiazide plasma', 'hydrochlorothiazide urine'])
   })
 
-  it('keeps a legend which fits its column beside the plot', () => {
-    const svg = plotSvg(spec(2, { width: 390 }))
+  it('keeps a legend beside the plot where that leaves the larger plot box', () => {
+    // a figure which is wide and short: the row a legend takes below it costs
+    // more of the plot than the column beside it, so the column is what it gets
+    const svg = plotSvg(spec(2, { width: 1100, height: 160 }))
     expect(svg).not.toContain('class="legend below"')
     expect(svg).toContain('class="legend"')
-    expect(plotRight(svg)).toBeLessThan(390 - 8)
+    expect(plotRight(svg)).toBeLessThan(1100 - 8)
   })
 
   it('packs the entries of a legend below the plot into the rows of the figure', () => {
@@ -568,6 +578,70 @@ describe('plotSvg', () => {
     expect(svg).toContain('class="background"')
     expect(occurrences(svg, 'class="axis ')).toBe(2)
     expect(occurrences(svg, 'class="tick"')).toBeGreaterThan(3)
+  })
+})
+
+describe('the room the legend keeps', () => {
+  /** The labels of a figure whose second entry is drawn under a condition. */
+  const CONDITIONED = ['urine', 'Beermann 1976 (5 mg, oral)']
+
+  /** Build that figure, with the second entry drawn or only reserved. */
+  function conditioned(width: number, shown: boolean, height = 300): PlotSpec {
+    const base = spec(1, {
+      width,
+      height,
+      series: [{ ...series(1), label: CONDITIONED[0] ?? '' }],
+    })
+    return shown
+      ? {
+          ...base,
+          points: [{ id: 'seriesA', label: CONDITIONED[1] ?? '', curve: 'curve1', x: [0], y: [1] }],
+        }
+      : { ...base, legendReserve: [CONDITIONED[1] ?? ''] }
+  }
+
+  /** The area of the plot box of a figure in square pixels. */
+  function area(figure: PlotSpec): number {
+    const box = plotGeometry(figure).box
+    return (box.x1 - box.x0) * (box.y1 - box.y0)
+  }
+
+  it('lays the legend out over the labels it reserves and draws the entries it has', () => {
+    const reserved = conditioned(390, false)
+    const shown = conditioned(390, true)
+    // the figure of the panel is the same figure whether or not the series of
+    // its condition is drawn, so the curve is never redrawn in another box
+    expect(plotGeometry(reserved).box).toEqual(plotGeometry(shown).box)
+    expect(legendEntries(plotSvg(reserved))).toEqual([CONDITIONED[0]])
+    expect(legendEntries(plotSvg(shown))).toEqual(CONDITIONED)
+    // and the room it keeps is room: the same figure without the reserved label
+    // keeps its legend beside the plot, where the reserved one takes the band
+    // below it, so the reserve is part of the layout and not a note
+    const plain = spec(1, {
+      width: 1100,
+      height: 160,
+      series: [{ ...series(1), label: CONDITIONED[0] ?? '' }],
+    })
+    expect(plotGeometry(conditioned(1100, false, 160)).box.y1).toBeLessThan(
+      plotGeometry(plain).box.y1,
+    )
+  })
+
+  it('never gives a wider figure a smaller plot', () => {
+    // the legend sits beside the plot or below it, whichever leaves the larger
+    // box, so a viewport which grows past the width where the two trade places
+    // never loses plot. The labels are the ones of a real panel, whose legend
+    // trades places inside this sweep
+    const seen = new Set<boolean>()
+    let last = -1
+    for (let width = 600; width <= 1500; width += 5) {
+      const figure = conditioned(width, true, 160)
+      seen.add(plotSvg(figure).includes('class="legend below"'))
+      const now = area(figure)
+      expect(now).toBeGreaterThanOrEqual(last)
+      last = now
+    }
+    expect([...seen].sort()).toEqual([false, true])
   })
 })
 

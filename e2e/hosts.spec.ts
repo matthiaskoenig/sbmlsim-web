@@ -206,6 +206,8 @@ test.describe('the legend', () => {
             text: lines.map((line) => line.textContent).join(' '),
             top: Math.min(...boxes.map((box) => box.top)),
             bottom: Math.max(...boxes.map((box) => box.bottom)),
+            left: Math.min(...boxes.map((box) => box.left)),
+            right: Math.max(...boxes.map((box) => box.right)),
           }
         }),
       )
@@ -216,10 +218,15 @@ test.describe('the legend', () => {
       // on the axis and every entry is the short label of its curve, which
       // fits the column of a phone as well as the one of a page
       expect(names.join('')).not.toContain('…')
+      // no entry runs into the next one, whether the legend is the column
+      // beside the plot, where the entries are stacked, or the band below it,
+      // where they are packed into rows
       for (const [index, entry] of entries.entries()) {
         const next = entries[index + 1]
         if (next !== undefined) {
-          expect(entry.bottom).toBeLessThanOrEqual(next.top + 1)
+          const stacked = entry.bottom <= next.top + 1
+          const beside = entry.right <= next.left + 1
+          expect(stacked || beside).toBe(true)
         }
       }
     })
