@@ -17,7 +17,10 @@
  *
  * The dark values follow `prefers-color-scheme`, as the reports do. A host with
  * a switch of its own (a documentation theme, a slide deck) sets the tokens
- * under its own selector the same way.
+ * under its own selector the same way, and an element which carries
+ * `theme="light"` or `theme="dark"` takes those values whatever the system
+ * says: the media query leaves a `theme="light"` host alone and the last block
+ * of this file puts the dark values on a `theme="dark"` host.
  */
 
 :host,
@@ -76,7 +79,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :host,
+  :host(:not([theme='light'])),
   :root {
     --sbmlsim-bg: rgb(20 23 28);
     --sbmlsim-bg-soft: rgb(26 30 36);
@@ -104,4 +107,34 @@
     --sbmlsim-ramp-5: rgb(155 217 60);
     --sbmlsim-ramp-6: rgb(253 231 37);
   }
+}
+
+/*
+ * The dark values on a host which asks for them, whatever the system says.
+ * They are the same values as above: a custom property has no mixin, so the
+ * one table which is written twice is the price of an element a page can put
+ * into dark on its own.
+ */
+:host([theme='dark']) {
+  --sbmlsim-bg: rgb(20 23 28);
+  --sbmlsim-bg-soft: rgb(26 30 36);
+  --sbmlsim-bg-card: rgb(26 30 36);
+  --sbmlsim-fg: rgb(230 233 238);
+  --sbmlsim-fg-soft: rgb(154 164 178);
+  --sbmlsim-line: rgb(42 48 56);
+  --sbmlsim-accent: rgb(116 143 252);
+
+  --sbmlsim-training: rgb(81 207 102);
+  --sbmlsim-validation: rgb(77 171 247);
+  --sbmlsim-outlier: rgb(255 146 43);
+  --sbmlsim-excluded: rgb(173 181 189);
+
+  --sbmlsim-shadow: none;
+
+  --sbmlsim-ramp-1: rgb(59 82 139);
+  --sbmlsim-ramp-2: rgb(42 120 142);
+  --sbmlsim-ramp-3: rgb(30 156 137);
+  --sbmlsim-ramp-4: rgb(68 191 112);
+  --sbmlsim-ramp-5: rgb(155 217 60);
+  --sbmlsim-ramp-6: rgb(253 231 37);
 }

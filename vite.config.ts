@@ -7,8 +7,27 @@ import { defineConfig } from 'vitest/config'
 // UMD bundle is a `.cjs` file, which is what makes `require` of it work. Vue is
 // bundled into both, so a host page (the documentation, a slide deck, a course)
 // needs nothing else.
-export default defineConfig({
+//
+// The build replaces what the esm-bundler build of vue leaves to its bundler:
+// `process.env.NODE_ENV`, which no page defines and which a bundle that reads
+// it throws a `ReferenceError` over, and the three feature flags of vue, which
+// it warns about when they are not defined. They are replaced in the build
+// alone, so the tests keep the development build of vue with its warnings.
+//
+// `test.css` is on because the styles of the element are part of what it is:
+// `*.ce.vue` puts them in the shadow root, and a test which reads them out of
+// it has to find them there.
+export default defineConfig(({ command }) => ({
   plugins: [vue()],
+  define:
+    command === 'build'
+      ? {
+          'process.env.NODE_ENV': '"production"',
+          __VUE_OPTIONS_API__: 'false',
+          __VUE_PROD_DEVTOOLS__: 'false',
+          __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
+        }
+      : {},
   build: {
     target: 'es2022',
     sourcemap: true,
@@ -21,6 +40,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    css: true,
     include: ['src/**/*.test.ts'],
   },
-})
+}))

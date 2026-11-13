@@ -1,0 +1,401 @@
+/**
+ * The HTTP client of an sbmlsim endpoint and what a failed request is.
+ *
+ * `PanelClient` is the only place in this library which calls `fetch`. It
+ * speaks the routes of `python -m sbmlsim.serve` and nothing else, it bounds
+ * every request with a timeout, it checks the contract version of every answer
+ * before it is read, and it fails with one typed error whose `kind` is a short
+ * machine string: no status code, no url and no host ever reaches the page
+ * which embeds a panel, because a reader cannot act on them and a deployment
+ * should not have to publish them.
+ *
+ * `FAILURE_MESSAGES` is the one line a reader is shown per kind. It is a fixed
+ * table rather than the message of the error which was caught, so that nothing
+ * a server, a browser or a stack trace writes can leak into a page.
+ */
+
+import { CONTRACTS, ContractError, checkContract } from './contract'
+import type {
+  PanelDataResponse,
+  PanelDataSeries,
+  PanelDeclaration,
+  SimulateRequest,
+  SimulateResponse,
+} from './contract'
+
+/**
+ * What went wrong with a request, a short machine string.
+ *
+ * `aborted` is the one which is no failure: it is what a request which was
+ * superseded or stopped answers with, and the element which stopped it drops
+ * it instead of showing it. `internal` is never thrown by the client; it is
+ * the kind of a failure of the renderer itself.
+ */
+export type FailureKind =
+  'network' | 'timeout' | 'http' | 'contract' | 'body' | 'aborted' | 'internal'
+
+/** The one line a reader is shown per kind; none of them names a url or a host. */
+export const FAILURE_MESSAGES: Readonly<Record<FailureKind, string>> = {
+  network: 'The simulation endpoint could not be reached.',
+  timeout: 'The simulation endpoint did not answer in time.',
+  http: 'The simulation endpoint refused the request.',
+  contract: 'The simulation endpoint speaks another version of the panel contract.',
+  body: 'The answer of the simulation endpoint could not be read.',
+  aborted: 'The request was stopped.',
+  internal: 'The panel could not be drawn.',
+}
+
+/** A request which did not answer with the payload it was asked for. */
+export class PanelRequestError extends Error {
+  /** What went wrong, the kind a page reads from an `sbmlsim-error` event. */
+  readonly kind: FailureKind
+
+  /**
+   * Build the error of a request which failed.
+   *
+   * @param kind what went wrong
+   * @param cause the error which was caught, for a caller which debugs; it is
+   *   never shown to a reader and never leaves the element
+   */
+  constructor(kind: FailureKind, cause?: unknown) {
+    super(FAILURE_MESSAGES[kind], cause === undefined ? undefined : { cause })
+    this.name = 'PanelRequestError'
+    this.kind = kind
+  }
+}
+
+/** The milliseconds a request is given before it is stopped. */
+export const DEFAULT_TIMEOUT = 8000
+
+/** The smallest timeout which is taken as one; below it the default is used. */
+const LEAST_TIMEOUT = 1
+
+/**
+ * Get the kind of an error which was caught anywhere in the element.
+ *
+ * @param error the error
+ * @returns its kind for a `PanelRequestError`, `internal` for everything else,
+ *   which is a failure of the renderer and not of the endpoint
+ */
+export function failureKind(error: unknown): FailureKind {
+  return error instanceof PanelRequestError ? error.kind : 'internal'
+}
+
+/**
+ * Join an endpoint and a path of a route.
+ *
+ * @param endpoint the endpoint, with or without a trailing slash; an empty one
+ *   makes the path relative to the page, which is the teaching mode where the
+ *   page is served by the service itself
+ * @param path the path of the route, which starts with a slash
+ * @returns the url of the request
+ */
+function join(endpoint: string, path: string): string {
+  return `${endpoint.replace(/\/+$/, '')}${path}`
+}
+
+/**
+ * Get whether a value is a plain object, which every payload of a route is.
+ *
+ * @param value the parsed body
+ * @returns whether fields can be read off it
+ */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Check that a body carries the fields of a declaration before it is read.
+ *
+ * The check is the shape and not the values: a payload may grow a field within
+ * its version, so an unknown field is ignored, while a body whose `axes` is no
+ * array is no declaration whatever its `contract` says.
+ *
+ * @param body the parsed body, of the contract `panel/1`
+ * @returns the declaration
+ * @throws PanelRequestError of the kind `body` for a body which is no
+ *   declaration
+ */
+function asDeclaration(body: unknown): PanelDeclaration {
+  if (
+    !isObject(body) ||
+    !isObject(body.panel) ||
+    !Array.isArray(body.axes) ||
+    !Array.isArray(body.curves) ||
+    !Array.isArray(body.data) ||
+    !isObject(body.simulation) ||
+    !isObject(body.limits)
+  ) {
+    throw new PanelRequestError('body')
+  }
+  return body as unknown as PanelDeclaration
+}
+
+/**
+ * Check that a body carries the fields of the answer of a run before it is read.
+ *
+ * The fields of the provenance are checked too, because the footer of a panel
+ * writes them: a body which is checked here is a body every reader of it can
+ * read without a guard of its own.
+ *
+ * @param body the parsed body, of the contract `panel/1`
+ * @returns the answer of the run
+ * @throws PanelRequestError of the kind `body` for a body which is no answer
+ *   of a run
+ */
+function asGrid(body: unknown): SimulateResponse {
+  if (
+    !isObject(body) ||
+    typeof body.spec_hash !== 'string' ||
+    !Array.isArray(body.x) ||
+    !Array.isArray(body.dims) ||
+    !isObject(body.curves) ||
+    !isObject(body.units) ||
+    !isObject(body.status) ||
+    !Array.isArray(body.status.failed) ||
+    !isObject(body.provenance) ||
+    typeof body.provenance.engine !== 'string' ||
+    typeof body.provenance.seconds !== 'number'
+  ) {
+    throw new PanelRequestError('body')
+  }
+  return body as unknown as SimulateResponse
+}
+
+/**
+ * Check that a body carries the series of the study data before it is read.
+ *
+ * @param body the parsed body, of the contract `paneldata/1`
+ * @returns the series
+ * @throws PanelRequestError of the kind `body` for a body which is no study data
+ */
+function asSeries(body: unknown): PanelDataSeries[] {
+  if (!isObject(body) || !Array.isArray(body.series)) {
+    throw new PanelRequestError('body')
+  }
+  return (body as unknown as PanelDataResponse).series
+}
+
+/**
+ * The client of one sbmlsim endpoint.
+ *
+ * Every method answers the payload of its route or throws a
+ * `PanelRequestError`; nothing else leaves the client, so a caller which
+ * catches that one type catches a dead network, a slow endpoint, a refused
+ * request, a payload of another contract version and a body which is not the
+ * one of its route alike.
+ */
+export class PanelClient {
+  /** The endpoint the client talks to, without a trailing slash. */
+  readonly endpoint: string
+  /** The milliseconds one request is given before it is stopped. */
+  readonly timeoutMs: number
+
+  /**
+   * Build the client of an endpoint.
+   *
+   * @param endpoint the origin and path the routes hang under, e.g.
+   *   `https://models.example.org`; an empty one makes every request relative
+   *   to the page, which is what the service does when it serves the page
+   *   itself
+   * @param timeoutMs the milliseconds one request is given, `DEFAULT_TIMEOUT`
+   *   for a value which is no positive number
+   */
+  constructor(endpoint: string, timeoutMs: number = DEFAULT_TIMEOUT) {
+    this.endpoint = endpoint.replace(/\/+$/, '')
+    this.timeoutMs =
+      Number.isFinite(timeoutMs) && timeoutMs >= LEAST_TIMEOUT ? timeoutMs : DEFAULT_TIMEOUT
+  }
+
+  /**
+   * Get the declaration of a panel, the route `panels/{panel}`.
+   *
+   * @param model the id of the model, which the endpoint serves
+   * @param panel the id of the panel of that model
+   * @param signal a signal which stops the request, e.g. of a superseded move
+   * @returns the declaration of the panel
+   * @throws PanelRequestError for every failure
+   */
+  async panel(model: string, panel: string, signal?: AbortSignal): Promise<PanelDeclaration> {
+    const body = await this.read(this.panelPath(model, panel), CONTRACTS.panel, signal)
+    return asDeclaration(body)
+  }
+
+  /**
+   * Get the study data behind the curves of a panel, the route `data`.
+   *
+   * @param model the id of the model
+   * @param panel the id of the panel
+   * @param signal a signal which stops the request
+   * @returns the series the panel declares, in its order; empty for a panel
+   *   which declares none
+   * @throws PanelRequestError for every failure
+   */
+  async data(model: string, panel: string, signal?: AbortSignal): Promise<PanelDataSeries[]> {
+    const body = await this.read(`${this.panelPath(model, panel)}/data`, CONTRACTS.data, signal)
+    return asSeries(body)
+  }
+
+  /**
+   * Run a simulation of a panel, the route `simulate`.
+   *
+   * @param model the id of the model
+   * @param panel the id of the panel
+   * @param body the values of the knobs and the points of the grid, which the
+   *   endpoint bounds by the limits its declaration carries
+   * @param signal a signal which stops the request
+   * @returns the grid of the run with its units and its provenance, which is a
+   *   `Grid` and more
+   * @throws PanelRequestError for every failure
+   */
+  async simulate(
+    model: string,
+    panel: string,
+    body: SimulateRequest,
+    signal?: AbortSignal,
+  ): Promise<SimulateResponse> {
+    const answer = await this.read(
+      `${this.panelPath(model, panel)}/simulate`,
+      CONTRACTS.panel,
+      signal,
+      body,
+    )
+    return asGrid(answer)
+  }
+
+  /**
+   * Read a stored answer of a run from a url of its own.
+   *
+   * The url is not a route of the endpoint: it is the static file a page ships
+   * next to itself as the fallback of a panel, which is fetched while the
+   * endpoint is asked and drawn when the endpoint does not answer.
+   *
+   * @param url the url of the file, absolute or relative to the page
+   * @param signal a signal which stops the request
+   * @returns the stored answer
+   * @throws PanelRequestError for every failure
+   */
+  async stored(url: string, signal?: AbortSignal): Promise<SimulateResponse> {
+    const body = await this.fetchJson(url, CONTRACTS.panel, signal)
+    return asGrid(body)
+  }
+
+  /**
+   * Get the path of the routes of one panel.
+   *
+   * @param model the id of the model
+   * @param panel the id of the panel
+   * @returns the path, with both ids encoded, so an id is a path component and
+   *   never a path
+   */
+  private panelPath(model: string, panel: string): string {
+    return `/api/models/${encodeURIComponent(model)}/panels/${encodeURIComponent(panel)}`
+  }
+
+  /**
+   * Read a route of the endpoint.
+   *
+   * @param path the path of the route
+   * @param contract the version the answer has to carry
+   * @param signal a signal which stops the request
+   * @param body the body of a POST, none for a GET
+   * @returns the parsed body
+   * @throws PanelRequestError for every failure
+   */
+  private async read(
+    path: string,
+    contract: string,
+    signal: AbortSignal | undefined,
+    body?: SimulateRequest,
+  ): Promise<unknown> {
+    return this.fetchJson(join(this.endpoint, path), contract, signal, body)
+  }
+
+  /**
+   * Fetch one url and read its body as the payload of a contract.
+   *
+   * The request carries no credential: a page of another origin may not send
+   * one to the service anyway, and a panel is public data.
+   *
+   * @param url the url
+   * @param contract the version the answer has to carry
+   * @param signal a signal which stops the request
+   * @param body the body of a POST, none for a GET
+   * @returns the parsed body
+   * @throws PanelRequestError of the kind `timeout` for a request which was
+   *   not answered within `timeoutMs`, `aborted` for one the caller stopped,
+   *   `network` for one which never reached the endpoint, `http` for a status
+   *   which is no success, `contract` for a payload of another version and
+   *   `body` for one which cannot be read
+   */
+  private async fetchJson(
+    url: string,
+    contract: string,
+    signal: AbortSignal | undefined,
+    body?: SimulateRequest,
+  ): Promise<unknown> {
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, this.timeoutMs)
+    const stop = (): void => {
+      controller.abort()
+    }
+    signal?.addEventListener('abort', stop)
+    try {
+      const answer = await fetch(url, {
+        method: body === undefined ? 'GET' : 'POST',
+        credentials: 'omit',
+        headers:
+          body === undefined
+            ? { accept: 'application/json' }
+            : { accept: 'application/json', 'content-type': 'application/json' },
+        signal: controller.signal,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+      if (!answer.ok) {
+        throw new PanelRequestError('http')
+      }
+      let parsed: unknown
+      try {
+        parsed = await answer.json()
+      } catch (error) {
+        throw new PanelRequestError('body', error)
+      }
+      checkContract(parsed, contract)
+      return parsed
+    } catch (error) {
+      throw PanelClient.failure(error, timedOut)
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', stop)
+    }
+  }
+
+  /**
+   * Get the error a failed request throws.
+   *
+   * @param error the error which was caught
+   * @param timedOut whether the request was stopped by its own timeout
+   * @returns the typed error; one which already is one is kept, a contract
+   *   error becomes `contract`, an abort becomes `timeout` or `aborted`, and
+   *   everything else - a `TypeError` of `fetch` above all - becomes `network`
+   */
+  private static failure(error: unknown, timedOut: boolean): PanelRequestError {
+    if (error instanceof PanelRequestError) {
+      return error
+    }
+    if (error instanceof ContractError) {
+      return new PanelRequestError('contract', error)
+    }
+    if (timedOut) {
+      return new PanelRequestError('timeout', error)
+    }
+    if (error instanceof Error && error.name === 'AbortError') {
+      return new PanelRequestError('aborted', error)
+    }
+    return new PanelRequestError('network', error)
+  }
+}
