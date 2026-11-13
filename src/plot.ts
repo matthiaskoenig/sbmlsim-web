@@ -190,6 +190,9 @@ const BAR_BANDS = 32
 const BAND_SEAM = 0.5
 /** The size of the font of a tick, a legend entry and a label of a colour bar. */
 const SMALL_FONT = 11
+
+/** The size of the font of an axis label in pixels, the default of `--sbmlsim-font-size`. */
+const LABEL_FONT = 12
 /** What a sum of pixels may be off by and still count as the same room. */
 const ROUNDING = 1e-9
 /** What a label which does not fit its room ends with. */
@@ -1042,14 +1045,14 @@ function markersOf(points: Points, colour: string, x: Axis, y: Axis): string {
  * @param axis the axis
  * @param horizontal whether it is the x axis
  * @param box the plot box
- * @param label the label of the axis, with its unit
+ * @param full the label of the axis, with its unit
  * @returns the group of the axis
  */
 function axisGroup(
   axis: Axis,
   horizontal: boolean,
   box: { x0: number; y0: number; x1: number; y1: number },
-  label: string,
+  full: string,
 ): string {
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
@@ -1104,6 +1107,9 @@ function axisGroup(
     })
     .join('')
   const middle = horizontal ? (box.x0 + box.x1) / 2 : (box.y0 + box.y1) / 2
+  // a label which is longer than its axis is cut with an ellipsis, as a legend
+  // entry is, and not left to run out of the figure
+  const label = fittingLabel(full, horizontal ? box.x1 - box.x0 : box.y1 - box.y0, LABEL_FONT)
   const title = horizontal
     ? text(label, {
         class: 'axis-label',

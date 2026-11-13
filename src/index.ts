@@ -1,7 +1,7 @@
 /**
  * sbmlsim-web: the renderer of the interactive panels of an SBML model.
  *
- * Importing this module registers the custom element `<sbmlsim-panel>`, so a
+ * Importing this module registers the custom elements `<sbmlsim-panel>` and `<sbmlsim-app>`, so a
  * page loads one script and writes one tag. The registration is a no-op where
  * the tag name is taken already, which is what a page which loads the library
  * twice does, and it does nothing at all where there is no `customElements` at
@@ -18,6 +18,7 @@
 
 import { defineCustomElement } from 'vue'
 
+import SbmlsimApp from './SbmlsimApp.ce.vue'
 import SbmlsimPanel from './SbmlsimPanel.ce.vue'
 
 export { CONTRACTS, ContractError, checkContract } from './contract'
@@ -75,28 +76,54 @@ export const PANEL_TAG = 'sbmlsim-panel'
  */
 export const SbmlsimPanelElement = defineCustomElement(SbmlsimPanel)
 
+/** The tag of the shell of an app, which places the `<sbmlsim-panel>` elements of its pages. */
+export const APP_TAG = 'sbmlsim-app'
+
 /**
- * Register the element with the browser.
+ * The class of `<sbmlsim-app>`, the shell of the app of a model.
  *
- * @param tagName the tag to register it under, `PANEL_TAG` without; a class of
- *   a custom element belongs to one tag, so another tag is given a class of
- *   its own, built from the same component
- * @returns whether this call registered it; `false` for a tag which is taken
- *   already and for an environment without custom elements, in both of which
- *   the call changes nothing
+ * It carries the attributes `endpoint`, `model`, `page`, `theme`, `timeout` and
+ * `heading-level`, and it dispatches `sbmlsim-error` when the app could not be
+ * read. It places `<sbmlsim-panel>` elements, so the panel has to be registered
+ * under `PANEL_TAG` where the shell is used.
  */
-export function register(tagName: string = PANEL_TAG): boolean {
-  if (typeof customElements === 'undefined') {
+export const SbmlsimAppElement = defineCustomElement(SbmlsimApp)
+
+/**
+ * Define one element, unless its tag is taken or there is nothing to define it in.
+ *
+ * @param tagName the tag
+ * @param build builds a class of its own for another tag, since a class of a
+ *   custom element belongs to one tag
+ * @returns whether this call defined it
+ */
+function define(tagName: string, build: () => CustomElementConstructor): boolean {
+  if (typeof customElements === 'undefined' || customElements.get(tagName) !== undefined) {
     return false
   }
-  if (customElements.get(tagName) !== undefined) {
-    return false
-  }
-  customElements.define(
-    tagName,
+  customElements.define(tagName, build())
+  return true
+}
+
+/**
+ * Register the elements with the browser.
+ *
+ * @param tagName the tag to register the panel under, `PANEL_TAG` without
+ * @param appTagName the tag to register the shell of an app under, `APP_TAG`
+ *   without; a class of a custom element belongs to one tag, so another tag is
+ *   given a class of its own, built from the same component
+ * @returns whether this call registered either of them; `false` for tags which
+ *   are taken already and for an environment without custom elements, in both
+ *   of which the call changes nothing
+ */
+export function register(tagName: string = PANEL_TAG, appTagName: string = APP_TAG): boolean {
+  const panel = define(tagName, () =>
     tagName === PANEL_TAG ? SbmlsimPanelElement : defineCustomElement(SbmlsimPanel),
   )
-  return true
+  const shell = define(appTagName, () =>
+    appTagName === APP_TAG ? SbmlsimAppElement : defineCustomElement(SbmlsimApp),
+  )
+  return panel || shell
 }
 
 register()

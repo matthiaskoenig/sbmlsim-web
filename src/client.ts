@@ -16,6 +16,7 @@
 
 import { CONTRACTS, ContractError, checkContract } from './contract'
 import type {
+  AppDeclaration,
   PanelDataResponse,
   PanelDataSeries,
   PanelDeclaration,
@@ -148,6 +149,40 @@ function asDeclaration(body: unknown): PanelDeclaration {
 }
 
 /**
+ * Check that a body carries the fields of an app before it is read.
+ *
+ * The items of the pages and of the variants are checked as well, because the
+ * shell walks them to build its navigation, its switcher and its panels.
+ *
+ * @param body the parsed body, of the contract `app/1`
+ * @returns the app
+ * @throws PanelRequestError of the kind `body` for a body which is no app
+ */
+function asApp(body: unknown): AppDeclaration {
+  if (
+    !isObject(body) ||
+    typeof body.title !== 'string' ||
+    typeof body.subtitle !== 'string' ||
+    typeof body.citation !== 'string' ||
+    typeof body.doi !== 'string' ||
+    !Array.isArray(body.licenses) ||
+    !Array.isArray(body.pages) ||
+    !Array.isArray(body.variants) ||
+    !allIdentified(body.pages) ||
+    !allIdentified(body.variants) ||
+    !body.pages.every(
+      (page) =>
+        typeof (page as Record<string, unknown>).title === 'string' &&
+        Array.isArray((page as Record<string, unknown>).panels),
+    ) ||
+    !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string')
+  ) {
+    throw new PanelRequestError('body')
+  }
+  return body as unknown as AppDeclaration
+}
+
+/**
  * Get whether an item of `dims` is an axis of a grid.
  *
  * @param value the item
@@ -232,6 +267,24 @@ export class PanelClient {
     this.endpoint = endpoint.replace(/\/+$/, '')
     this.timeoutMs =
       Number.isFinite(timeoutMs) && timeoutMs >= LEAST_TIMEOUT ? timeoutMs : DEFAULT_TIMEOUT
+  }
+
+  /**
+   * Get the app of a model, the route `app`.
+   *
+   * @param model the id of the model, which the endpoint serves
+   * @param signal a signal which stops the request
+   * @returns the pages, the variants and the provenance texts of the app
+   * @throws PanelRequestError for every failure; a model which declares no app
+   *   is an `http` failure
+   */
+  async app(model: string, signal?: AbortSignal): Promise<AppDeclaration> {
+    const body = await this.read(
+      `/api/models/${encodeURIComponent(model)}/app`,
+      CONTRACTS.app,
+      signal,
+    )
+    return asApp(body)
   }
 
   /**

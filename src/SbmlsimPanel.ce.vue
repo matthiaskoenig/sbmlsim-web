@@ -84,6 +84,11 @@
  * line a reader can act on and dispatches `sbmlsim-error` so that the page can
  * react. `activate()` resolves either way and never rejects.
  *
+ * Every answer of a simulation is announced with `sbmlsim-result`, whose
+ * `detail` carries its `provenance` and its `spec_hash`, so a page, and the
+ * shell of an app (`SbmlsimApp.ce.vue`), can say which versions simulated what
+ * it shows without reading into the panel.
+ *
  * A page which cannot run a script of its own writes the boolean attribute
  * `auto`, which calls `activate()` when the element is connected; without it
  * the element does nothing until the page asks, which is what a deck needs.
@@ -355,6 +360,13 @@ const props = defineProps({
   model: { type: String, default: '' },
   /** The id of the panel of that model. */
   panel: { type: String, default: '' },
+  /**
+   * The variant of the model to simulate, which an app switches between; empty
+   * is the one the panel declares. Only the SBML which is integrated depends
+   * on it, so the declaration and the study data are not read again, and a
+   * change of it runs the simulation again at the values of the knobs.
+   */
+  variant: { type: String, default: '' },
   /** Where the controls go: `auto` (the default), `sidebar`, `stacked` or `toolbar`. */
   layout: { type: String as PropType<LayoutName>, default: 'auto' },
   /**
@@ -1252,7 +1264,9 @@ function bodyFor(gridId: string | null): SimulateRequest {
     const value = values.value[axis.id]
     sent[axis.id] = value === undefined || !Number.isFinite(value) ? axis.default : value
   }
-  return { values: sent, grid: over }
+  return props.variant === ''
+    ? { values: sent, grid: over }
+    : { values: sent, grid: over, variant: props.variant }
 }
 
 /**
@@ -1349,6 +1363,13 @@ async function simulate(gridId: string | null): Promise<void> {
     fromStore.value = false
     failure.value = null
     frozen.value = false
+    host?.dispatchEvent(
+      new CustomEvent('sbmlsim-result', {
+        detail: { provenance: answer.provenance, spec_hash: answer.spec_hash },
+        bubbles: true,
+        composed: true,
+      }),
+    )
   } catch (error) {
     if (own === sequence) {
       fail(error)
@@ -1746,6 +1767,20 @@ watch(
     const declared = declaration.value
     if (wanted !== 'off' && declared !== null && study.value === null) {
       void loadData(declared)
+    }
+  },
+)
+
+/*
+ * The curves of the other variant are another simulation of the same knobs.
+ * It goes through `schedule`, so a shell which switches every panel of its
+ * page at once and a reader who switches twice in a row pay one run each.
+ */
+watch(
+  () => props.variant,
+  () => {
+    if (declaration.value !== null && !frozen.value) {
+      schedule(gridded.value)
     }
   },
 )

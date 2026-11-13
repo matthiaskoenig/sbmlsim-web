@@ -247,6 +247,8 @@ export interface SimulateRequest {
   values?: Record<string, number>
   /** The points of a knob of the grid by its id; a knob of the grid takes no value. */
   grid?: Record<string, number>
+  /** The variant of the model to simulate; the one the panel declares without. */
+  variant?: string
 }
 
 /** One axis of the grid a run covered. */

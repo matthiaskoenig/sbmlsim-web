@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sbmlsim-web app of a model</title>
+  </head>
+  <body>
+    <!--
+      The page a model deployment serves: one script tag and one element tag.
+      The element reads the app of the model from the endpoint, which here is
+      the origin of the page itself, and draws its navigation, its panels and
+      its footer; the app is the configuration of the model and not code of this
+      page.
+    -->
+    <script src="../dist/sbmlsim-web.iife.js"></script>
+    <sbmlsim-app endpoint="" model="hctz"></sbmlsim-app>
+  </body>
+</html>

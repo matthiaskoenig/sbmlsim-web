@@ -1268,3 +1268,33 @@ describe('the study data under the curves', () => {
     expect(figure(outside)).toBe(figure(inside))
   })
 })
+
+describe('the variant of the model', () => {
+  it('is left out of the request without the attribute and sent with it', async () => {
+    await started()
+    expect(simulations()[0]).not.toHaveProperty('variant')
+    await started({ variant: 'variantA' })
+    expect(simulations()[1]?.variant).toBe('variantA')
+  })
+
+  it('runs the simulation again when it changes, without reading the declaration again', async () => {
+    vi.useFakeTimers()
+    const element = await started({ variant: 'variantA' })
+    expect(simulations()).toHaveLength(1)
+    element.setAttribute('variant', 'variantB')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations().map((one) => one.variant)).toEqual(['variantA', 'variantB'])
+    expect(declarations()).toHaveLength(1)
+  })
+
+  it('announces every answer with its provenance', async () => {
+    const heard: unknown[] = []
+    document.addEventListener('sbmlsim-result', (event) =>
+      heard.push(
+        (event as CustomEvent<{ provenance: { engine: string } }>).detail.provenance.engine,
+      ),
+    )
+    await started()
+    expect(heard).toEqual(['engineA'])
+  })
+})

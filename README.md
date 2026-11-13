@@ -40,6 +40,7 @@ A page writes one tag and calls `activate()` on it:
 | `endpoint`      | the service the panel talks to; empty is the origin of the page, which is the teaching mode                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `model`         | the id of the model, as the endpoint serves it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `panel`         | the id of the panel of that model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `variant`       | the variant of the model to simulate, which an app switches between; empty is the one the panel declares; a change runs the simulation again at the values of the knobs, and the declaration and the study data are not read again                                                                                                                                                                                                                                                                                               |
 | `layout`        | `auto` (the default, the controls beside the figure above 560 px and under it below), `sidebar`, `stacked`, `toolbar`                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `theme`         | `auto` (the default, `prefers-color-scheme`), `light`, `dark`                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `hover`         | `on` (the default, the crosshair and the readout at the cursor) or `off`                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -61,6 +62,34 @@ A page writes one tag and calls `activate()` on it:
 
 The element has a shadow root, so the styles of the host page cannot reach it and it cannot leak into the page; the `--sbmlsim-*` tokens are the one hook from outside, and they work from the element and from anything above it. The element declares no token of its own on its host: it reads every one of them into a private token with the value of the design as the fallback, so a documentation theme, the dark switch of a slide deck or a branded container which sets `--sbmlsim-accent` on a wrapper is what the panel takes. A rule of the page which matches the element itself wins over all of it, `theme="light"` and `theme="dark"` come next as the explicit opt-in they are, then an ancestor, then `prefers-color-scheme`, then the table of `theme.css`. Nothing of the typography and nothing of the colour of the panel is declared on the host either, because a declaration of the page which matches the element, `* { font-family: ... }` among them, beats one of the shadow tree there and everything in the panel would inherit it.
 
+## The app shell
+
+`<sbmlsim-app>` is the shell of the app of a model, which replaces a webapp written by hand per model. A page writes one script tag and one element tag, and the model's own declaration (`app/1`, `Project.app` of sbmlsim) is the rest:
+
+```html
+<script src="sbmlsim-web.iife.js"></script>
+<sbmlsim-app endpoint="https://models.example.org" model="MODEL"></sbmlsim-app>
+```
+
+| attribute       | what it is                                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | the service the app talks to; empty is the origin of the page                                                                     |
+| `model`         | the id of the model, as the endpoint serves it                                                                                    |
+| `page`          | the id of the page which is shown, the first page without or for an unknown id; the shell sets it when a reader switches the page |
+| `theme`         | `auto` (the default), `light`, `dark`, passed to every panel                                                                      |
+| `timeout`       | the milliseconds one request is given, 8000 without                                                                               |
+| `heading-level` | the level the title of the app is drawn at, 1 without; its panels are drawn one level below it                                    |
+
+It draws the title and the subtitle, the navigation of the pages (none for an app of one page), the switcher of the variants (none for an app of fewer than two), the grid of the panels of the page and the provenance footer: the citation, the DOI and the licenses of the declaration and the versions which simulated what is shown, which it reads from the `sbmlsim-result` events of its panels. The grid is two columns where the shell is wide enough and one below 760 px of its own width, so an app in a column of a page is as narrow as its column. The shell owns no simulation logic: it reads `app/1` once, never fetches the declaration of a panel and never simulates; a panel is an `<sbmlsim-panel auto>` which does its own work.
+
+**A page change swaps the panels in the grid.** The panels of the page which is left are frozen and removed, and the panels of the page which is shown start themselves, so the DOM holds the panels of one page. A panel is created again when its page is returned to, with its knobs at the values of its declaration, and the endpoint answers its first grid from its cache.
+
+**The chosen variant goes to every panel.** It is the `variant` attribute of the panels, which send it in the body of the simulation, and it stays chosen while the page changes.
+
+**A failure leaves one line.** An app which cannot be read - an endpoint which is down, a model without an app, a payload of another version - shows one line in the voice of the panel, which names no url, no host and no status, and no navigation, grid or footer; `sbmlsim-error` is dispatched as a panel does.
+
+A panel dispatches `sbmlsim-result` with the `provenance` and the `spec_hash` of every answer of a simulation, and `register(tagName, appTagName)` gives either element another tag; the shell places `<sbmlsim-panel>`, so the panel has to be registered under that tag where the shell is used.
+
 ## Build
 
 ```bash
@@ -77,7 +106,7 @@ Vue is bundled into every build, so a host page needs nothing else: it reads `di
 
 ## The demo pages and the end to end tests
 
-`demo/` has the three hosts the element is tested on: `plain.html` (one script tag and one element tag, the page of a course platform), `slides.html` (reveal.js on a dark theme, which activates a panel when its slide is shown and freezes it when it is left) and `docs.md` (a raw HTML block in a markdown page, which `scripts/stage-demo.mjs` renders to `docs.html` for the tests). `npm run e2e` stages them and serves them with the endpoint of the python package, `python -m sbmlsim.serve --static`, so a page and its API are one origin, and drives the installed Chrome through playwright. The endpoint is the checkout in `SBMLSIM_REPO` (`../sbmlsim` without), serving `examples.panels.hctz:PROJECT`; where there is no such checkout the command says that it skipped and exits 0.
+`demo/` has the four pages the elements are tested on, the three hosts of the panel and the page of an app: `plain.html` (one script tag and one element tag, the page of a course platform), `slides.html` (reveal.js on a dark theme, which activates a panel when its slide is shown and freezes it when it is left) and `docs.md` (a raw HTML block in a markdown page, which `scripts/stage-demo.mjs` renders to `docs.html` for the tests), and `app.html` is the page a model deployment serves: one script tag and one `<sbmlsim-app>` tag. `npm run e2e` stages them and serves them with the endpoint of the python package, `python -m sbmlsim.serve --static`, so a page and its API are one origin, and drives the installed Chrome through playwright. The endpoint is the checkout in `SBMLSIM_REPO` (`../sbmlsim` without), serving `examples.panels.hctz:PROJECT`; where there is no such checkout the command says that it skipped and exits 0.
 
 ## License
 
