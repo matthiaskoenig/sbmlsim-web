@@ -13,7 +13,20 @@
  * It has the shadow root, the tokens and the typography of the panel
  * (`SbmlsimPanel.ce.vue` has the reasons, and `theme.css` the table): it
  * declares no colour of its own, so a host which sets a `--sbmlsim-*` token
- * moves the shell and its panels together.
+ * moves the shell and its panels together. Unlike a panel, which is a figure
+ * in the prose of a page, the shell is a page level region with a title, a
+ * navigation, a grid and a footer, so it paints its own surface (`--_bg`, which
+ * is dark under `theme="dark"` and under a dark `prefers-color-scheme`) and
+ * its text is read against that surface and not against whatever page it sits
+ * in; the text never inherits the colour of the page.
+ *
+ * ## The grid
+ *
+ * The grid has as many columns as fit panels of at least 30rem, and a track
+ * which would stay empty collapses, so a lone panel takes the row: two columns
+ * from about 976px of the width of the shell, one below it, which is also the
+ * one column of a phone. The width is the one of the shell and not of the
+ * window, so an app in a column of a page is as narrow as its column.
  *
  * ## What happens to a page
  *
@@ -28,7 +41,12 @@
  * declaration and not at the ones the reader left them at, and it asks the
  * endpoint for its declaration and its first grid again, which the endpoint
  * answers from its cache of the simulations; the navigation, the title and the
- * footer stay where they are.
+ * footer stay where they are. A reader's switch of the page is announced to a
+ * screen reader in a polite live region and to the page with `sbmlsim-page`,
+ * whose `detail` is `{ page }`, the id of the page; the page can give its pages
+ * addresses with it and answer the back button by setting `page` again.
+ * The event is for the reader's switch, not for the attribute being set from
+ * outside, which the page which set it knows.
  *
  * ## The variant
  *
@@ -42,9 +60,11 @@
  *
  * The citation, the DOI and the licenses of the declaration, and the versions
  * which simulated: the shell listens to `sbmlsim-result` of its panels, which
- * carries the provenance of every answer, and names the version of sbmlsim, the
- * engine and the short hash of the model of the answers which are shown, so the
- * line says what the page shows and not what the service happens to run.
+ * carries the provenance of every successful simulation, keeps the latest one
+ * of each panel, and names the version of sbmlsim, the engine and the short
+ * hash of the model of those answers, so the line says what the page shows and
+ * not what the service happens to run, and it does not grow with the moves of
+ * a knob.
  *
  * ## A failure
  *
@@ -70,6 +90,7 @@ import type { PropType } from 'vue'
 import { DEFAULT_TIMEOUT, FAILURE_MESSAGES, PanelClient, failureKind } from './client'
 import type { FailureKind } from './client'
 import type { AppDeclaration, AppPage, Provenance } from './contract'
+import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
 type ThemeName = 'auto' | 'light' | 'dark'
@@ -115,8 +136,10 @@ const app = shallowRef<AppDeclaration | null>(null)
 const failure = ref<FailureKind | null>(null)
 /** The id of the variant the reader chose, empty where the app has none. */
 const chosen = ref('')
-/** The provenance of the answers the panels of the page announced, by their model hash. */
-const answers = ref<Provenance[]>([])
+/** The provenance of the latest answer of each panel of the page, by the id of the panel. */
+const answers = ref<Record<string, Provenance>>({})
+/** What the live region says, the page which was switched to; empty until a reader switches. */
+const announced = ref('')
 
 /** The controller of the request of the app, so a superseded one is dropped. */
 let flight: AbortController | null = null
@@ -160,12 +183,13 @@ const doiText = computed<string>(() => app.value?.doi.trim().replace(DOI_PREFIX,
 
 /** The versions which simulated what the page shows, empty before the first answer. */
 const simulated = computed<string>(() => {
-  const versions = [...new Set(answers.value.map((one) => `sbmlsim ${one.sbmlsim}`))]
-  const engines = [...new Set(answers.value.map((one) => one.engine))]
-  const models = [...new Set(answers.value.map((one) => one.model_sha256.slice(0, HASH_LENGTH)))]
-  if (answers.value.length === 0) {
+  const latest = Object.values(answers.value)
+  if (latest.length === 0) {
     return ''
   }
+  const versions = [...new Set(latest.map((one) => `sbmlsim ${one.sbmlsim}`))]
+  const engines = [...new Set(latest.map((one) => one.engine))]
+  const models = [...new Set(latest.map((one) => one.model_sha256.slice(0, HASH_LENGTH)))]
   return [
     `Simulated with ${versions.join(', ')}`,
     engines.join(', '),
@@ -249,37 +273,49 @@ function freezeShown(): void {
 function collect(event: Event): void {
   const provenance = (event as CustomEvent<{ provenance?: Provenance }>).detail.provenance
   if (provenance !== undefined) {
-    answers.value = [...answers.value, provenance]
+    answers.value = { ...answers.value, [provenance.panel]: provenance }
   }
 }
 
 /**
- * Set the page, which is the attribute `page` of the element.
+ * Switch the page, which is the attribute `page` of the element, and say so.
  *
  * @param id the id of the page
  */
 function show(id: string): void {
+  if (id === current.value?.id) {
+    return
+  }
   host?.setAttribute('page', id)
+  const title = app.value?.pages.find((one) => one.id === id)?.title ?? id
+  announced.value = `Showing ${title}`
+  host?.dispatchEvent(
+    new CustomEvent('sbmlsim-page', {
+      detail: { page: id },
+      bubbles: true,
+      composed: true,
+    }),
+  )
 }
 
 watch(
   () => current.value?.id,
   () => {
     freezeShown()
-    answers.value = []
+    answers.value = {}
   },
   { flush: 'pre' },
 )
 
 watch(variantOfPanels, () => {
-  answers.value = []
+  answers.value = {}
 })
 
 watch(
   () => [props.endpoint, props.model],
   () => {
     freezeShown()
-    answers.value = []
+    answers.value = {}
     void load()
   },
 )
@@ -323,15 +359,17 @@ onBeforeUnmount(() => {
           </select>
         </label>
       </div>
-      <main
+      <!-- a region and no main: the page which embeds the shell has its own landmark -->
+      <section
         ref="grid"
         :key="current.id"
         class="grid"
-        :class="{ single: current.panels.length === 1 }"
+        :aria-label="current.title"
         @sbmlsim-result="collect"
       >
-        <section v-for="one in current.panels" :key="one" class="cell">
-          <sbmlsim-panel
+        <div v-for="one in current.panels" :key="one" class="cell">
+          <component
+            :is="placedPanelTag()"
             auto
             :endpoint="props.endpoint"
             :model="props.model"
@@ -340,9 +378,10 @@ onBeforeUnmount(() => {
             :timeout="props.timeout"
             :heading-level="panelLevel"
             :variant="variantOfPanels"
-          ></sbmlsim-panel>
-        </section>
-      </main>
+          ></component>
+        </div>
+      </section>
+      <p class="live" aria-live="polite">{{ announced }}</p>
       <footer class="footer">
         <p v-if="app.citation !== ''" class="citation">{{ app.citation }}</p>
         <p class="facts">
@@ -363,14 +402,18 @@ onBeforeUnmount(() => {
 
 <style>
 /*
- * As in the panel, the host carries its box and nothing else, and every colour
- * and every piece of typography is declared on `.shell`, so a rule of the page
- * which matches the element cannot hand its own to what is inside by
+ * The host carries its box and its surface, and every text colour and every
+ * piece of typography is declared on `.shell`, so a rule of the page which
+ * matches the element cannot hand its own colour to what is inside by
  * inheritance. The panels inherit the `--sbmlsim-*` tokens through the shadow
  * boundary, which is how `theme` and a token of the page reach them.
  */
 :host {
   display: block;
+  /* the surface of the shell, read through the private token, which is dark
+   * under a dark scheme and under `theme="dark"`, so the text on it, which is
+   * the colour of the same table, is readable on any page */
+  background: var(--_bg);
   color-scheme: light dark;
 }
 
@@ -383,6 +426,7 @@ onBeforeUnmount(() => {
 }
 
 .shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -393,8 +437,6 @@ onBeforeUnmount(() => {
   /* the grid below reads the width of the shell and not of the window, so an
    * app in a column of a page is as narrow as its column */
   container-type: inline-size;
-  /* no background: the shell is part of the page it sits in, as a figure is, and
-   * only the cards of the panels are surfaces */
   color: var(--_fg);
   font-family: var(--_font);
   font-size: 14px;
@@ -493,15 +535,9 @@ onBeforeUnmount(() => {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
   gap: 16px;
   align-items: start;
-}
-
-.grid.single {
-  /* a lone panel is not stretched over the width of the page, which leaves
-   * its figure a strip, and not left in half of it either */
-  grid-template-columns: minmax(0, 60rem);
 }
 
 .cell {
@@ -514,6 +550,16 @@ onBeforeUnmount(() => {
   border-radius: var(--_radius);
   background: var(--_bg-card);
   box-shadow: var(--_shadow);
+}
+
+.live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .footer {
@@ -558,12 +604,6 @@ onBeforeUnmount(() => {
 :focus-visible {
   outline: 2px solid var(--_accent);
   outline-offset: 2px;
-}
-
-@container (max-width: 760px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* a figure keeps the room on a phone, where the card is nearly the screen */

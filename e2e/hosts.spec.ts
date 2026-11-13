@@ -372,14 +372,15 @@ test.describe('the app shell', () => {
     expect(await position()).toEqual(before)
   })
 
-  test('is readable in the dark theme', async ({ page }) => {
-    await page.goto('/demo/app.html')
-    const app = page.locator('sbmlsim-app')
-    await app.evaluate((element) => {
-      element.setAttribute('theme', 'dark')
-    })
-    await expect(app.locator('sbmlsim-panel svg path').first()).toBeVisible()
-    const ratios = await app.evaluate((element) => {
+  /**
+   * Measure the contrast of the text of the shell against what it sits on.
+   *
+   * The background behind an element is the first one which is painted on the
+   * way up, through the shadow roots, so the measure is of the surface the
+   * reader sees and not of one the element happens not to sit on.
+   */
+  async function contrasts(app: Locator): Promise<Record<string, number>> {
+    return app.evaluate((element) => {
       const parse = (text: string): number[] => (text.match(/[\d.]+/g) ?? []).map(Number)
       const lin = (c: number): number => {
         const s = c / 255
@@ -391,27 +392,106 @@ test.describe('the app shell', () => {
         const [x, y] = [luminance(parse(a)), luminance(parse(b))]
         return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
       }
+      const behind = (start: Element): string => {
+        let node: Node | null = start
+        while (node !== null) {
+          if (node instanceof Element) {
+            const paint = getComputedStyle(node).backgroundColor
+            if (parse(paint).length < 4 || parse(paint)[3] !== 0) {
+              return paint
+            }
+          }
+          node = node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
+        }
+        return 'rgb(255, 255, 255)'
+      }
       const root = element.shadowRoot
-      const style = (selector: string): CSSStyleDeclaration => {
+      const measure = (selector: string): number => {
         const found = root?.querySelector(selector)
         if (!found) {
           throw new Error(`no ${selector}`)
         }
-        return getComputedStyle(found)
+        return ratio(getComputedStyle(found).color, behind(found))
       }
-      // the shell paints no surface, so the text of the page is read against
-      // the card it sits above, which is the dark surface of the theme
-      const surface = style('.cell').backgroundColor
+      const shell = root?.querySelector('.shell')
       return {
-        title: ratio(style('.title').color, surface),
-        idle: ratio(style('.tab:not([aria-current])').color, surface),
-        footer: ratio(style('.citation').color, surface),
-        link: ratio(style('.footer a').color, surface),
+        title: measure('.title'),
+        subtitle: measure('.subtitle'),
+        idle: measure('.tab:not([aria-current])'),
+        current: measure('.tab[aria-current]'),
+        citation: measure('.citation'),
+        link: measure('.footer a'),
+        // the surface itself, against the white of a page which is not dark
+        surface: ratio(shell ? behind(shell) : '', 'rgb(255, 255, 255)'),
       }
     })
+  }
+
+  test('is readable with theme dark on a light page', async ({ page }) => {
+    await page.goto('/demo/app.html')
+    const app = page.locator('sbmlsim-app')
+    await app.evaluate((element) => {
+      element.setAttribute('theme', 'dark')
+    })
+    await expect(app.locator('sbmlsim-panel svg path').first()).toBeVisible()
+    const ratios = await contrasts(app)
+    // the surface is dark, so the light text of the dark table sits on it
+    expect(ratios.surface).toBeGreaterThan(10)
     expect(ratios.title).toBeGreaterThan(7)
-    expect(ratios.idle).toBeGreaterThan(4.5)
-    expect(ratios.footer).toBeGreaterThan(4.5)
-    expect(ratios.link).toBeGreaterThan(4.5)
+    for (const name of ['subtitle', 'idle', 'current', 'citation', 'link']) {
+      expect(ratios[name], name).toBeGreaterThan(4.5)
+    }
+  })
+
+  test('is readable under a dark colour scheme on the unmodified page', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await page.goto('/demo/app.html')
+    const app = page.locator('sbmlsim-app')
+    await expect(app.locator('sbmlsim-panel svg path').first()).toBeVisible()
+    const ratios = await contrasts(app)
+    expect(ratios.surface).toBeGreaterThan(10)
+    expect(ratios.title).toBeGreaterThan(7)
+    for (const name of ['subtitle', 'idle', 'current', 'citation', 'link']) {
+      expect(ratios[name], name).toBeGreaterThan(4.5)
+    }
+  })
+
+  test('is readable in the light theme', async ({ page }) => {
+    await page.goto('/demo/app.html')
+    const app = page.locator('sbmlsim-app')
+    await expect(app.locator('sbmlsim-panel svg path').first()).toBeVisible()
+    const ratios = await contrasts(app)
+    expect(ratios.surface).toBeLessThan(1.1)
+    expect(ratios.title).toBeGreaterThan(7)
+    for (const name of ['subtitle', 'idle', 'current', 'citation', 'link']) {
+      expect(ratios[name], name).toBeGreaterThan(4.5)
+    }
+  })
+
+  test('announces a page change and tells the page', async ({ page }) => {
+    const app = await openApp(page)
+    await app.evaluate((element) => {
+      const heard: unknown[] = []
+      element.addEventListener('sbmlsim-page', (event) => heard.push((event as CustomEvent).detail))
+      ;(window as unknown as { heard: unknown[] }).heard = heard
+    })
+    await app.locator('.tab', { hasText: 'Dose' }).click()
+    await expect(app.locator('.live')).toHaveText('Showing Dose')
+    expect(await page.evaluate(() => (window as unknown as { heard: unknown[] }).heard)).toEqual([
+      { page: 'dose' },
+    ])
+    await expect(app.locator('main')).toHaveCount(0)
+  })
+
+  test('lets a lone panel take the row', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const app = await openApp(page)
+    const widths = await app.evaluate((element) => {
+      const root = element.shadowRoot
+      const cell = root?.querySelector('.cell')?.getBoundingClientRect()
+      const grid = root?.querySelector('.grid')?.getBoundingClientRect()
+      return { cell: cell?.width ?? 0, grid: grid?.width ?? 0 }
+    })
+    expect(widths.cell).toBeCloseTo(widths.grid, 0)
   })
 })

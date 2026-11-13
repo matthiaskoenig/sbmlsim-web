@@ -349,14 +349,90 @@ describe('the shell of an app', () => {
     expect(element.shadowRoot.querySelector('.grid')).toBeNull()
   })
 
-  it('is one grid column below 760px of its own width', async () => {
+  it('lays its panels out in as many columns as fit 30rem and collapses an empty track', async () => {
     const element = await shell()
     const style = [...element.shadowRoot.querySelectorAll('style')]
       .map((one) => one.textContent)
       .join('\n')
-    const narrow =
-      /@container \(max-width: 760px\)\s*{\s*\.grid\s*{\s*grid-template-columns:\s*1fr;/
-    expect(style).toMatch(narrow)
+    // one column below about 976px of the width of the shell, two above, and a
+    // lone panel takes the row, which `auto-fit` is for and `auto-fill` is not
+    expect(style).toMatch(/repeat\(auto-fit,\s*minmax\(min\(100%,\s*30rem\),\s*1fr\)\)/)
+    expect(style).not.toMatch(/auto-fill/)
+  })
+
+  it('paints its own surface and declares the scheme of its controls', async () => {
+    const element = await shell()
+    const style = [...element.shadowRoot.querySelectorAll('style')]
+      .map((one) => one.textContent)
+      .join('\n')
+    expect(style).toMatch(/:host\s*{[^}]*background:\s*var\(--_bg\)/)
+    expect(style).toMatch(/:host\s*{[^}]*color-scheme:\s*light dark/)
+    expect(style).toMatch(/:host\(\[theme='dark'\]\)\s*{[^}]*color-scheme:\s*dark/)
+  })
+
+  it('has no landmark of its own, a named region for the grid and a live region', async () => {
+    const element = await shell()
+    expect(element.shadowRoot.querySelector('main')).toBeNull()
+    expect(part(element, '.grid').getAttribute('aria-label')).toBe('Page A')
+    const live = part(element, '.live')
+    expect(live.getAttribute('aria-live')).toBe('polite')
+    expect(live.textContent).toBe('')
+    tabs(element)[1]?.click()
+    await settled()
+    expect(live.textContent).toBe('Showing Page B')
+    expect(part(element, '.grid').getAttribute('aria-label')).toBe('Page B')
+  })
+
+  it('tells the page which page a reader switched to, once per switch', async () => {
+    const element = await shell()
+    const heard: unknown[] = []
+    element.addEventListener('sbmlsim-page', (event) => heard.push((event as CustomEvent).detail))
+    tabs(element)[1]?.click()
+    await settled()
+    tabs(element)[1]?.click()
+    await settled()
+    tabs(element)[0]?.click()
+    await settled()
+    expect(heard).toEqual([{ page: 'pageB' }, { page: 'pageA' }])
+  })
+
+  it('keeps one answer per panel for the footer however many simulations ran', async () => {
+    const element = await shell()
+    const panel = part(element, 'sbmlsim-panel')
+    const answer = (sha: string): CustomEvent =>
+      new CustomEvent('sbmlsim-result', {
+        detail: { provenance: { ...run({}).provenance, panel: 'panelA', model_sha256: sha } },
+        bubbles: true,
+        composed: true,
+      })
+    for (let move = 0; move < 50; move += 1) {
+      panel.dispatchEvent(answer('d'.repeat(64)))
+    }
+    panel.dispatchEvent(answer('e'.repeat(64)))
+    await settled()
+    // the latest answer of the panel is what the footer names, and the first ones are gone
+    const text = part(element, '.simulated').textContent
+    expect(text).toContain('model eeeeeeee')
+    expect(text).not.toContain('dddddddd')
+    expect(text).not.toContain('cccccccc')
+  })
+
+  it('places the panels under the tag register was called with', async () => {
+    try {
+      expect(register('x-panel', 'x-app')).toBe(true)
+      const element = document.createElement('x-app') as AppElement
+      element.setAttribute('endpoint', '/api-root')
+      element.setAttribute('model', 'modelA')
+      document.body.append(element)
+      await settled()
+      expect([...element.shadowRoot.querySelectorAll('x-panel')]).toHaveLength(1)
+      expect(element.shadowRoot.querySelector('sbmlsim-panel')).toBeNull()
+      expect(element.shadowRoot.querySelector('x-panel')?.getAttribute('heading-level')).toBe('2')
+    } finally {
+      // the default call puts the shells back on the default panel tag
+      register()
+    }
+    expect(panels(await shell())).toEqual(['panelA'])
   })
 
   it('declares no colour of its own, only the tokens of the design', async () => {

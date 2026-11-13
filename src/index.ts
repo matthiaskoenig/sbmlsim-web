@@ -20,6 +20,7 @@ import { defineCustomElement } from 'vue'
 
 import SbmlsimApp from './SbmlsimApp.ce.vue'
 import SbmlsimPanel from './SbmlsimPanel.ce.vue'
+import { APP_TAG, PANEL_TAG, placePanelTag } from './tags'
 
 export { CONTRACTS, ContractError, checkContract } from './contract'
 export type {
@@ -63,29 +64,28 @@ export { interpolate } from './interpolate'
 export { plotGeometry, plotSvg, seriesColour } from './plot'
 export type { PlotBox, PlotGeometry, PlotSpec, Points, Series } from './plot'
 
-/** The tag the element is registered under unless a page asks for another one. */
-export const PANEL_TAG = 'sbmlsim-panel'
+export { APP_TAG, PANEL_TAG }
 
 /**
  * The class of `<sbmlsim-panel>`, a custom element with a shadow root.
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
- * `hover`, `data`, `fallback`, `timeout`, `heading-level` and `auto` and the
- * methods `activate()`, `freeze()` and `reset()`, and it dispatches
- * `sbmlsim-error` when a request failed.
+ * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant` and `auto`
+ * and the methods `activate()`, `freeze()` and `reset()`. It dispatches
+ * `sbmlsim-error` when a request failed and `sbmlsim-result`, with the
+ * `provenance` and the `spec_hash` of the answer, when a simulation succeeded:
+ * never for a failure and never for a stored fallback, which is no simulation.
  */
 export const SbmlsimPanelElement = defineCustomElement(SbmlsimPanel)
-
-/** The tag of the shell of an app, which places the `<sbmlsim-panel>` elements of its pages. */
-export const APP_TAG = 'sbmlsim-app'
 
 /**
  * The class of `<sbmlsim-app>`, the shell of the app of a model.
  *
  * It carries the attributes `endpoint`, `model`, `page`, `theme`, `timeout` and
  * `heading-level`, and it dispatches `sbmlsim-error` when the app could not be
- * read. It places `<sbmlsim-panel>` elements, so the panel has to be registered
- * under `PANEL_TAG` where the shell is used.
+ * read and `sbmlsim-page`, with the id of the page, when a reader switches the
+ * page. It places the panels under the tag `register` was called with, so the
+ * panel has to be registered under it where the shell is used.
  */
 export const SbmlsimAppElement = defineCustomElement(SbmlsimApp)
 
@@ -111,12 +111,14 @@ function define(tagName: string, build: () => CustomElementConstructor): boolean
  * @param tagName the tag to register the panel under, `PANEL_TAG` without
  * @param appTagName the tag to register the shell of an app under, `APP_TAG`
  *   without; a class of a custom element belongs to one tag, so another tag is
- *   given a class of its own, built from the same component
+ *   given a class of its own, built from the same component; the shells place
+ *   their panels under `tagName`
  * @returns whether this call registered either of them; `false` for tags which
  *   are taken already and for an environment without custom elements, in both
  *   of which the call changes nothing
  */
 export function register(tagName: string = PANEL_TAG, appTagName: string = APP_TAG): boolean {
+  placePanelTag(tagName)
   const panel = define(tagName, () =>
     tagName === PANEL_TAG ? SbmlsimPanelElement : defineCustomElement(SbmlsimPanel),
   )

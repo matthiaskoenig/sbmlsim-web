@@ -22,13 +22,7 @@ import { defineConfig } from 'vitest/config'
 // `*.ce.vue` puts them in the shadow root, and a test which reads them out of
 // it has to find them there.
 export default defineConfig(({ command }) => ({
-  // `<sbmlsim-panel>` is the element the shell places, a tag of the browser and
-  // no component of Vue, which would otherwise be looked up and warned about
-  plugins: [
-    vue({
-      template: { compilerOptions: { isCustomElement: (tag) => tag === 'sbmlsim-panel' } },
-    }),
-  ],
+  plugins: [vue()],
   define:
     command === 'build'
       ? {

@@ -1,0 +1,34 @@
+/**
+ * The tags of the two elements and the one a shell places its panels under.
+ *
+ * It is a module of its own because both `index.ts`, which registers the
+ * elements, and the shell, which places the panels, need it, and the shell
+ * cannot import the index which imports it.
+ */
+
+/** The tag the panel is registered under unless a page asks for another one. */
+export const PANEL_TAG = 'sbmlsim-panel'
+
+/** The tag the shell of an app is registered under unless a page asks for another one. */
+export const APP_TAG = 'sbmlsim-app'
+
+/** The tag the shells place their panels under, the one `register` was called with last. */
+let placed: string = PANEL_TAG
+
+/**
+ * Get the tag a shell places its panels under.
+ *
+ * @returns the tag of the panel as `register` registered it
+ */
+export function placedPanelTag(): string {
+  return placed
+}
+
+/**
+ * Set the tag a shell places its panels under.
+ *
+ * @param tagName the tag the panel is registered under
+ */
+export function placePanelTag(tagName: string): void {
+  placed = tagName
+}

@@ -454,6 +454,27 @@ function fittingLabel(label: string, room: number, fontSize: number): string {
 }
 
 /**
+ * Cut the label of an axis to the room it has, keeping its unit.
+ *
+ * @param label the label, which ends in ` [unit]` where the axis has a unit
+ * @param room the pixels the axis is long
+ * @returns the label where it fits, else its name cut with an ellipsis in front
+ *   of the unit; the unit alone where not even one character of the name fits
+ */
+function fittingAxisLabel(label: string, room: number): string {
+  const found = /^(.*?)( \[[^\]]*\])$/.exec(label)
+  if (found === null) {
+    return fittingLabel(label, room, LABEL_FONT)
+  }
+  const [, name = '', unit = ''] = found
+  if (labelRoom(label, LABEL_FONT) <= room + ROUNDING) {
+    return label
+  }
+  const cut = fittingLabel(name, room - labelRoom(unit, LABEL_FONT), LABEL_FONT)
+  return cut === '' ? unit.trim() : `${cut}${unit}`
+}
+
+/**
  * Lay a label out on the lines of the room it has.
  *
  * A label which does not fit one line wraps at its words, so a legend in a
@@ -1108,8 +1129,9 @@ function axisGroup(
     .join('')
   const middle = horizontal ? (box.x0 + box.x1) / 2 : (box.y0 + box.y1) / 2
   // a label which is longer than its axis is cut with an ellipsis, as a legend
-  // entry is, and not left to run out of the figure
-  const label = fittingLabel(full, horizontal ? box.x1 - box.x0 : box.y1 - box.y0, LABEL_FONT)
+  // entry is, and not left to run out of the figure; the unit is what a reader
+  // cannot guess, so it is the name which is cut and the unit stays
+  const label = fittingAxisLabel(full, horizontal ? box.x1 - box.x0 : box.y1 - box.y0)
   const title = horizontal
     ? text(label, {
         class: 'axis-label',

@@ -84,7 +84,8 @@
  * line a reader can act on and dispatches `sbmlsim-error` so that the page can
  * react. `activate()` resolves either way and never rejects.
  *
- * Every answer of a simulation is announced with `sbmlsim-result`, whose
+ * Every successful simulation is announced with `sbmlsim-result`, never a
+ * failure and never the stored fallback, which is no simulation. Its
  * `detail` carries its `provenance` and its `spec_hash`, so a page, and the
  * shell of an app (`SbmlsimApp.ce.vue`), can say which versions simulated what
  * it shows without reading into the panel.

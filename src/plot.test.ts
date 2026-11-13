@@ -466,11 +466,13 @@ describe('plotGeometry', () => {
 })
 
 describe('the label of an axis', () => {
-  it('is cut with an ellipsis where it is longer than its axis and kept where it fits', () => {
-    const long = 'a curve of a very long name which runs past the axis it labels [umol]'
-    const narrow = texts(plotSvg(spec(1, { yLabel: long, height: 160, width: 300 })))
-    expect(narrow).not.toContain(long)
-    expect(narrow.some((one) => one.endsWith('…') && long.startsWith(one.slice(0, -1)))).toBe(true)
+  it('is cut in its name and keeps its unit where it is longer than its axis', () => {
+    const name = 'a curve of a very long name which runs past the axis it labels'
+    const narrow = texts(plotSvg(spec(1, { yLabel: name, height: 160, width: 300 })))
+    const cut = narrow.find((one) => one.endsWith('\u2026 [mM]'))
+    expect(cut).toBeDefined()
+    // the name is cut and the unit, which a reader cannot guess, stays
+    expect(name.startsWith((cut ?? '').slice(0, -'\u2026 [mM]'.length))).toBe(true)
     expect(texts(plotSvg(spec(1, { yLabel: 'value' })))).toContain('value [mM]')
   })
 })
