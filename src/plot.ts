@@ -28,9 +28,9 @@
  *   tick labels are every point up to `MAX_TICKS` and every k-th above it,
  * - a legend sits beside the plot or below it, packed into rows, whichever of
  *   the two leaves the larger plot box, so a figure which grows never loses
- *   plot at a width where the two trade places; it is laid out over the labels
- *   it may show (`declaredLabels`) and drawn with the ones it has, so an entry
- *   which comes and goes does not move the box either,
+ *   plot at a width where the two trade places; it is laid out over the
+ *   legends it may show (`declaredLegends`) and drawn with the one it has, so
+ *   an entry which comes and goes does not move the box either,
  * - the label of an axis wraps at its words onto at most `AXIS_LINES` lines of
  *   the length of that axis, which is `_fit_margins` and `_wrap_label` of
  *   `sbmlsim.plot.serialization_matplotlib`; the margin of the figure grows by
@@ -126,23 +126,25 @@ export interface PlotSpec {
    */
   yLimits?: Limits
   /**
-   * The labels of the series the figure may draw under its curves, in the order
-   * the caller declares them, the drawn ones among them.
+   * Every legend of study data the figure may draw, each the labels of the
+   * series drawn together, in the order the caller declares them.
    *
    * It is what a caller passes whose entries come and go while the figure stays
-   * the same figure: a series which is drawn only under some condition is named
-   * here whether or not it is drawn now, the legend takes the width of its
-   * column and the rows of a legend below the plot over this list, and nothing
-   * is drawn for a label which has no series. It is the whole list and not the
-   * labels which are missing, because the rows are packed in the order they are
-   * given: a list which held the drawn entries first would pack the same labels
-   * in another order, and two conditions of one declaration would draw their
-   * curve in boxes of two sizes. The plot box is then a function of what the
-   * caller may show and not of what it happens to show, which is the rule the
-   * frame of the value axis follows as well. The cost is a legend which
-   * sometimes keeps room it does not use.
+   * the same figure: the series of a panel are drawn under conditions of its
+   * knobs, and each state of the knobs draws one list of them. The legend
+   * takes the width of its column over the widest label of any of these lists
+   * and the rows of a legend below the plot over the list which needs the most
+   * rows, and nothing is drawn for a label which has no series. A list is a
+   * whole list in its order and not the labels which are missing, because the
+   * rows are packed in the order they are given. The plot box is then a
+   * function of what the caller may show and not of what it happens to show,
+   * which is the rule the frame of the value axis follows as well, and it is
+   * the box of the largest legend one state shows and not of every series at
+   * once, which no state shows. Without it the figure lays its legend out
+   * over the series it draws; the list it draws is always laid out with the
+   * others, so the band never holds fewer rows than it draws.
    */
-  declaredLabels?: string[]
+  declaredLegends?: string[][]
   /** The width of the figure in pixels. */
   width: number
   /** The height of the figure in pixels. */
@@ -163,6 +165,25 @@ export interface PlotSpec {
    * from the table instead.
    */
   measure?: TextMeasure
+  /**
+   * The sizes the text of the figure is drawn in, the sizes of the design
+   * without.
+   *
+   * The layout measures every text at the size it is drawn in and gives every
+   * line, row and margin the height of its font, so a caller whose page sets
+   * the size tokens (`--sbmlsim-font-size`, `--sbmlsim-font-size-small`)
+   * passes the sizes they resolve to; the figure then writes them as the
+   * fallbacks of those tokens, so a copy of it out of the page keeps them.
+   */
+  fontSizes?: FontSizes
+}
+
+/** The sizes the text of a figure is drawn in, in pixels. */
+export interface FontSizes {
+  /** The size of the labels of the axes, `--sbmlsim-font-size`. */
+  label: number
+  /** The size of the tick labels, the legend and the colour bar, `--sbmlsim-font-size-small`. */
+  small: number
 }
 
 /**
@@ -208,8 +229,6 @@ const TOKENS = {
   fg: 'rgb(27 31 36)',
   'fg-soft': 'rgb(91 100 114)',
   font: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-  'font-size': '12px',
-  'font-size-small': '11px',
   'axis-width': '1px',
   'curve-width': '1.8px',
   'data-width': '1px',
@@ -219,11 +238,17 @@ const TOKENS = {
 const PAD = 8
 /** The length of a tick, in pixels. */
 const TICK = 4
-/** The room left of the plot for the y label and its tick labels, in pixels. */
+/**
+ * The room left of the plot for one line of the y label and its tick labels,
+ * in pixels, at the sizes of the design; it grows by what a larger font of the
+ * label adds to its line (`letteringOf`).
+ */
 const LEFT = 64
-/** The room above the plot, in pixels. */
-const TOP = 14
-/** The room below the plot for the x label and its tick labels, in pixels. */
+/**
+ * The room below the plot for the x tick labels and one line of the x label,
+ * in pixels, at the sizes of the design; it grows by what larger fonts add to
+ * the two.
+ */
 const BOTTOM = 42
 /**
  * The share of the width of a figure the column of a legend or of a colour bar
@@ -366,16 +391,16 @@ const COLOURBAR_BAR = 12
 const COLUMN_GAP = 12
 /** The length of the line of a legend entry, in pixels. */
 const SWATCH = 18
-/** The height of a row of a legend, in pixels. */
-const ROW = 18
-/** The height of a further line of a legend entry which wraps, in pixels. */
-const LEGEND_LINE = 13
+/** The pixels a row of a legend is taller than the size of its font. */
+const ROW_LEADING = 7
+/** The pixels a further line of a legend entry is taller than the size of its font. */
+const LEGEND_LEADING = 2
 /** The most lines a legend entry is given before its last line is cut. */
 const LEGEND_LINES = 2
 /** The most lines the label of an axis is given before its last line is cut. */
 const AXIS_LINES = 2
-/** The height of a further line of the label of an axis, in pixels. */
-const AXIS_LINE = 14
+/** The pixels a further line of the label of an axis is taller than its font. */
+const AXIS_LEADING = 2
 /** The radius of the marker of a study point, in pixels. */
 const MARKER = 3
 /**
@@ -398,8 +423,13 @@ const CAP = 3
 const X_TICK_ROOM = 70
 /** The pixels a tick of the y axis is given, which is how many ticks it gets. */
 const Y_TICK_ROOM = 50
-/** The fewest ticks an axis gets whatever its length. */
+/**
+ * The fewest ticks an axis asks for whatever its length; an x axis whose
+ * labels do not fit that many asks for fewer (`xAxisOf`).
+ */
 const LEAST_TICKS = 3
+/** The gap two labels of neighbouring ticks of the x axis keep, in pixels. */
+const TICK_GAP = 6
 /** The most ticks an axis gets whatever its length. */
 const MOST_TICKS = 8
 /** The counts of ticks an axis can get, which are the tick sets of its limits. */
@@ -414,9 +444,11 @@ const LABEL_GAP = 3
 const BAR_BANDS = 32
 /** The overlap of two bands of a colour bar, which closes their seam, in pixels. */
 const BAND_SEAM = 0.5
-/** The size of the font of a tick, a legend entry and a label of a colour bar. */
+/**
+ * The size of the font of a tick, a legend entry and a label of a colour bar in
+ * pixels, the default of `--sbmlsim-font-size-small`.
+ */
 const SMALL_FONT = 11
-
 /** The size of the font of an axis label in pixels, the default of `--sbmlsim-font-size`. */
 const LABEL_FONT = 12
 /** What a sum of pixels may be off by and still count as the same room. */
@@ -699,6 +731,76 @@ function charactersOf(text: string): string[] {
     : Array.from(GRAPHEMES.segment(text), (one) => one.segment)
 }
 
+/** The measure and the sizes a figure lays its text out with. */
+interface Lettering {
+  /** How wide a text is drawn. */
+  measure: TextMeasure
+  /** The size of the labels of the axes, in pixels. */
+  label: number
+  /** The size of the tick labels, the legend and the colour bar, in pixels. */
+  small: number
+  /** The height of a further line of the label of an axis. */
+  axisLine: number
+  /** The height of a row of a legend. */
+  row: number
+  /** The height of a further line of a legend entry which wraps. */
+  legendLine: number
+  /** The room above the plot, which holds half of the top y tick label. */
+  top: number
+  /** The room below the plot for the x tick labels and one line of the x label. */
+  bottom: number
+  /** The room left of the plot for one line of the y label and its tick labels. */
+  left: number
+}
+
+/**
+ * Get one size of the font of a figure.
+ *
+ * @param given the size a caller passed
+ * @param fallback the size of the design
+ * @returns the size, the one of the design for one which is no size
+ */
+function fontSize(given: number | undefined, fallback: number): number {
+  return given !== undefined && Number.isFinite(given) && given >= 1 ? given : fallback
+}
+
+/**
+ * Get the measure and the sizes a figure lays its text out with.
+ *
+ * Every height of a line follows the size of its font, and every room which
+ * holds text grows by what the font adds over the size of the design, so a
+ * figure of the default sizes is the figure it always was.
+ *
+ * @param spec the figure
+ * @returns its lettering
+ */
+function letteringOf(spec: PlotSpec): Lettering {
+  const label = fontSize(spec.fontSizes?.label, LABEL_FONT)
+  const small = fontSize(spec.fontSizes?.small, SMALL_FONT)
+  return {
+    measure: measureOf(spec),
+    label,
+    small,
+    axisLine: label + AXIS_LEADING,
+    row: small + ROW_LEADING,
+    legendLine: small + LEGEND_LEADING,
+    top: PAD + Math.ceil(small / 2),
+    bottom: BOTTOM + (small - SMALL_FONT) + (label - LABEL_FONT),
+    left: LEFT + (label - LABEL_FONT),
+  }
+}
+
+/**
+ * Write the size of a font as a token with the size of the figure as its fallback.
+ *
+ * @param name the token
+ * @param size the size the figure was laid out for
+ * @returns the `var()` a style of the output carries
+ */
+function sizeToken(name: 'font-size' | 'font-size-small', size: number): string {
+  return `var(--sbmlsim-${name}, ${coord(size)}px)`
+}
+
 /**
  * Get whether a text fits the room it has.
  *
@@ -855,13 +957,13 @@ function wrapLabel(
  * @param label the label of the entry
  * @param room the pixels a line has
  * @param wrap whether the legend wraps its labels or cuts them on one line
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the lines
  */
-function legendLines(label: string, room: number, wrap: boolean, measure: TextMeasure): string[] {
+function legendLines(label: string, room: number, wrap: boolean, type: Lettering): string[] {
   return wrap
-    ? wrapLabel(label, room, SMALL_FONT, LEGEND_LINES, measure)
-    : [fittingLabel(label, room, SMALL_FONT, measure)]
+    ? wrapLabel(label, room, type.small, LEGEND_LINES, type.measure)
+    : [fittingLabel(label, room, type.small, type.measure)]
 }
 
 /**
@@ -870,14 +972,14 @@ function legendLines(label: string, room: number, wrap: boolean, measure: TextMe
  * @param entries the entries
  * @param room the pixels a label has
  * @param wrap whether the legend wraps its labels
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the pixels from the top of the first row of the legend to the end of
  *   its last
  */
-function legendHeight(entries: Entry[], room: number, wrap: boolean, measure: TextMeasure): number {
+function legendHeight(entries: Entry[], room: number, wrap: boolean, type: Lettering): number {
   return entries.reduce(
     (sum, entry) =>
-      sum + ROW + (legendLines(entry.label, room, wrap, measure).length - 1) * LEGEND_LINE,
+      sum + type.row + (legendLines(entry.label, room, wrap, type).length - 1) * type.legendLine,
     0,
   )
 }
@@ -1198,11 +1300,11 @@ function tickPositions(count: number): number[] {
  * Get the room the widest of a set of labels needs.
  *
  * @param labels the labels
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the pixels of the widest of them, 0 without a label
  */
-function widest(labels: string[], measure: TextMeasure): number {
-  return labels.reduce((most, one) => Math.max(most, measure(one, SMALL_FONT)), 0)
+function widest(labels: string[], type: Lettering): number {
+  return labels.reduce((most, one) => Math.max(most, type.measure(one, type.small)), 0)
 }
 
 /**
@@ -1483,6 +1585,7 @@ function markersOf(points: Points, colour: string, shape: MarkerShape, x: Axis, 
  * @param lines the label of the axis, with its unit, on the lines it wraps to
  * @param room the pixels the margin of the axis has, which is where its label
  *   and its tick labels are written
+ * @param type the lettering of the figure
  * @returns the group of the axis
  */
 function axisGroup(
@@ -1491,6 +1594,7 @@ function axisGroup(
   box: { x0: number; y0: number; x1: number; y1: number },
   lines: string[],
   room: number,
+  type: Lettering,
 ): string {
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
@@ -1551,7 +1655,7 @@ function axisGroup(
   // guess. The x label is written upwards from the bottom of its margin and the
   // y label rightwards from the left edge of the figure, so the line nearest
   // the plot is the last one of the label and the first one of it respectively
-  const style = `fill:${token('fg')};stroke:none;font-size:${token('font-size')}`
+  const style = `fill:${token('fg')};stroke:none;font-size:${sizeToken('font-size', type.label)}`
   const title = lines
     .map((line, index) =>
       horizontal
@@ -1559,15 +1663,15 @@ function axisGroup(
             class: 'axis-label',
             style,
             x: coord(middle),
-            y: coord(box.y1 + room - PAD - LABEL_GAP - (lines.length - 1 - index) * AXIS_LINE),
+            y: coord(box.y1 + room - PAD - LABEL_GAP - (lines.length - 1 - index) * type.axisLine),
             'text-anchor': 'middle',
           })
         : text(line, {
             class: 'axis-label',
             style,
-            x: coord(PAD + index * AXIS_LINE),
+            x: coord(PAD + index * type.axisLine),
             y: coord(middle),
-            transform: `rotate(-90 ${coord(PAD + index * AXIS_LINE)} ${coord(middle)})`,
+            transform: `rotate(-90 ${coord(PAD + index * type.axisLine)} ${coord(middle)})`,
             'text-anchor': 'middle',
             'dominant-baseline': 'hanging',
           }),
@@ -1579,7 +1683,7 @@ function axisGroup(
       class: horizontal ? 'axis x' : 'axis y',
       style:
         `stroke:${token('fg-soft')};stroke-width:${token('axis-width')};` +
-        `fill:none;font-size:${token('font-size-small')}`,
+        `fill:none;font-size:${sizeToken('font-size-small', type.small)}`,
     },
     `${line}${ticks}${title}`,
   )
@@ -1592,9 +1696,10 @@ function axisGroup(
  * @param x the pixel its swatch starts at
  * @param y the pixel its first line is centred on
  * @param lines the lines of its label
+ * @param type the lettering of the figure
  * @returns the group of the entry
  */
-function legendEntry(entry: Entry, x: number, y: number, lines: string[]): string {
+function legendEntry(entry: Entry, x: number, y: number, lines: string[], type: Lettering): string {
   const swatch = entry.shape
     ? markerTag(entry.shape, entry.colour, x + SWATCH / 2, y, 'swatch')
     : tag('line', {
@@ -1609,7 +1714,7 @@ function legendEntry(entry: Entry, x: number, y: number, lines: string[]): strin
     .map((line, index) =>
       text(line, {
         x: coord(x + SWATCH + LABEL_GAP * 2),
-        y: coord(y + index * LEGEND_LINE),
+        y: coord(y + index * type.legendLine),
         'dominant-baseline': 'central',
       }),
     )
@@ -1621,11 +1726,11 @@ function legendEntry(entry: Entry, x: number, y: number, lines: string[]): strin
  * Get the pixels one entry of a legend needs on a line of its own.
  *
  * @param entry the entry
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns its swatch, the gap after it and the width of its label
  */
-function entryRoom(entry: Entry, measure: TextMeasure): number {
-  return SWATCH + LABEL_GAP * 2 + measure(entry.label, SMALL_FONT)
+function entryRoom(entry: Entry, type: Lettering): number {
+  return SWATCH + LABEL_GAP * 2 + type.measure(entry.label, type.small)
 }
 
 /**
@@ -1633,16 +1738,16 @@ function entryRoom(entry: Entry, measure: TextMeasure): number {
  *
  * @param entries the entries, in their order
  * @param room the pixels a row has
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the rows, in their order; an entry which is wider than a row on its
  *   own gets a row of its own, where its label is cut when it is written
  */
-function legendRows(entries: Entry[], room: number, measure: TextMeasure): Entry[][] {
+function legendRows(entries: Entry[], room: number, type: Lettering): Entry[][] {
   const rows: Entry[][] = []
   let row: Entry[] = []
   let used = 0
   for (const entry of entries) {
-    const needed = entryRoom(entry, measure)
+    const needed = entryRoom(entry, type)
     if (row.length > 0 && used + COLUMN_GAP + needed > room + ROUNDING) {
       rows.push(row)
       row = []
@@ -1665,7 +1770,7 @@ function legendRows(entries: Entry[], room: number, measure: TextMeasure): Entry
  * @param y the pixel its first row is centred on
  * @param room the pixels a label has
  * @param wrap whether a label which is longer wraps; otherwise it is cut on one line
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the group of the legend, empty for no entry at all
  */
 function legendGroup(
@@ -1674,7 +1779,7 @@ function legendGroup(
   y: number,
   room: number,
   wrap: boolean,
-  measure: TextMeasure,
+  type: Lettering,
 ): string {
   if (entries.length === 0) {
     return ''
@@ -1682,9 +1787,9 @@ function legendGroup(
   let at = y
   const rows = entries
     .map((entry) => {
-      const lines = legendLines(entry.label, room, wrap, measure)
-      const written = legendEntry(entry, x, at, lines)
-      at += ROW + (lines.length - 1) * LEGEND_LINE
+      const lines = legendLines(entry.label, room, wrap, type)
+      const written = legendEntry(entry, x, at, lines, type)
+      at += type.row + (lines.length - 1) * type.legendLine
       return written
     })
     .join('')
@@ -1692,7 +1797,7 @@ function legendGroup(
     'g',
     {
       class: 'legend',
-      style: `fill:${token('fg')};font-size:${token('font-size-small')}`,
+      style: `fill:${token('fg')};font-size:${sizeToken('font-size-small', type.small)}`,
     },
     rows,
   )
@@ -1713,7 +1818,7 @@ function legendGroup(
  * @param x the pixel the plot starts at
  * @param y the pixel the first row is centred on
  * @param room the pixels a row has, the width of the plot
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the group of the legend, empty for no row at all
  */
 function belowLegendGroup(
@@ -1721,7 +1826,7 @@ function belowLegendGroup(
   x: number,
   y: number,
   room: number,
-  measure: TextMeasure,
+  type: Lettering,
 ): string {
   if (rows.length === 0) {
     return ''
@@ -1736,10 +1841,10 @@ function belowLegendGroup(
         const label = fittingLabel(
           entry.label,
           x + room - end - SWATCH - LABEL_GAP * 2,
-          SMALL_FONT,
-          measure,
+          type.small,
+          type.measure,
         )
-        end += entryRoom({ ...entry, label }, measure) + COLUMN_GAP
+        end += entryRoom({ ...entry, label }, type) + COLUMN_GAP
         return label
       })
       const wide = end - x - COLUMN_GAP
@@ -1747,8 +1852,8 @@ function belowLegendGroup(
       return row
         .map((entry, place) => {
           const label = labels[place] ?? ''
-          const one = legendEntry(entry, at, y + index * ROW, [label])
-          at += entryRoom({ ...entry, label }, measure) + COLUMN_GAP
+          const one = legendEntry(entry, at, y + index * type.row, [label], type)
+          at += entryRoom({ ...entry, label }, type) + COLUMN_GAP
           return one
         })
         .join('')
@@ -1758,7 +1863,7 @@ function belowLegendGroup(
     'g',
     {
       class: 'legend below',
-      style: `fill:${token('fg')};font-size:${token('font-size-small')}`,
+      style: `fill:${token('fg')};font-size:${sizeToken('font-size-small', type.small)}`,
     },
     written,
   )
@@ -1779,7 +1884,7 @@ function belowLegendGroup(
  * @param top the pixel its top is at
  * @param bottom the pixel its bottom is at
  * @param room the pixels a label has, which cuts one which is longer
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the group of the colour bar, the first series at its bottom
  */
 function colourbarGroup(
@@ -1788,7 +1893,7 @@ function colourbarGroup(
   top: number,
   bottom: number,
   room: number,
-  measure: TextMeasure,
+  type: Lettering,
 ): string {
   const height = Math.max(1, bottom - top)
   const slice = height / BAR_BANDS
@@ -1820,7 +1925,7 @@ function colourbarGroup(
         x2: coord(x + COLOURBAR_BAR + TICK),
         y2: coord(at),
       })
-      const written = text(fittingLabel(one.label, room, SMALL_FONT, measure), {
+      const written = text(fittingLabel(one.label, room, type.small, type.measure), {
         style: `fill:${token('fg-soft')}`,
         x: coord(x + COLOURBAR_BAR + TICK + LABEL_GAP),
         y: coord(at),
@@ -1831,7 +1936,7 @@ function colourbarGroup(
     .join('')
   return tag(
     'g',
-    { class: 'colourbar', style: `font-size:${token('font-size-small')}` },
+    { class: 'colourbar', style: `font-size:${sizeToken('font-size-small', type.small)}` },
     `${bar}${labels}`,
   )
 }
@@ -1880,8 +1985,8 @@ interface Layout {
   fits: Fitted[]
   /** The fits it chose the larger box of, which are those it can draw. */
   candidates: Fitted[]
-  /** The measure every width of the layout was taken with. */
-  measure: TextMeasure
+  /** The measure and the sizes every text of the layout was laid out with. */
+  type: Lettering
 }
 
 /**
@@ -1957,6 +2062,57 @@ function boxArea(box: PlotBox): number {
 }
 
 /**
+ * Get the x axis of a plot whose tick labels keep a gap between them.
+ *
+ * The ticks an axis asks for are its length over `X_TICK_ROOM`, at least
+ * `LEAST_TICKS`, which a narrow plot of wide labels does not hold: two labels
+ * of neighbouring ticks centred on them would overlap. The axis asks for one
+ * tick fewer until every two neighbouring labels, measured, keep `TICK_GAP`
+ * between them, down to a single tick, which overlaps nothing.
+ *
+ * @param xs the values the axis covers
+ * @param from the pixel its lower limit is at
+ * @param to the pixel of its upper limit
+ * @param type the lettering of the figure
+ * @returns the axis of the most ticks up to the count of its length whose
+ *   labels keep their gap
+ */
+function xAxisOf(xs: number[], from: number, to: number, type: Lettering): Axis {
+  let axis = axisOf(xs, false, from, to, tickCount(to - from, X_TICK_ROOM))
+  for (let count = tickCount(to - from, X_TICK_ROOM); count >= 1; count -= 1) {
+    axis = axisOf(xs, false, from, to, count)
+    if (tickLabelsClear(axis, type)) {
+      return axis
+    }
+  }
+  return axis
+}
+
+/**
+ * Get whether the labels of neighbouring ticks of an x axis keep their gap.
+ *
+ * @param axis the axis
+ * @param type the lettering of the figure
+ * @returns whether every two neighbouring labels, each centred on its tick, are
+ *   at least `TICK_GAP` apart
+ */
+function tickLabelsClear(axis: Axis, type: Lettering): boolean {
+  const decimals = tickDecimals(axis.ticks)
+  const exponential = exponentialTicks(axis.ticks)
+  const spans = axis.ticks
+    .filter((value) => axis.drawable(value))
+    .map((value) => {
+      const at = axis.position(value)
+      const half = type.measure(formatNumber(value, decimals, exponential), type.small) / 2
+      return { from: at - half, to: at + half }
+    })
+  return spans.every((span, index) => {
+    const next = spans[index + 1]
+    return next === undefined || next.from - span.to >= TICK_GAP - ROUNDING
+  })
+}
+
+/**
  * Get the box the tick labels of an x axis leave room for.
  *
  * A tick label is centred on its tick, so the label of a tick near either end
@@ -1971,7 +2127,7 @@ function boxArea(box: PlotBox): number {
  * @param to the pixel of its upper limit
  * @param edge the pixel the room of the plot ends at, which is the figure
  *   without its padding and without the column of a legend or a colour bar
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the smallest pixel the axis may start at and the largest it may end
  *   at, `-Infinity` and `Infinity` on a side no label constrains
  */
@@ -1980,9 +2136,9 @@ function tickReach(
   from: number,
   to: number,
   edge: number,
-  measure: TextMeasure,
+  type: Lettering,
 ): { from: number; to: number } {
-  const axis = axisOf(xs, false, from, to, tickCount(to - from, X_TICK_ROOM))
+  const axis = xAxisOf(xs, from, to, type)
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
   const span = axis.limits.high - axis.limits.low
@@ -1992,7 +2148,7 @@ function tickReach(
     if (!axis.drawable(value)) {
       continue
     }
-    const half = measure(formatNumber(value, decimals, exponential), SMALL_FONT) / 2
+    const half = type.measure(formatNumber(value, decimals, exponential), type.small) / 2
     // the share of `axisOf`, so the solved end puts the tick where it is drawn
     const share = span > 0 ? (value - axis.limits.low) / span : 0.5
     if (share > 0) {
@@ -2009,7 +2165,7 @@ function tickReach(
  * Get where the plot has to start for the tick labels of its y axis to keep their room.
  *
  * A y tick label is written right-aligned `TICK + LABEL_GAP` left of the plot,
- * and the lines of the y label run from `PAD` rightwards, one `AXIS_LINE` each,
+ * and the lines of the y label run from `PAD` rightwards, one line of the label each,
  * so the widest tick label of the axis of a box and a `LABEL_GAP` between it and
  * the last line of the label are what the left margin has to hold. Its ticks
  * are the ticks of the height of the box, which is why it is asked of a box.
@@ -2018,7 +2174,7 @@ function tickReach(
  * @param log whether it is logarithmic
  * @param box the box whose height decides its ticks
  * @param lines the lines of the y label
- * @param measure the measure of the figure
+ * @param type the lettering of the figure
  * @returns the smallest pixel the plot may start at
  */
 function yTickClear(
@@ -2026,7 +2182,7 @@ function yTickClear(
   log: boolean,
   box: PlotBox,
   lines: number,
-  measure: TextMeasure,
+  type: Lettering,
 ): number {
   const axis = axisOf(ys, log, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM))
   const decimals = tickDecimals(axis.ticks)
@@ -2034,7 +2190,7 @@ function yTickClear(
   const labels = axis.ticks
     .filter((value) => axis.drawable(value))
     .map((value) => formatNumber(value, decimals, exponential))
-  return PAD + lines * AXIS_LINE + LABEL_GAP + widest(labels, measure) + LABEL_GAP + TICK
+  return PAD + lines * type.axisLine + LABEL_GAP + widest(labels, type) + LABEL_GAP + TICK
 }
 
 /**
@@ -2044,30 +2200,35 @@ function yTickClear(
  * of them only moves one way. A width is asked of the measure of the figure,
  * which is one function for the whole fit, so the width of a text is a
  * constant of that text: what a pass asks for is the same function of the box
- * whatever the measure is, and the counting below holds for every measure.
- * The left margin takes one of the
+ * whatever the measure and the sizes of the font are, and the counting below
+ * holds for every one of them. The left margin takes one of the
  * `AXIS_LINES` margins of the lines of the y label or one of the room the y
  * tick labels need (`yTickClear`), which is a function of the lines and of the
  * ticks of the height of the box, of which there are `TICK_COUNTS` counts; an x
- * tick label never asks the plot to start right of `LEFT` while half of the
- * widest is at most `LEFT - PAD`, 56 px (thirteen characters of `toFixed(6)`
- * are 74 px in the table and 80 px in Roboto, so a font has to be half again
- * as wide as Arial to reach it), since a tick right of the start of the plot only
+ * tick label never asks the plot to start right of the room of one line of
+ * the y label while half of the widest is at most that room less `PAD`, 56 px
+ * at the sizes of the design (thirteen characters of `toFixed(6)` are 74 px in
+ * the table and 80 px in Roboto, so a font has to be half again as wide as
+ * Arial to reach it; a larger label font widens the room), since a tick right
+ * of the start of the plot only
  * needs less, and a left margin grown by the y axis is larger still; a measure
  * past that couples the two ends of the plot, and the fit then stops at this
  * bound and says that it did not settle. The room below the plot takes
  * one of the `AXIS_LINES` margins of the x label, the band one of the row
- * counts of its entries, and the right end of the plot is solved from the left
- * margin and the ticks of the width of the box alone, so it takes one of
- * `TICK_COUNTS` values per left margin. Their changes and the pass which
- * changes nothing are the bound.
+ * counts of its largest legend (the most rows of any legend it holds, each of
+ * which only grows as the box narrows, so their maximum only grows as well),
+ * and the right end of the plot is solved from the left margin and the ticks
+ * of the width of the box alone, which are one of `MOST_TICKS` counts asked
+ * for, so it takes one of `MOST_TICKS` values per left margin. Their changes
+ * and the pass which changes nothing are the bound.
  *
- * @param entries the entries of the band, 0 for a legend beside the plot
+ * @param entries the entries of the longest legend of the band, 0 for a legend
+ *   beside the plot
  * @returns the most passes a fit takes
  */
 function passBound(entries: number): number {
   const lefts = AXIS_LINES * (1 + TICK_COUNTS)
-  const ends = lefts * TICK_COUNTS
+  const ends = lefts * MOST_TICKS
   return lefts - 1 + (AXIS_LINES - 1) + entries + ends + 1
 }
 
@@ -2100,8 +2261,9 @@ function passBound(entries: number): number {
  * @param width the width of the figure in whole pixels
  * @param height its height in whole pixels
  * @param column the pixels right of the plot, 0 for a figure with nothing there
- * @param band the entries of a legend below the plot, none for one beside it
- * @param measure the measure of the figure
+ * @param bands the legends a band below the plot may hold, each its entries in
+ *   their order; none for a legend beside the plot
+ * @param type the lettering of the figure
  * @returns the box with the lines, the margins and the band it was fitted into
  */
 function fitBox(
@@ -2112,16 +2274,16 @@ function fitBox(
   width: number,
   height: number,
   column: number,
-  band: Entry[],
-  measure: TextMeasure,
+  bands: Entry[][],
+  type: Lettering,
 ): Fitted {
   const edge = width - PAD - column
-  const bound = passBound(band.length)
-  let x0 = LEFT
+  const bound = passBound(Math.max(0, ...bands.map((one) => one.length)))
+  let x0 = type.left
   let x1 = edge
-  let bottomRoom = BOTTOM
+  let bottomRoom = type.bottom
   let under = 0
-  let box: PlotBox = { x0, y0: TOP, x1, y1: height - bottomRoom }
+  let box: PlotBox = { x0, y0: type.top, x1, y1: height - bottomRoom }
   let xLines: string[] = [spec.xLabel]
   let yLines: string[] = [full]
   let passes = 0
@@ -2133,20 +2295,22 @@ function fitBox(
     // that is a figure of 105 px or less, and the element draws none below 220
     box = {
       x0,
-      y0: TOP,
+      y0: type.top,
       x1: Math.max(x0 + MIN_PLOT, x1),
-      y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
+      y1: Math.max(type.top + MIN_PLOT, height - bottomRoom - under),
     }
-    xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, LABEL_FONT, AXIS_LINES, measure)
-    yLines = wrapLabel(full, box.y1 - TOP, LABEL_FONT, AXIS_LINES, measure)
-    const reach = tickReach(xs, box.x0, box.x1, edge, measure)
-    const clear = yTickClear(ys, spec.logY, box, yLines.length, measure)
-    const rows = band.length > 0 ? legendRows(band, box.x1 - box.x0, measure).length : 0
+    xLines = wrapLabel(spec.xLabel, box.x1 - box.x0, type.label, AXIS_LINES, type.measure)
+    yLines = wrapLabel(full, box.y1 - type.top, type.label, AXIS_LINES, type.measure)
+    const reach = tickReach(xs, box.x0, box.x1, edge, type)
+    const clear = yTickClear(ys, spec.logY, box, yLines.length, type)
+    // the band holds the legend of any state, so it reserves the most rows any
+    // of them packs into the width of this box
+    const rows = Math.max(0, ...bands.map((band) => legendRows(band, box.x1 - box.x0, type).length))
     const next = {
-      x0: Math.max(x0, LEFT + (yLines.length - 1) * AXIS_LINE, reach.from, clear),
+      x0: Math.max(x0, type.left + (yLines.length - 1) * type.axisLine, reach.from, clear),
       x1: Math.min(x1, reach.to),
-      bottomRoom: Math.max(bottomRoom, BOTTOM + (xLines.length - 1) * AXIS_LINE),
-      under: Math.max(under, rows * ROW),
+      bottomRoom: Math.max(bottomRoom, type.bottom + (xLines.length - 1) * type.axisLine),
+      under: Math.max(under, rows * type.row),
     }
     settled =
       next.x0 === x0 && next.x1 === x1 && next.bottomRoom === bottomRoom && next.under === under
@@ -2167,7 +2331,7 @@ function fitBox(
 function layoutFor(spec: PlotSpec): Layout {
   const width = size(spec.width)
   const height = size(spec.height)
-  const measure = measureOf(spec)
+  const type = letteringOf(spec)
   const series = spec.series
   const declared = spec.points ?? []
   const range = curveRange(spec.x)
@@ -2204,29 +2368,21 @@ function layoutFor(spec: PlotSpec): Layout {
   const barLabels = hasColourbar
     ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
     : []
-  // the legend is laid out over every label it may have to show, in the order
-  // the caller declares them, and drawn with the ones it shows now: the rows
-  // are packed in order, so a figure keeps its plot box when an entry which is
-  // drawn under a condition arrives or leaves, whichever of them it is
-  const held: Entry[] = [
+  // the legend is laid out over every legend it may have to show, each in the
+  // order the caller declares it, and drawn with the one it shows now: the
+  // rows are packed in order, so a figure keeps its plot box when an entry
+  // which is drawn under a condition arrives or leaves, whichever of them it
+  // is. The legend drawn now is one of them, so the band never reserves fewer
+  // rows than it draws, whatever a caller declares
+  const drawnLabels = pointEntries.map((one) => one.label)
+  const held: Entry[][] = [...(spec.declaredLegends ?? []), drawnLabels].map((labels) => [
     ...curveEntries,
-    ...(spec.declaredLabels ?? pointEntries.map((one) => one.label)).map((label) => ({
-      id: '',
-      label,
-      colour: '',
-      shape: null,
-    })),
-  ]
+    ...labels.map((label) => ({ id: '', label, colour: '', shape: null })),
+  ])
+  const reservedLabels = held.flatMap((legend) => legend.map((one) => one.label))
   const legendRoom =
-    held.length > 0
-      ? SWATCH +
-        LABEL_GAP * 2 +
-        widest(
-          held.map((o) => o.label),
-          measure,
-        )
-      : 0
-  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels, measure) : 0
+    reservedLabels.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(reservedLabels, type) : 0
+  const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels, type) : 0
   const cap = Math.round(width * COLUMN_SHARE)
   // a legend sits beside the plot or below it, where a row is as wide as the
   // figure: whichever of the two leaves the larger plot box is the one the
@@ -2278,18 +2434,20 @@ function layoutFor(spec: PlotSpec): Layout {
     height,
     columnOf(Math.max(legendRoom, barRoom)),
     [],
-    measure,
+    type,
   )
   // the band spans the plot box, so its rows are counted in the fit, against
   // the box they are drawn under, and the height it reserves is those rows
   const under =
-    held.length > 0
-      ? fitBox(spec, full, xs, ys, width, height, columnOf(barRoom), held, measure)
+    reservedLabels.length > 0
+      ? fitBox(spec, full, xs, ys, width, height, columnOf(barRoom), held, type)
       : null
   // a band whose rows leave no plot of `MIN_PLOT` cannot be drawn in the
   // figure at all, which is no preference but where its rows would end
   const candidates =
-    under !== null && height - BOTTOM - under.under - TOP >= MIN_PLOT ? [beside, under] : [beside]
+    under !== null && height - under.bottomRoom - under.under - type.top >= MIN_PLOT
+      ? [beside, under]
+      : [beside]
   const fitted = candidates.reduce((best, one) =>
     boxArea(one.box) > boxArea(best.box) ? one : best,
   )
@@ -2300,14 +2458,14 @@ function layoutFor(spec: PlotSpec): Layout {
     width,
     height,
     box,
-    x: axisOf(xs, false, box.x0, box.x1, tickCount(box.x1 - box.x0, X_TICK_ROOM)),
+    x: xAxisOf(xs, box.x0, box.x1, type),
     y: axisOf(ys, spec.logY, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM)),
     points,
     shapes,
     colours,
     entries,
     hasColourbar,
-    belowRows: below ? legendRows(entries, box.x1 - box.x0, measure) : [],
+    belowRows: below ? legendRows(entries, box.x1 - box.x0, type) : [],
     belowHeight: below ? fitted.under : 0,
     fits: under === null ? [beside] : [beside, under],
     candidates,
@@ -2321,7 +2479,7 @@ function layoutFor(spec: PlotSpec): Layout {
     // label reaches past its end towards the column, which holds still
     columnX: Math.max(box.x1, width - PAD - column) + COLUMN_GAP,
     colourOf,
-    measure,
+    type,
   }
 }
 
@@ -2408,8 +2566,8 @@ export function marginFits(
  * figure and is read against the height of the plot, and its labels are cut
  * with an ellipsis there; a figure of both keeps the bar beside the plot and
  * puts the legend of its study data below. The legend is laid out over the
- * labels of `declaredLabels`, in the order they are given, and drawn with the
- * entries it has, so a figure whose entries come and go keeps its plot box
+ * legends of `declaredLegends`, each in the order it is given, and drawn with
+ * the entries it has, so a figure whose entries come and go keeps its plot box
  * where it is. A legend below the plot spans the plot box and centres its rows
  * on it, as the label of the x axis is centred, so the foot of the figure is
  * one block of the plot, its label and its legend.
@@ -2448,7 +2606,7 @@ export function plotSvg(spec: PlotSpec): string {
     barLabelRoom,
     columnX,
     colourOf,
-    measure,
+    type,
   } = layoutOf(spec)
 
   const clip =
@@ -2510,11 +2668,11 @@ export function plotSvg(spec: PlotSpec): string {
   // and single-line labels, cut with an ellipsis, when it does not: the
   // renderer never grows the figure behind the host, and never drops an entry
   const sideEntries = underneath ? [] : entries
-  const sideRoom = box.y1 - box.y0 - (hasColourbar ? MIN_PLOT + ROW : 0)
-  const wrap = legendHeight(sideEntries, legendLabels, true, measure) <= sideRoom
+  const sideRoom = box.y1 - box.y0 - (hasColourbar ? MIN_PLOT + type.row : 0)
+  const wrap = legendHeight(sideEntries, legendLabels, true, type) <= sideRoom
   const barBottom =
     box.y1 -
-    (sideEntries.length > 0 ? legendHeight(sideEntries, legendLabels, wrap, measure) + ROW : 0)
+    (sideEntries.length > 0 ? legendHeight(sideEntries, legendLabels, wrap, type) + type.row : 0)
   const side = hasColourbar
     ? colourbarGroup(
         series,
@@ -2522,23 +2680,23 @@ export function plotSvg(spec: PlotSpec): string {
         box.y0 + MARKER,
         Math.max(box.y0 + MIN_PLOT, barBottom),
         barLabelRoom,
-        measure,
+        type,
       ) +
       legendGroup(
         sideEntries,
         columnX,
-        Math.max(box.y0 + MIN_PLOT, barBottom) + ROW,
+        Math.max(box.y0 + MIN_PLOT, barBottom) + type.row,
         legendLabels,
         wrap,
-        measure,
+        type,
       )
-    : legendGroup(sideEntries, columnX, box.y0 + ROW / 2, legendLabels, wrap, measure)
+    : legendGroup(sideEntries, columnX, box.y0 + type.row / 2, legendLabels, wrap, type)
   const under = belowLegendGroup(
     belowRows,
     box.x0,
-    height - PAD - belowHeight + ROW / 2,
+    height - PAD - belowHeight + type.row / 2,
     box.x1 - box.x0,
-    measure,
+    type,
   )
 
   const label = axisLabel(spec.yLabel, sharedUnit(series))
@@ -2553,7 +2711,8 @@ export function plotSvg(spec: PlotSpec): string {
   })
   const body =
     `${title}${defs}${background}` +
-    `${axisGroup(x, true, box, xLines, bottomRoom)}${axisGroup(y, false, box, yLines, box.x0)}` +
+    axisGroup(x, true, box, xLines, bottomRoom, type) +
+    axisGroup(y, false, box, yLines, box.x0, type) +
     tag('g', { class: 'data', 'clip-path': `url(#${clip})` }, drawnPoints + drawnSeries) +
     side +
     under
@@ -2567,7 +2726,7 @@ export function plotSvg(spec: PlotSpec): string {
       height,
       viewBox: `0 0 ${String(width)} ${String(height)}`,
       role: 'img',
-      style: `font-family:${token('font')};font-size:${token('font-size')}`,
+      style: `font-family:${token('font')};font-size:${sizeToken('font-size', type.label)}`,
     },
     body,
   )

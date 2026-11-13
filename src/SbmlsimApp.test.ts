@@ -319,6 +319,11 @@ describe('the shell of an app', () => {
     expect(simulated).toContain('model cccccccc')
   })
 
+  it('breaks a citation where it has to, so a long url does not scroll a phone sideways', async () => {
+    const element = await shell()
+    expect(getComputedStyle(part(element, '.citation')).overflowWrap).toBe('anywhere')
+  })
+
   it('takes a DOI written as a url and links nothing for a script', async () => {
     declared = app({ doi: 'https://doi.org/10.1000/xyz 1' })
     const element = await shell()

@@ -582,8 +582,11 @@ onBeforeUnmount(() => {
   font-size: var(--_font-size);
 }
 
+/* a citation carries a url, one word longer than a phone is wide at a large
+   font, which would scroll the page sideways: it breaks where it has to */
 .footer p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .facts {

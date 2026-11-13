@@ -133,7 +133,7 @@ function chromeLike(text: string, size: number): number {
  * The figure of a small spec, byte for byte.
  *
  * It is the pin of every caller which hands the renderer nothing but what it
- * draws: a spec without `yLimits` and without `declaredLabels` draws these
+ * draws: a spec without `yLimits` and without `declaredLegends` draws these
  * bytes, so neither field can move the figure of a page which never passes
  * them, and nothing else drifts under them unnoticed either. It is drawn with
  * the table of the renderer (`tableMeasure`), which a spec without a measure is
@@ -634,7 +634,7 @@ describe('the room the legend keeps', () => {
       height,
       series: [{ ...series(1), label: CONDITIONED[0] ?? '' }],
     })
-    const declared = { ...base, declaredLabels: [CONDITIONED[1] ?? ''] }
+    const declared = { ...base, declaredLegends: [[CONDITIONED[1] ?? '']] }
     return shown
       ? {
           ...declared,
@@ -677,7 +677,7 @@ describe('the room the legend keeps', () => {
     const two = ['healthy', 'renal impairment, creatinine clearance 10 ml/min']
     const drawn = (which: number, width: number): PlotSpec => ({
       ...spec(1, { width, height: 200, series: [{ ...series(1), label: 'urine' }] }),
-      declaredLabels: two,
+      declaredLegends: two.map((label) => [label]),
       points: [
         { id: `series${String(which)}`, label: two[which] ?? '', curve: 'curve1', x: [0], y: [1] },
       ],
@@ -797,7 +797,7 @@ function antiXa(width: number, height = 200): PlotSpec {
   return {
     ...spec(1, { width, height, yLabel: 'anti-Xa activity' }),
     series: [{ ...series(1), label: 'anti-Xa', unit: 'ng/ml' }],
-    declaredLabels: ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly'],
+    declaredLegends: [['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']],
   }
 }
 
@@ -1010,7 +1010,7 @@ describe('the band of rows below the plot', () => {
       width,
       height: height ?? Math.round(Math.min(420, Math.max(200, width * 0.6))),
       logY: false,
-      declaredLabels: ['Beermann 1976'],
+      declaredLegends: [['Beermann 1976']],
       points: [{ id: 's0', label: 'Beermann 1976', curve: 'curve1', x: [720], y: [10] }],
     }
   }
@@ -1120,7 +1120,7 @@ describe('the fit of the margins', () => {
     return study
       ? {
           ...base,
-          declaredLabels: ['Beermann 1976'],
+          declaredLegends: [['Beermann 1976']],
           points: [
             { id: 's0', label: 'Beermann 1976', curve: 'curve1', x: [grid[25] ?? 0], y: [1] },
           ],
@@ -1392,7 +1392,7 @@ describe('the measure of the text', () => {
     return {
       ...spec(1, { width, height, yLabel: 'amount in urine' }),
       series: [{ ...series(1), label: 'urine', unit: 'umol' }],
-      declaredLabels: STUDIES,
+      declaredLegends: [STUDIES],
       points: STUDIES.map((label, index) => ({
         id: `study${String(index)}`,
         label,
@@ -1408,7 +1408,7 @@ describe('the measure of the text', () => {
     const label = 'a study of a long name, 5 mg oral, healthy volunteers'
     return {
       ...urine(width),
-      declaredLabels: [label],
+      declaredLegends: [[label]],
       points: [{ id: 'study0', label, curve: 'curve1', x: [1], y: [2] }],
     }
   }
@@ -1579,6 +1579,8 @@ describe('the measure of the text', () => {
 describe('the choice of the legend', () => {
   /** The labels of three studies, the anti-Xa panel's. */
   const STUDIES = ['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']
+  /** The labels of four arms of one study, drawn together. */
+  const ARMS = ['Frost 2013, 2.5 mg', 'Frost 2013, 5 mg', 'Frost 2013, 10 mg', 'Frost 2013, 25 mg']
 
   /** A figure over `x` whose y axis covers `low..high`, with the studies declared. */
   function figure(
@@ -1593,7 +1595,7 @@ describe('the choice of the legend', () => {
     return {
       ...spec(1, { x: grid, width, height, yLabel: 'amount', xLabel: 'time [min]' }),
       series: [{ ...series(1, values), label: 'curve' }],
-      ...(studies.length > 0 ? { declaredLabels: studies } : {}),
+      ...(studies.length > 0 ? { declaredLegends: [studies] } : {}),
     }
   }
 
@@ -1615,7 +1617,7 @@ describe('the choice of the legend', () => {
       [-170000, 0],
       [0, 150000],
     ] as [number, number][]) {
-      for (const studies of [[], ['Beermann 1976'], STUDIES]) {
+      for (const studies of [[], ['Beermann 1976'], STUDIES, ARMS]) {
         for (let width = 220; width <= 700; width += 3) {
           for (const height of [120, 200, 300]) {
             const one = { ...figure(width, height, [0, 143000], y, studies), measure: chromeLike }
@@ -1640,16 +1642,16 @@ describe('the choice of the legend', () => {
   })
 
   it('keeps the band of a narrow figure whose y tick labels grow by a character', () => {
-    // a seven character y tick label (`-1.5e+5`) moves the plot right and the
-    // band of three studies takes a fourth row, which is more than a third of
-    // the height and still the larger plot: the band stays, where a cap on its
-    // share put the legend beside a plot of a third less area
-    for (const width of [223, 229, 232]) {
+    // a seven character y tick label (`-1.5e+5`) moves the plot right, and the
+    // band of the four arms of a study takes four rows, which is more than a
+    // third of the height and still the larger plot: the band stays, where a
+    // cap on its share put the legend beside a plot of a third less area
+    for (const width of [283, 286, 289, 292]) {
       for (const y of [
         [0, 3],
         [-170000, 0],
       ] as [number, number][]) {
-        const one = { ...figure(width, 200, [0, 143000], y, STUDIES), measure: chromeLike }
+        const one = { ...figure(width, 200, [0, 143000], y, ARMS), measure: chromeLike }
         expect({ width, y, below: plotSvg(one).includes('class="legend below"') }).toEqual({
           width,
           y,
@@ -1657,5 +1659,293 @@ describe('the choice of the legend', () => {
         })
       }
     }
+  })
+})
+
+describe('the sizes the text is drawn in', () => {
+  /** The padding of a figure, the renderer's. */
+  const PAD = 8
+  /** The sizes a host sets the tokens of the figure to. */
+  const SIZES = { label: 16, small: 14 }
+
+  /** A figure of a curve over minutes with a band of studies, in the sizes given. */
+  function sized(width: number, studies: string[], measure: TextMeasure): PlotSpec {
+    const grid = Array.from({ length: 50 }, (_, index) => (index * 1440) / 49)
+    return {
+      ...spec(1, {
+        x: grid,
+        width,
+        height: Math.round(Math.min(420, Math.max(200, width * 0.6))),
+        xLabel: 'time (min)',
+        yLabel: 'plasma concentration',
+      }),
+      series: [
+        {
+          ...series(
+            1,
+            grid.map((at) => at / 30),
+          ),
+          label: 'plasma',
+          unit: 'uM',
+        },
+      ],
+      declaredLegends: [studies],
+      points: studies.map((label, index) => ({
+        id: `study${String(index)}`,
+        label,
+        curve: 'curve1',
+        x: [720],
+        y: [10],
+      })),
+      fontSizes: SIZES,
+      measure,
+    }
+  }
+
+  /** The text elements of a group of the figure, with their attributes. */
+  function textsOf(group: string): { attributes: string; text: string }[] {
+    return [...group.matchAll(/<text([^>]*)>([^<]*)<\/text>/g)].map((one) => ({
+      attributes: one[1] ?? '',
+      text: one[2] ?? '',
+    }))
+  }
+
+  /** Read a number attribute of a text element. */
+  function attribute(attributes: string, name: string): number {
+    return Number(new RegExp(`\\s${name}="([^"]*)"`).exec(attributes)?.[1] ?? Number.NaN)
+  }
+
+  it('keeps every text inside the figure and clear of its neighbours in the sizes of a host', () => {
+    // a host which sets the size tokens draws the figure in 16 and 14 px: the
+    // widths are measured at those sizes and every line, row and margin which
+    // holds text is as tall as its font, so nothing leaves the figure, no row
+    // of the band passes the end of the plot, the x label stays below the x
+    // tick labels and the lines of the y label do not overlap
+    const problems: string[] = []
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (const studies of [
+        [],
+        ['Beermann 1976 (5 mg, oral)'],
+        ['Frost 2021', 'Frost 2015, young'],
+      ]) {
+        for (let width = 220; width <= 700; width += 7) {
+          const figure = sized(width, studies, measure)
+          const svg = plotSvg(figure)
+          const box = plotGeometry(figure).box
+          const name = `${measure.name} ${String(studies.length)} ${String(width)}`
+          const [, xAxis = '', rest = ''] = svg.split('<g class="axis ')
+          const yAxis = rest.split('<g class="data"')[0] ?? ''
+          const band = /<g class="legend below"[\s\S]*$/.exec(svg)?.[0] ?? ''
+          // a tick label stays inside the padding, a line of the label inside the figure
+          for (const one of textsOf(xAxis)) {
+            const x = attribute(one.attributes, 'x')
+            const label = one.attributes.includes('axis-label')
+            const half = measure(one.text, label ? SIZES.label : SIZES.small) / 2
+            const edge = label ? 0 : PAD
+            if (x - half < edge - 0.01 || x + half > width - edge + 0.01) {
+              problems.push(`${name}: x axis text ${one.text} at ${String(x)}`)
+            }
+          }
+          const tickBottom = box.y1 + 4 + 3 + SIZES.small
+          for (const one of textsOf(xAxis).filter((t) => t.attributes.includes('axis-label'))) {
+            const baseline = attribute(one.attributes, 'y')
+            if (
+              baseline - 0.75 * SIZES.label < tickBottom ||
+              baseline + 0.25 * SIZES.label > figure.height
+            ) {
+              problems.push(`${name}: x label at ${String(baseline)} below ${String(tickBottom)}`)
+            }
+          }
+          const lines = textsOf(yAxis)
+            .filter((t) => t.attributes.includes('axis-label'))
+            .map((t) => attribute(t.attributes, 'x'))
+          for (const [index, x] of lines.entries()) {
+            const next = lines[index + 1]
+            if (next !== undefined && next - x < SIZES.label) {
+              problems.push(`${name}: y label lines ${String(x)} and ${String(next)}`)
+            }
+          }
+          const labelEnd = Math.max(PAD, ...lines.map((x) => x + SIZES.label))
+          for (const one of textsOf(yAxis).filter((t) => !t.attributes.includes('axis-label'))) {
+            const start = attribute(one.attributes, 'x') - measure(one.text, SIZES.small)
+            if (start < labelEnd - 0.01) {
+              problems.push(`${name}: y tick ${one.text} starts at ${String(start)}`)
+            }
+          }
+          for (const one of textsOf(band)) {
+            const end = attribute(one.attributes, 'x') + measure(one.text, SIZES.small)
+            const row = attribute(one.attributes, 'y')
+            if (end > box.x1 + 0.01 || row + SIZES.small / 2 > figure.height) {
+              problems.push(
+                `${name}: a row of the band ${one.text} ends at ${String(end)}, ${String(row)}`,
+              )
+            }
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+  })
+
+  it('writes the sizes it was laid out in as the fallbacks of the tokens', () => {
+    const svg = plotSvg({ ...pinned(), fontSizes: SIZES })
+    expect(svg).toContain('font-size:var(--sbmlsim-font-size, 16px)')
+    expect(svg).toContain('font-size:var(--sbmlsim-font-size-small, 14px)')
+    expect(svg).not.toContain('12px')
+    // a size which is no size is the size of the design
+    expect(plotSvg({ ...pinned(), fontSizes: { label: Number.NaN, small: 0 } })).toBe(PINNED)
+  })
+})
+
+describe('the legends a figure may draw', () => {
+  /** A figure of a curve whose study data may draw the legends given. */
+  function legends(declared: string[][], width = 316, height = 200): PlotSpec {
+    return { ...spec(1, { width, height }), declaredLegends: declared }
+  }
+
+  /** Labels two of which do not fit one row of a band at 316 px. */
+  const LONG_A = 'Study A 2013, a single oral dose in healthy volunteers'
+  const LONG_B = 'Study B 2015, a single oral dose in elderly volunteers'
+
+  it('reserves the rows of the legend which needs the most', () => {
+    // the band holds the legend of any state, so it is as tall as the one of
+    // the most rows, whichever order the legends come in
+    const most = plotGeometry(legends([[LONG_A, LONG_B]])).box
+    expect(plotGeometry(legends([['short'], [LONG_A, LONG_B]])).box).toEqual(most)
+    expect(plotGeometry(legends([[LONG_A, LONG_B], ['short']])).box).toEqual(most)
+    // and not the rows of every label at once, which no state draws
+    expect(plotGeometry(legends([[LONG_A], [LONG_B]])).box).toEqual(
+      plotGeometry(legends([[LONG_A]])).box,
+    )
+    expect(plotGeometry(legends([[LONG_A], [LONG_B]])).box.y1).toBeGreaterThan(most.y1)
+  })
+
+  it('reserves the rows of the legend it draws whatever a caller declares', () => {
+    // the legend drawn now is laid out with the declared ones, so a caller
+    // which declares less than it draws gets a band of the rows it draws
+    const drawn = {
+      ...legends([['short']]),
+      points: [LONG_A, LONG_B].map((label, index) => ({
+        id: `study${String(index)}`,
+        label,
+        curve: 'curve1',
+        x: [1],
+        y: [2],
+      })),
+    }
+    const declared = { ...drawn, declaredLegends: [[LONG_A, LONG_B]] }
+    expect(plotGeometry(drawn).box).toEqual(plotGeometry(declared).box)
+  })
+
+  it('gives the column the widest label of any legend', () => {
+    // a figure wide and short keeps its legend beside the plot, whose column is
+    // as wide as the widest label any legend may show, wherever it is listed
+    const column = (declared: string[][]): number => {
+      const figure = legends(declared, 1100, 110)
+      expect(plotSvg(figure)).not.toContain('class="legend below"')
+      return plotGeometry(figure).box.x1
+    }
+    expect(column([[LONG_B.slice(0, 20)], [LONG_A]])).toBe(column([[LONG_A]]))
+    expect(column([[LONG_A], [LONG_B.slice(0, 20)]])).toBe(column([[LONG_A]]))
+  })
+})
+
+describe('the ticks of the x axis', () => {
+  it('keeps a gap between the labels of neighbouring ticks however narrow the plot', () => {
+    // an axis asks for fewer ticks until its measured labels keep their gap, so
+    // a plot beside a legend at the width of a phone writes no two labels into
+    // each other, falling to two ticks or one where that is all it holds
+    const problems: string[] = []
+    let fewer = 0
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (const span of [1440, 96, 143000]) {
+        for (const declared of [
+          [],
+          [['Beermann 1976 (5 mg, oral)']],
+          [['Frost 2021', 'Frost 2015, young', 'Frost 2015, elderly']],
+        ]) {
+          for (let at = 0; at < 2 * 394; at += 1) {
+            // every width at the height the element gives it and at 120 px
+            const width = 220 + 3 * Math.floor(at / 2)
+            const height =
+              at % 2 === 0 ? (width < 300 ? 200 : Math.round(Math.min(420, width * 0.6))) : 120
+            const grid = Array.from({ length: 50 }, (_, index) => (span * index) / 49)
+            const svg = plotSvg({
+              ...spec(1, { x: grid, width, height }),
+              declaredLegends: declared,
+              measure,
+            })
+            const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
+            const spans = [
+              ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
+            ].map((one) => {
+              const half = measure(one[2] ?? '', 11) / 2
+              return { from: Number(one[1]) - half, to: Number(one[1]) + half }
+            })
+            fewer += spans.length < 3 ? 1 : 0
+            for (const [index, one] of spans.entries()) {
+              const next = spans[index + 1]
+              if (next !== undefined && next.from - one.to < 6 - 0.01) {
+                problems.push(
+                  `${measure.name} ${String(span)} ${String(width)}: ${String(next.from - one.to)}`,
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+    expect(fewer).toBeGreaterThan(0)
+  })
+})
+
+describe('a band which cannot be drawn', () => {
+  it('is no layout of a figure whose rows and wrapped x label leave no plot', () => {
+    // the rows of a band and the lines of a wrapped x label are both below the
+    // plot, so a band is drawn only where both leave the plot its least height;
+    // where they do not, the legend stays beside the plot and no row is drawn
+    // over the x label or out of the figure
+    const problems: string[] = []
+    let beside = 0
+    for (let width = 220; width <= 500; width += 2) {
+      for (const count of [2, 3, 4]) {
+        const labels = Array.from({ length: count }, (_, index) => `Study ${String(index)} 2001`)
+        const figure: PlotSpec = {
+          ...spec(1, {
+            width,
+            height: 120,
+            xLabel: 'time after the first dose of the drug, in hours [h]',
+          }),
+          declaredLegends: [labels],
+          points: labels.map((label, index) => ({
+            id: `study${String(index)}`,
+            label,
+            curve: 'curve1',
+            x: [1],
+            y: [2],
+          })),
+        }
+        const svg = plotSvg(figure)
+        if (!svg.includes('class="legend below"')) {
+          beside += 1
+          continue
+        }
+        const baselines = [
+          ...svg.matchAll(/<text class="axis-label"[^>]*\sy="([^"]*)" text-anchor="middle">/g),
+        ].map((one) => Number(one[1]))
+        const rows = [
+          ...(/<g class="legend below"[\s\S]*$/.exec(svg)?.[0] ?? '').matchAll(
+            /<text [^>]*\sy="([^"]*)"/g,
+          ),
+        ].map((one) => Number(one[1]))
+        const top = Math.min(...rows) - 9
+        if (top < Math.max(...baselines) || Math.max(...rows) + 5.5 > 120) {
+          problems.push(`${String(width)} ${String(count)}: rows ${rows.join(', ')}`)
+        }
+      }
+    }
+    expect(problems).toEqual([])
+    expect(beside).toBeGreaterThan(0)
   })
 })

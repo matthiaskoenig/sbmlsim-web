@@ -141,9 +141,9 @@ import type {
   SimulateResponse,
 } from './contract'
 import { interpolate } from './interpolate'
-import { canvasMeasure, fontOf, whenFontArrives } from './measure'
-import { plotGeometry, plotSvg, seriesColour } from './plot'
-import type { Limits, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
+import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
+import { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
+import type { FontSizes, Limits, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
 
 /** How the controls are placed next to the figure. */
 type LayoutName = 'auto' | 'sidebar' | 'stacked' | 'toolbar'
@@ -345,18 +345,15 @@ const READOUT_ROW_GAP = 6
 /**
  * The size of the font of the readout where no style can be read off the page.
  *
- * The box is placed and never measured, as the figure places its legend: its
- * room is the characters of its rows at the size its box carries and the widths
- * below, so a host whose font is much wider than them gets a label cut with an
- * ellipsis. The size itself is read off the element (`fontSizeOf`), so a host
- * which sets `--sbmlsim-font-size-small` gets a box and rows of that size, and
- * this is the value of the design for an environment which computes no style.
+ * The box is sized by its rows as they are drawn: the labels measured in the
+ * font of the panel and the values and the time in the mono font, both at the
+ * size its box carries (`measure`, `monoMeasure`), so a host whose font is wide
+ * gets a box as wide as its rows. The size itself is read off the element
+ * (`fontSizeOf`), so a host which sets `--sbmlsim-font-size-small` gets a box
+ * and rows of that size, and this is the value of the design for an
+ * environment which computes no style.
  */
 const READOUT_FONT = 11
-/** The width a character of a label is given, a share of its font size. */
-const READOUT_EM = 0.5
-/** The width a character of a value is given, which is set in the mono font. */
-const READOUT_MONO_EM = 0.62
 /** The pixels between the label of a row and its value. */
 const READOUT_COLUMN = 8
 /** The smallest box the readout is drawn in, in pixels. */
@@ -449,7 +446,24 @@ const plotted = useTemplateRef<HTMLElement>('plotted')
  * measure is a new spec, so that is one layout and not one per font event.
  */
 const measure = shallowRef<TextMeasure | null>(null)
-/** Whether the measure was built, which happens once for the life of the element. */
+/**
+ * How wide a text of the mono font of the readout is drawn, `null` where the
+ * page cannot measure; built as `measure` is, in the font `--sbmlsim-font-mono`
+ * resolves to, and once more when that font arrives.
+ */
+const monoMeasure = shallowRef<TextMeasure | null>(null)
+/**
+ * The sizes the text of the figure is drawn in, `null` before they were read.
+ *
+ * The labels of the axes are drawn in `--sbmlsim-font-size`, the size of
+ * `.panel`, and the tick labels, the legend and the colour bar in
+ * `--sbmlsim-font-size-small`, which a probe in `.panel` resolves as the
+ * figure does, a host's token and an `em` or a `rem` among them. The figure is
+ * laid out in them, so a host which sets the tokens gets a figure whose text
+ * fits it.
+ */
+const fontSizes = shallowRef<FontSizes | null>(null)
+/** Whether the measures were built, which happens once for the life of the element. */
 let measuring = false
 
 watch(root, (box) => {
@@ -457,14 +471,25 @@ watch(root, (box) => {
     return
   }
   measuring = true
-  const font = fontOf(box)
-  if (font === null) {
-    return
+  const small = probeFont(box, { 'font-size': 'var(--_font-size-small)' })
+  const label = Number.parseFloat(globalThis.getComputedStyle(box).fontSize)
+  if (small !== null && Number.isFinite(label) && label > 0) {
+    fontSizes.value = { label, small: small.size }
   }
-  measure.value = canvasMeasure(font)
-  whenFontArrives(font, () => {
+  const font = fontOf(box)
+  if (font !== null) {
     measure.value = canvasMeasure(font)
-  })
+    whenFontArrives(font, () => {
+      measure.value = canvasMeasure(font)
+    })
+  }
+  const mono = probeFont(box, { 'font-family': 'var(--_font-mono)' })?.font ?? null
+  if (mono !== null) {
+    monoMeasure.value = canvasMeasure(mono)
+    whenFontArrives(mono, () => {
+      monoMeasure.value = canvasMeasure(mono)
+    })
+  }
 })
 
 /** Whether `activate()` has run, which is what makes the element draw anything. */
@@ -956,15 +981,51 @@ const drawnData = computed<Points[]>(() => {
 })
 
 /**
- * The labels of every series the panel can draw, in the order it declares them.
+ * The legends of study data the panel can draw, one per state of its knobs.
  *
- * The legend of the figure is laid out over them and drawn with the series
- * which are at their condition, so the plot box of a panel is the same box
- * whichever of its conditioned series is drawn. It is the whole list and not
- * the ones which are missing, because a legend below the plot packs its rows in
- * the order it is given them.
+ * Which series are drawn is a function of the state of the knobs alone: a
+ * series is drawn when every knob its `at` names is at the value it names.
+ * The states which tell the legends apart are, per knob some `at` names, the
+ * values the declarations name and one value none of them names, the state
+ * where none of those series is drawn; a knob no `at` names draws the same
+ * series at every value. Each state gives the labels of its series in the
+ * order the panel declares them, and the legend of the figure is laid out over
+ * all of them and drawn with the one of the state the figure is at, so the
+ * plot box of a panel is the same box whichever state it is at, and it is the
+ * box of the largest legend one state draws and not of every series at once:
+ * four arms of one study, of which a state draws one, keep the room of one.
+ * It reads the declaration and the answer and no knob, so it runs once per
+ * answer.
  */
-const declaredLabels = computed<string[]>(() => resolvedData.value.resolved.map((one) => one.label))
+const declaredLegends = computed<string[][]>(() => {
+  const resolved = resolvedData.value.resolved
+  const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
+  const conditions = resolved.map((one) => Object.entries(declared.get(one.id)?.at ?? {}))
+  const named = new Map<string, number[]>()
+  for (const [id, value] of conditions.flat()) {
+    const values = named.get(id) ?? []
+    if (!values.includes(value)) {
+      named.set(id, [...values, value])
+    }
+  }
+  // `null` is the value of a knob which none of the declarations names
+  let states = [new Map<string, number | null>()]
+  for (const [id, values] of named) {
+    states = states.flatMap((state) =>
+      [...values, null].map((value) => new Map(state).set(id, value)),
+    )
+  }
+  const legends = new Map<string, string[]>()
+  for (const state of states) {
+    const labels = resolved
+      .filter((_, index) =>
+        (conditions[index] ?? []).every(([id, value]) => state.get(id) === value),
+      )
+      .map((one) => one.label)
+    legends.set(JSON.stringify(labels), labels)
+  }
+  return [...legends.values()]
+})
 
 /** The series which were already reported, so each is reported once per element. */
 const reported = new Set<string>()
@@ -1150,10 +1211,11 @@ const plot = computed<PlotSpec | null>(() => {
     logY: logY.value,
     ...(held === null ? {} : { yLimits: held }),
     ...(measure.value === null ? {} : { measure: measure.value }),
+    ...(fontSizes.value === null ? {} : { fontSizes: fontSizes.value }),
   }
   const points = drawnData.value
-  const labels = declaredLabels.value
-  const whole = labels.length > 0 ? { ...spec, declaredLabels: labels } : spec
+  const legends = declaredLegends.value
+  const whole = legends.some((one) => one.length > 0) ? { ...spec, declaredLegends: legends } : spec
   return points.length > 0 ? { ...whole, points } : whole
 })
 
@@ -1329,21 +1391,22 @@ function moreText(more: number): string {
  * @param rows the rows of the readout
  * @param more how many rows the box will not show, 0 for a box which shows all
  * @param font the size of its font in pixels, as the page resolved it
- * @returns the pixels of its widest row with its padding and its border, an
- *   estimate of its characters and no measurement: the box is an overlay which
- *   only has to hold its rows, while the figure under it measures its text
+ * @returns the pixels of its widest row with its padding and its border, its
+ *   labels measured in the font of the panel and its values and its time in
+ *   the mono font, each by the measure of the page and by the table of the
+ *   renderer where the page has none
  */
 function readoutRoom(time: string, rows: ReadoutRow[], more: number, font: number): number {
-  const label = font * READOUT_EM
-  const value = font * READOUT_MONO_EM
+  const label = measure.value ?? tableMeasure
+  const value = monoMeasure.value ?? tableMeasure
   const swatch = READOUT_SWATCH + READOUT_ROW_GAP
-  let most = time.length * value
+  let most = value(time, font)
   for (const one of rows) {
-    const text = one.label.length * label + one.value.length * value
+    const text = label(one.label, font) + value(one.value, font)
     most = Math.max(most, swatch + text + READOUT_COLUMN)
   }
   if (more > 0) {
-    most = Math.max(most, swatch + moreText(more).length * label)
+    most = Math.max(most, swatch + label(moreText(more), font))
   }
   return (READOUT_PAD + READOUT_BORDER) * 2 + most
 }

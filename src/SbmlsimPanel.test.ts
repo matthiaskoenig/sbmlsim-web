@@ -2004,6 +2004,48 @@ describe('the measure of the text', () => {
     expect(vi.mocked(plotSvg).mock.calls.length).toBe(drawn + 1)
   })
 
+  it('lays the figure out in the sizes a host sets the font of the figure to', async () => {
+    // a host which sets the size tokens gets a figure laid out in them and
+    // carrying them as the fallbacks of its tokens, so a copy of it keeps them
+    const container = branded({
+      '--sbmlsim-font-size': '16px',
+      '--sbmlsim-font-size-small': '14px',
+    })
+    const element = await started({}, container)
+    await settled()
+    expect(figure(element)).toContain('font-size:var(--sbmlsim-font-size, 16px)')
+    expect(figure(element)).toContain('font-size:var(--sbmlsim-font-size-small, 14px)')
+    const plain = await started()
+    await settled()
+    expect(figure(plain)).toContain('font-size:var(--sbmlsim-font-size, 12px)')
+    expect(figure(plain)).toContain('font-size:var(--sbmlsim-font-size-small, 11px)')
+  })
+
+  it('sizes the box of the readout by its rows as they are measured', async () => {
+    // the labels of the readout are measured in the font of the panel and its
+    // values in the mono font, so a wide font gets a box as wide as its rows
+    // and a label which is not cut
+    const widths: number[] = []
+    for (const factor of [1, 1.6]) {
+      document.body.innerHTML = ''
+      vi.restoreAllMocks()
+      const state = canvas()
+      state.factor = factor
+      const element = await started()
+      await settled()
+      const box = laidOut(element)
+      await hover(element, { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 })
+      const wide = (text: string): number => tableMeasure(text, 11) * factor
+      const rows = readoutRows(element).map(
+        ([label = '', value = '']) => 8 + 6 + wide(label) + wide(value) + 8,
+      )
+      const wanted = (6 + 1) * 2 + Math.max(wide(textOf(element, '.readout-time')), ...rows)
+      expect(readoutBox(element).width).toBeCloseTo(Math.min(wanted, box.x1 - box.x0), 6)
+      widths.push(readoutBox(element).width)
+    }
+    expect(widths[1] ?? 0).toBeGreaterThan(widths[0] ?? 0)
+  })
+
   it('leaves a font which is there already to the first layout', async () => {
     canvas()
     const load = vi.fn(() => Promise.resolve([]))
@@ -2014,5 +2056,71 @@ describe('the measure of the text', () => {
     await started()
     await settled()
     expect(load).not.toHaveBeenCalled()
+  })
+})
+
+describe('the legend of the study data', () => {
+  /** A label two of which do not fit one row of the band of the figure. */
+  const LONG = 'Study A 2013, a single oral dose of the drug in healthy volunteers'
+
+  /** Serve a declaration of the series given and study data for every one of them. */
+  function serve(series: Partial<PanelDataDeclaration>[]): void {
+    const declared = series.map((more) => declaredData(more))
+    served.panel = () => Promise.resolve({ ...declaration(), data: declared })
+    served.data = () =>
+      Promise.resolve({
+        contract: 'paneldata/1',
+        series: declared.map((one) => ({
+          id: one.id,
+          label: one.label,
+          x: [0, 1, 2],
+          y: [0.1, 0.9, 1.9],
+          yerr: [null, null, null],
+          x_unit: 'h',
+          unit: 'uM',
+          count: null,
+        })),
+      } satisfies PanelDataResponse)
+  }
+
+  /** Start a panel of the series given and read its plot box. */
+  async function boxOf(series: Partial<PanelDataDeclaration>[]): Promise<Box> {
+    document.body.innerHTML = ''
+    serve(series)
+    const element = await started()
+    await settled()
+    return laidOut(element)
+  }
+
+  it('reserves the room of the largest legend one state of the knobs draws', async () => {
+    // two arms of one study, each measured at a dose of its own: a state of
+    // the knobs draws one of them, so the panel keeps the room of one and not
+    // of both, which no state draws
+    const arms = await boxOf([
+      { id: 'armA', label: LONG, at: { knobA: 12.5 } },
+      { id: 'armB', label: LONG, at: { knobA: 25 } },
+    ])
+    const one = await boxOf([{ id: 'armB', label: LONG, at: { knobA: 25 } }])
+    expect(arms).toEqual(one)
+    // and both arms at once is a figure of less plot
+    const both = await boxOf([
+      { id: 'armA', label: LONG, at: null },
+      { id: 'armB', label: LONG, at: null },
+    ])
+    expect(both.y1).toBeLessThan(arms.y1)
+  })
+
+  it('reserves the series of two knobs which a state draws together', async () => {
+    // the series of two knobs are drawn together where both knobs are at their
+    // values, so that state keeps the room of both
+    const apart = await boxOf([
+      { id: 'seriesA', label: LONG, at: { knobA: 12.5 } },
+      { id: 'seriesB', label: LONG, at: { knobB: 0.2 } },
+    ])
+    const together = await boxOf([
+      { id: 'seriesA', label: LONG, at: null },
+      { id: 'seriesB', label: LONG, at: null },
+    ])
+    expect(apart).toEqual(together)
   })
 })

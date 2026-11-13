@@ -58,6 +58,43 @@ export function fontOf(element: Element): FigureFont | null {
 }
 
 /**
+ * Read the font a text would be drawn in under declarations of its own.
+ *
+ * A figure writes its text in sizes and fonts the page resolves for tokens,
+ * and the elements which carry them are not always in the page when the
+ * figure is laid out, e.g. the readout before a pointer has moved. A probe is
+ * put into the element for as long as its style is read: it inherits what the
+ * element inherits and carries the declarations it is given, so it resolves
+ * them as the text would, `em` and `rem` and the tokens of a host included.
+ *
+ * @param parent the element the text would be drawn in
+ * @param declarations the declarations of the text, by their css names
+ * @returns its font and its size in pixels, `null` where the page computes
+ *   neither
+ */
+export function probeFont(
+  parent: Element,
+  declarations: Record<string, string>,
+): { font: FigureFont; size: number } | null {
+  try {
+    const probe = globalThis.document.createElement('span')
+    probe.setAttribute('aria-hidden', 'true')
+    probe.style.setProperty('position', 'absolute')
+    probe.style.setProperty('visibility', 'hidden')
+    for (const [name, value] of Object.entries(declarations)) {
+      probe.style.setProperty(name, value)
+    }
+    parent.append(probe)
+    const font = fontOf(probe)
+    const size = Number.parseFloat(globalThis.getComputedStyle(probe).fontSize)
+    probe.remove()
+    return font === null || !Number.isFinite(size) || size <= 0 ? null : { font, size }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Write a font as the shorthand canvas and `document.fonts` read.
  *
  * @param font the font
