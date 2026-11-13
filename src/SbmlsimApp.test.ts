@@ -58,7 +58,7 @@ function app(more: Partial<AppDeclaration> = {}): AppDeclaration {
 function panelDeclaration(id: string): PanelDeclaration {
   return {
     contract: 'panel/1',
-    panel: { id, title: `Title of ${id}`, subtitle: '', x_label: 'time [h]' },
+    panel: { id, title: `Title of ${id}`, subtitle: '', x_label: 'time [h]', y_label: '' },
     axes: [
       {
         id: 'knobA',

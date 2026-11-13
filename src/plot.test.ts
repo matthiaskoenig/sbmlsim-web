@@ -171,6 +171,42 @@ describe('plotSvg', () => {
     expect(marker?.[1]).toBe(curve?.[1])
   })
 
+  it('gives the series under one curve a marker shape each, in their order', () => {
+    // two studies under one curve carry the colour of that curve, so the shape
+    // is the only thing which tells their points apart
+    const under = (curve: string, id: string): Points => ({ id, label: id, curve, x: [0], y: [1] })
+    const svg = plotSvg(
+      spec(2, {
+        points: [
+          under('curve1', 'seriesA'),
+          under('curve1', 'seriesB'),
+          under('curve1', 'seriesC'),
+          under('curve2', 'seriesD'),
+        ],
+      }),
+    )
+    const shapeOf = (id: string): string => {
+      const group = new RegExp(`<g class="points" data-series="${id}">(.*?)</g>`).exec(svg)
+      const marker = /<(circle|path) class="marker"[^>]*\s(?:r|d)="([^"]*)"/.exec(group?.[1] ?? '')
+      return `${marker?.[1] ?? ''} ${marker?.[2] ?? ''}`
+    }
+    const shapes = ['seriesA', 'seriesB', 'seriesC', 'seriesD'].map(shapeOf)
+    expect(new Set(shapes.slice(0, 3)).size).toBe(3)
+    // the first series of every curve keeps the circle every series had
+    expect(shapes[0]).toBe('circle 3')
+    expect(shapes[3]).toBe('circle 3')
+    // and the legend tells them apart by the same shapes
+    const swatches = [...svg.matchAll(/<(circle|path) class="swatch"/g)].map((one) => one[1])
+    expect(swatches).toEqual(['circle', 'path', 'path', 'circle'])
+  })
+
+  it('keeps the circle of a curve of one series and its colour', () => {
+    const svg = plotSvg(spec(2, { points: [{ id: 'curve2', label: 'Series A', x: [0], y: [1] }] }))
+    expect(svg).toContain('<circle class="marker"')
+    expect(svg).not.toContain('<path class="marker"')
+    expect(svg).toContain('<circle class="swatch"')
+  })
+
   it('takes its colours from the --sbmlsim tokens and not from hard coded hex', () => {
     // the figure of the assertion draws everything which carries a colour at
     // once: the curves, the colour bar above ten of them, the legend of the
@@ -301,6 +337,18 @@ describe('plotSvg', () => {
     expect(lines).toHaveLength(2)
     expect(lines[1]?.startsWith('…')).toBe(true)
     expect(lines[1]?.endsWith('some')).toBe(true)
+  })
+
+  it('starts the kept end of a cut label at a word, and inside one without', () => {
+    const lastLine = (label: string): string => {
+      const svg = plotSvg(spec(1, { series: [{ ...series(1), label }] }))
+      return texts(svg).find((one) => one.startsWith('…')) ?? ''
+    }
+    // the words of the end are words of the label and no tail of one
+    expect(lastLine('A very long legend entry indeed, and then some')).toBe('…and then some')
+    // a label which ends in a word longer than the room keeps the end of it,
+    // because there is no word to start at
+    expect(lastLine('Study A hydrochlorothiazideplasmaconcentrationofvolunteers')).toBe('…lunteers')
   })
 
   it('keeps the end of a label which needs more than two lines, where labels differ', () => {

@@ -684,19 +684,70 @@ const xLabel = computed<string>(() => {
 })
 
 /**
- * The label of the y axis.
+ * The label of the y axis, the one the panel declares or the one of its curves.
  *
- * A panel declares no label for it, so one curve lends the axis its own and
- * several curves, whose names are in the legend, take `GENERIC_Y`; the
- * renderer appends the unit the curves share in either case, and the label is
- * the name a reader who does not see the figure is given for it, so an empty
- * one is no option.
+ * A panel which declares none leaves the label to the element: one curve lends
+ * the axis its own and several curves, whose names are in the legend, take
+ * `GENERIC_Y`. The renderer appends the unit the curves share whichever of the
+ * three it is, so a declared label carries no unit of its own, and the label is
+ * the name a reader who does not see the figure is given for the axis, so an
+ * empty one is no option.
  */
 const yLabel = computed<string>(() => {
+  const declared = declaration.value?.panel.y_label
+  if (declared !== undefined && declared !== '') {
+    return declared
+  }
   const drawn = drawnCurves.value
   const only = drawn.length === 1 ? drawn[0]?.label : undefined
   return only === undefined || only === '' ? GENERIC_Y : only
 })
+
+/**
+ * Get the values of a knob the figure draws.
+ *
+ * @param id the id of the knob
+ * @param answer the run which is drawn
+ * @returns every value of its axis for a knob the run grids over, which draws
+ *   a line per point of it, and the single value its control is at for one
+ *   which is not gridded; no value at all for an id which is no knob of the
+ *   panel, which no state of the knobs ever matches
+ */
+function drawnValues(id: string, answer: SimulateResponse): number[] {
+  const axis = answer.dims.find((one) => one.id === id)
+  if (axis !== undefined) {
+    return Array.isArray(axis.values) ? axis.values : []
+  }
+  const knob = axes.value.find((one) => one.id === id)
+  if (knob === undefined) {
+    return []
+  }
+  const value = values.value[id]
+  return [value === undefined || !Number.isFinite(value) ? knob.default : value]
+}
+
+/**
+ * Get whether the knobs are at the state a series of the study data declares.
+ *
+ * The numbers are compared as they are: the value of the state and the value
+ * of the knob are the two sides of one declaration, a choice of that knob, and
+ * never a value a reader typed or an arithmetic of this element.
+ *
+ * @param declared the declaration of the series, `undefined` for a series the
+ *   declaration does not carry
+ * @param answer the run which is drawn
+ * @returns whether every knob the series names is drawn at the value it names;
+ *   a series which names none is at every state
+ */
+function atState(declared: PanelDataDeclaration | undefined, answer: SimulateResponse): boolean {
+  const state: unknown = declared?.at
+  if (typeof state !== 'object' || state === null) {
+    return true
+  }
+  return Object.entries(state as Record<string, unknown>).every(([id, value]) =>
+    drawnValues(id, answer).includes(value as number),
+  )
+}
 
 /**
  * The study data split into what is drawn and what is not.
@@ -711,6 +762,12 @@ const yLabel = computed<string>(() => {
  * declares one of its own, so a series which does not match is one of another
  * scale, which a figure of one y axis cannot draw without lying about it.
  *
+ * A series which was measured under a state of the knobs (`at`) is left out
+ * while the knobs are not at it, and is none of the three: it is data of a
+ * condition the figure does not show right now, not a series the panel cannot
+ * draw, so nothing is said about it and it comes back when the reader turns
+ * the knob to its value.
+ *
  * This is a view of the answer and nothing else. What a reader is told about a
  * dropped series is said by the watcher below, where a side effect runs once.
  */
@@ -724,6 +781,9 @@ const resolvedData = computed<ResolvedData>(() => {
   const drawn: Points[] = []
   const dropped: DroppedSeries[] = []
   for (const one of seriesOf(study.value)) {
+    if (!atState(declared.get(one.id), answer)) {
+      continue
+    }
     const curve = declared.get(one.id)?.curve ?? one.id
     const unit = units.get(curve)
     const delivered = one.unit ?? null

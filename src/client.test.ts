@@ -22,7 +22,7 @@ function json(body: unknown, status = 200): Response {
 function declaration(contract = 'panel/1'): PanelDeclaration {
   return {
     contract,
-    panel: { id: 'panelA', title: 'Panel A', subtitle: '', x_label: 'time' },
+    panel: { id: 'panelA', title: 'Panel A', subtitle: '', x_label: 'time', y_label: '' },
     axes: [],
     curves: [],
     data: [],

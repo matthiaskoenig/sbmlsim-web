@@ -61,6 +61,7 @@ function declaration(): PanelDeclaration {
       title: 'Panel A',
       subtitle: 'the question the panel answers',
       x_label: 'time [h]',
+      y_label: '',
     },
     axes: [
       {
@@ -101,6 +102,7 @@ function declaredData(more: Partial<PanelDataDeclaration> = {}): PanelDataDeclar
     y: 'value',
     yerr: 'value_sd',
     sel: null,
+    at: null,
     conversion: null,
     unit: null,
     ...more,
@@ -110,6 +112,26 @@ function declaredData(more: Partial<PanelDataDeclaration> = {}): PanelDataDeclar
 /** A declaration which carries study data under its first curve. */
 function withData(more: Partial<PanelDataDeclaration> = {}): PanelDeclaration {
   return { ...declaration(), data: [declaredData(more)] }
+}
+
+/** The choices of the choice knob, which a grid over it runs. */
+const CHOICES = [12.5, 25]
+
+/** A declaration of the choice knob alone, which a run therefore grids over. */
+function gridsOverChoices(more: Partial<PanelDataDeclaration> = {}): PanelDeclaration {
+  const declared = withData(more)
+  return { ...declared, axes: declared.axes.slice(0, 1) }
+}
+
+/** The answer of a run over the choices of that knob, one row per choice. */
+function choiceRun(): SimulateResponse {
+  const rows = CHOICES.map((value) => [0, value, 2 * value])
+  return {
+    ...run(),
+    dims: [{ id: 'knobA', label: 'knob A', unit: 'mg', values: CHOICES }],
+    curves: { curveA: rows, curveB: rows.map((one) => one.map((value) => 10 * value)) },
+    status: { ok: true, points: CHOICES.length, failed: [] },
+  }
 }
 
 /** The study data the endpoint answers, delivered on the scale of its curve. */
@@ -867,6 +889,21 @@ describe('the figure', () => {
     const element = await started()
     expect(figure(element)).toContain('<title>curve A [uM] over time [h]</title>')
   })
+
+  it('names the y axis as the panel declares it, and after its curves without', async () => {
+    const declared = declaration()
+    served.panel = () =>
+      Promise.resolve({
+        ...declared,
+        panel: { ...declared.panel, y_label: 'plasma concentration' },
+      })
+    const element = await started()
+    expect(figure(element)).toContain('>plasma concentration</text>')
+    expect(figure(element)).toContain('<title>plasma concentration over time [h]</title>')
+    // a panel which declares none keeps the label its curves give the axis
+    served.panel = () => Promise.resolve(declared)
+    expect(figure(await started())).toContain('<title>value over time [h]</title>')
+  })
 })
 
 describe('a payload which cannot be read', () => {
@@ -1266,6 +1303,50 @@ describe('the study data under the curves', () => {
     // axes to cover what is drawn nowhere
     expect(figure(outside)).toContain('class="marker"')
     expect(figure(outside)).toBe(figure(inside))
+  })
+
+  it('draws a series only while the knobs are at the state it was measured at', async () => {
+    // the choice knob starts at 25, the series was measured at 12.5: data of
+    // one condition is never drawn under a curve of another
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    // and it is nothing a reader is told about, it is simply not that condition
+    expect(warnings()).toHaveLength(0)
+    move(control(element, 'knobA'), '12.5', 'change')
+    await nextTick()
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    move(control(element, 'knobA'), '25', 'change')
+    await nextTick()
+    expect(figure(element)).not.toContain('class="points"')
+  })
+
+  it('draws a series of a state of a knob the run grids over, at every point of it', async () => {
+    // the run covers every choice of the knob it grids over, so the data of
+    // one of them is drawn next to the line of that choice
+    served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 12.5 } }))
+    served.simulate = () => Promise.resolve(choiceRun())
+    const element = await started()
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    // a value which is no point of that axis is drawn nowhere
+    served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 50 } }))
+    expect(figure(await started())).not.toContain('class="points"')
+  })
+
+  it('draws a series which was measured at no state whatever the knobs are', async () => {
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData())
+    const element = await started()
+    expect(figure(element)).toContain('class="points"')
+    move(control(element, 'knobA'), '12.5', 'change')
+    await nextTick()
+    expect(figure(element)).toContain('class="points"')
+  })
+
+  it('draws a series of a state of a knob the panel does not declare nowhere', async () => {
+    served.panel = () => Promise.resolve(withData({ at: { knobC: 1 } }))
+    expect(figure(await started())).not.toContain('class="points"')
   })
 })
 

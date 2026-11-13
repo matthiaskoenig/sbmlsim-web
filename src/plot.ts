@@ -28,6 +28,10 @@
  *   reading between six anchors is up to 12 of 255 per channel away from
  *   `viridis(linspace(0, 0.85, n))`, which is the price of a ramp a host moves
  *   with six values and not of a table of colours nobody can move,
+ * - a series of study data takes the colour of the curve it sits under and the
+ *   shape of its position among the series of that curve (`MARKER_SHAPES`), so
+ *   two studies under one curve share its colour and are told apart by their
+ *   markers, while a curve of one series keeps the circle,
  * - the label of an axis is `<label> [<unit>]`, the `name` of an `Axis`.
  *
  * Numbers are short and stable: a coordinate is rounded to `COORD_DECIMALS`
@@ -168,6 +172,20 @@ const LEGEND_LINE = 13
 const LEGEND_LINES = 2
 /** The radius of the marker of a study point, in pixels. */
 const MARKER = 3
+/**
+ * The shapes the series under one curve are drawn with, in their order.
+ *
+ * Two series under one curve carry the colour of that curve, so the shape is
+ * what tells them apart; the first of them is the circle every series was
+ * drawn as before there were shapes.
+ */
+const MARKER_SHAPES = ['circle', 'square', 'triangle', 'diamond'] as const
+/** The half side of the square marker, which carries the area of the circle. */
+const SQUARE = (MARKER * Math.sqrt(Math.PI)) / 2
+/** The half diagonal of the diamond marker, which carries that area as well. */
+const DIAMOND = MARKER * Math.sqrt(Math.PI / 2)
+/** The circumradius of the triangle marker, which carries it too. */
+const TRIANGLE = MARKER * Math.sqrt((4 * Math.PI) / (3 * Math.sqrt(3)))
 /** The half width of the cap of an error bar, in pixels. */
 const CAP = 3
 /** The pixels a tick of the x axis is given, which is how many ticks it gets. */
@@ -260,6 +278,9 @@ interface Axis {
   position: (value: number) => number
 }
 
+/** One of the shapes a series of study data is drawn with. */
+type MarkerShape = (typeof MARKER_SHAPES)[number]
+
 /** One entry of a legend: a curve or a series of study data. */
 interface Entry {
   /** The id of the curve or the series. */
@@ -268,8 +289,8 @@ interface Entry {
   label: string
   /** Its colour, a token or a mix of two of them. */
   colour: string
-  /** Whether it is drawn as a line or as a marker. */
-  marker: boolean
+  /** The shape of its marker, `null` for a curve, which is drawn as a line. */
+  shape: MarkerShape | null
 }
 
 /**
@@ -484,7 +505,9 @@ function fittingAxisLabel(label: string, room: number): string {
  * break it. Past `LEGEND_LINES` lines the last one keeps the end of the label
  * and not its start, with the ellipsis in front of it: the words which tell
  * two labels apart are the last ones, and the first line already shows the
- * head of the label, so the reader sees both ends and loses the middle.
+ * head of the label, so the reader sees both ends and loses the middle. That
+ * end starts at a word wherever the room it has holds one, so the reader is
+ * given words and not the tail of a word which reads as another one.
  *
  * @param label the label
  * @param room the pixels a line has
@@ -523,7 +546,16 @@ function wrapLabel(label: string, room: number, fontSize: number): string[] {
   }
   const kept = lines.slice(0, LEGEND_LINES - 1)
   const rest = lines.slice(LEGEND_LINES - 1).join(' ')
-  return [...kept, rest.length <= width ? rest : ELLIPSIS + rest.slice(rest.length - width + 1)]
+  if (rest.length <= width) {
+    return [...kept, rest]
+  }
+  // the kept end of the last line starts at a word where it can: a cut inside
+  // a word reads as another word and the reader cannot tell which it is, and a
+  // word longer than the room there is has nowhere else to break
+  const tail = rest.slice(rest.length - width + 1)
+  const space = tail.indexOf(' ')
+  const end = space >= 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail
+  return [...kept, ELLIPSIS + end]
 }
 
 /**
@@ -1030,15 +1062,85 @@ function errorsOf(points: Points, x: Axis, y: Axis): string {
 }
 
 /**
+ * Get the shape of every series of study data.
+ *
+ * The series under one curve take the shapes of `MARKER_SHAPES` in the order
+ * they are declared and start again at the first of them past the last shape,
+ * so two series of one curve, which share its colour, are told apart by their
+ * shape. A curve of one series therefore keeps the circle it always had.
+ *
+ * @param points the series in the order they are declared
+ * @returns the shape of every one of them, in that order
+ */
+function markerShapes(points: Points[]): MarkerShape[] {
+  const drawn = new Map<string, number>()
+  return points.map((one) => {
+    const curve = one.curve ?? one.id
+    const index = drawn.get(curve) ?? 0
+    drawn.set(curve, index + 1)
+    return MARKER_SHAPES[index % MARKER_SHAPES.length] ?? 'circle'
+  })
+}
+
+/**
+ * Write one marker of a series of study data.
+ *
+ * @param shape the shape of the marker
+ * @param colour its colour
+ * @param cx the pixel of its centre on the x axis
+ * @param cy the pixel of its centre on the y axis
+ * @param className the class the element carries
+ * @returns the element: a circle, or the closed path of a polygon of the same
+ *   area, so no shape weighs more than another
+ */
+function markerTag(
+  shape: MarkerShape,
+  colour: string,
+  cx: number,
+  cy: number,
+  className: string,
+): string {
+  const style = `fill:${colour}`
+  if (shape === 'circle') {
+    return tag('circle', { class: className, style, cx: coord(cx), cy: coord(cy), r: MARKER })
+  }
+  const corners: [number, number][] =
+    shape === 'square'
+      ? [
+          [-SQUARE, -SQUARE],
+          [SQUARE, -SQUARE],
+          [SQUARE, SQUARE],
+          [-SQUARE, SQUARE],
+        ]
+      : shape === 'diamond'
+        ? [
+            [0, -DIAMOND],
+            [DIAMOND, 0],
+            [0, DIAMOND],
+            [-DIAMOND, 0],
+          ]
+        : [
+            [0, -TRIANGLE],
+            [(TRIANGLE * Math.sqrt(3)) / 2, TRIANGLE / 2],
+            [(-TRIANGLE * Math.sqrt(3)) / 2, TRIANGLE / 2],
+          ]
+  const d = corners
+    .map(([dx, dy], index) => `${index === 0 ? 'M' : 'L'}${coord(cx + dx)} ${coord(cy + dy)}`)
+    .join(' ')
+  return tag('path', { class: className, style, d: `${d} Z` })
+}
+
+/**
  * Write the markers of a series of study data.
  *
  * @param points the series
  * @param colour the colour of the series
+ * @param shape the shape of its markers
  * @param x the x axis
  * @param y the y axis
- * @returns the circles of the points which can be drawn
+ * @returns the markers of the points which can be drawn
  */
-function markersOf(points: Points, colour: string, x: Axis, y: Axis): string {
+function markersOf(points: Points, colour: string, shape: MarkerShape, x: Axis, y: Axis): string {
   const count = Math.min(points.x.length, points.y.length)
   const drawn: string[] = []
   for (let index = 0; index < count; index += 1) {
@@ -1047,15 +1149,7 @@ function markersOf(points: Points, colour: string, x: Axis, y: Axis): string {
     if (at === undefined || value === undefined || !x.drawable(at) || !y.drawable(value)) {
       continue
     }
-    drawn.push(
-      tag('circle', {
-        class: 'marker',
-        style: `fill:${colour}`,
-        cx: coord(x.position(at)),
-        cy: coord(y.position(value)),
-        r: MARKER,
-      }),
-    )
+    drawn.push(markerTag(shape, colour, x.position(at), y.position(value), 'marker'))
   }
   return drawn.join('')
 }
@@ -1179,14 +1273,8 @@ function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap:
   const rows = entries
     .map((entry) => {
       const lines = legendLines(entry.label, room, wrap)
-      const swatch = entry.marker
-        ? tag('circle', {
-            class: 'swatch',
-            style: `fill:${entry.colour}`,
-            cx: coord(x + SWATCH / 2),
-            cy: coord(at),
-            r: MARKER,
-          })
+      const swatch = entry.shape
+        ? markerTag(entry.shape, entry.colour, x + SWATCH / 2, at, 'swatch')
         : tag('line', {
             class: 'swatch',
             style: `stroke:${entry.colour};stroke-width:${token('curve-width')}`,
@@ -1302,6 +1390,8 @@ interface Layout {
   y: Axis
   /** The study data as it is drawn, cut to the x the curves cover. */
   points: Points[]
+  /** The shape of the markers of every series, in the order of the study data. */
+  shapes: MarkerShape[]
   /** The colour of every series, in its order. */
   colours: string[]
   /** The entries of the legend, the curves first and the study data after them. */
@@ -1377,6 +1467,7 @@ function layoutFor(spec: PlotSpec): Layout {
     return colours[index] ?? token('fg-soft')
   }
 
+  const shapes = markerShapes(declared)
   const entries: Entry[] = []
   if (!hasColourbar) {
     const unit = sharedUnit(series)
@@ -1385,16 +1476,16 @@ function layoutFor(spec: PlotSpec): Layout {
         id: one.id,
         label: unit === undefined ? axisLabel(one.label, one.unit) : one.label,
         colour: colours[index] ?? token('fg-soft'),
-        marker: false,
+        shape: null,
       })
     }
   }
-  for (const one of declared) {
+  for (const [index, one] of declared.entries()) {
     entries.push({
       id: one.id,
       label: one.label,
       colour: colourOf(one.curve ?? one.id),
-      marker: true,
+      shape: shapes[index] ?? 'circle',
     })
   }
 
@@ -1440,6 +1531,7 @@ function layoutFor(spec: PlotSpec): Layout {
     x: axisOf(xs, false, box.x0, box.x1, tickCount(box.x1 - box.x0, X_TICK_ROOM)),
     y: axisOf(ys, spec.logY, box.y1, box.y0, tickCount(box.y1 - box.y0, Y_TICK_ROOM)),
     points,
+    shapes,
     colours,
     entries,
     hasColourbar,
@@ -1513,6 +1605,7 @@ export function plotSvg(spec: PlotSpec): string {
     x,
     y,
     points,
+    shapes,
     colours,
     entries,
     hasColourbar,
@@ -1542,8 +1635,9 @@ export function plotSvg(spec: PlotSpec): string {
   )
 
   const drawnPoints = points
-    .map((one) => {
+    .map((one, index) => {
       const colour = colourOf(one.curve ?? one.id)
+      const shape = shapes[index] ?? 'circle'
       const bars = errorsOf(one, x, y)
       const path =
         bars === ''
@@ -1556,7 +1650,7 @@ export function plotSvg(spec: PlotSpec): string {
       return tag(
         'g',
         { class: 'points', 'data-series': one.id },
-        `${path}${markersOf(one, colour, x, y)}`,
+        `${path}${markersOf(one, colour, shape, x, y)}`,
       )
     })
     .join('')

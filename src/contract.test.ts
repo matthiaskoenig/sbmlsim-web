@@ -24,6 +24,7 @@ const declaration: PanelDeclaration = {
     title: 'Panel A',
     subtitle: 'the question the panel answers',
     x_label: 'time [hr]',
+    y_label: '',
   },
   axes: [
     {
@@ -68,6 +69,7 @@ const declaration: PanelDeclaration = {
       y: 'value',
       yerr: null,
       sel: { label: 'seriesA_rows' },
+      at: null,
       conversion: '1/(100 g/mole)',
       unit: null,
     },

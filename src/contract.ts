@@ -177,6 +177,18 @@ export interface PanelDataDeclaration {
   yerr: string | null
   /** The rows of the dataset the series is, `null` for every row of it. */
   sel: Record<string, string> | null
+  /**
+   * The state of the knobs the series was measured under, the value of every
+   * knob it names, `null` for a series which was measured under none of them.
+   *
+   * A renderer draws the series only while the knobs are at that state, so the
+   * data of one condition is never drawn under a curve of another; a knob the
+   * state does not name is not constrained, and a series which names none is
+   * drawn whatever the knobs are set to. Every knob it names is a knob of the
+   * kind `choice` and every value one of the choices of its knob, which the
+   * endpoint checks where a panel is declared.
+   */
+  at: Record<string, number> | null
   /** A quantity the values are multiplied by, `null` for none. */
   conversion: string | null
   /** The unit it is delivered in, `null` for the unit of its curve. */
@@ -221,6 +233,13 @@ export interface PanelTexts {
   subtitle: string
   /** The label of the time axis. */
   x_label: string
+  /**
+   * The label of the value axis, empty for a panel which declares none.
+   *
+   * A renderer names that axis after the curves then, and appends the unit
+   * they share in either case, so the unit is no part of it.
+   */
+  y_label: string
 }
 
 /** The declaration of a panel, the `panel/1` payload a renderer draws from. */
