@@ -34,8 +34,11 @@ interface Call {
   body: SimulateRequest | null
 }
 
+/** The app as a test gives it, without what the service derives from the panels. */
+type Given = Omit<AppDeclaration, 'shared' | 'heads'>
+
 /** The app every test starts from: two pages, two variants and the texts of the footer. */
-function app(more: Partial<AppDeclaration> = {}): Omit<AppDeclaration, 'shared'> {
+function app(more: Partial<AppDeclaration> = {}): Given {
   return {
     contract: 'app/1',
     title: 'Model A',
@@ -59,7 +62,13 @@ function app(more: Partial<AppDeclaration> = {}): Omit<AppDeclaration, 'shared'>
 function panelDeclaration(id: string): PanelDeclaration {
   return {
     contract: 'panel/1',
-    panel: { id, title: `Title of ${id}`, subtitle: '', x_label: 'time [h]', y_label: '' },
+    panel: {
+      id,
+      title: `Title of ${id}`,
+      subtitle: subtitlesOf[id] ?? '',
+      x_label: 'time [h]',
+      y_label: '',
+    },
     axes: [
       {
         id: 'knobA',
@@ -145,7 +154,7 @@ function run(request: SimulateRequest): SimulateResponse {
  * service does: the ids more than one panel of a page declares, in the order
  * the first panel which declares one lists them.
  */
-function sharedOf(given: Omit<AppDeclaration, 'shared'>): AppDeclaration['shared'] {
+function sharedOf(given: Given): AppDeclaration['shared'] {
   return Object.fromEntries(
     given.pages.map((page) => {
       const first = new Map<string, PanelAxis>()
@@ -169,8 +178,24 @@ function sharedOf(given: Omit<AppDeclaration, 'shared'>): AppDeclaration['shared
   )
 }
 
+/** Work the heads of the panels of an app out of their declarations, as the service does. */
+function headsOf(given: Given): AppDeclaration['heads'] {
+  return Object.fromEntries(
+    given.pages.map((page) => [
+      page.id,
+      page.panels.map((id) => {
+        const { title, subtitle } = panelDeclaration(id).panel
+        return { id, title, subtitle }
+      }),
+    ]),
+  )
+}
+
 /** The app the stub answers, `null` for a request which cannot reach it. */
-let declared: Omit<AppDeclaration, 'shared'> | null = app()
+let declared: Given | null = app()
+
+/** The subtitle of a panel by its id, for a panel which declares one. */
+let subtitlesOf: Record<string, string> = {}
 
 /** The knobs of a panel by its id, for a panel which declares others than `knobA`. */
 let knobsOf: Record<string, PanelAxis[]> = {}
@@ -244,6 +269,7 @@ function tabs(element: AppElement): HTMLButtonElement[] {
 beforeEach(() => {
   declared = app()
   knobsOf = {}
+  subtitlesOf = {}
   calls = []
   hang = null
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
@@ -253,7 +279,9 @@ beforeEach(() => {
       return Promise.reject(new TypeError('Failed to fetch'))
     }
     if (url.endsWith('/app')) {
-      return Promise.resolve(json({ ...declared, shared: sharedOf(declared) }))
+      return Promise.resolve(
+        json({ ...declared, shared: sharedOf(declared), heads: headsOf(declared) }),
+      )
     }
     if (url.endsWith('/simulate')) {
       if (hang !== null && init?.signal) {
@@ -439,6 +467,49 @@ describe('the shell of an app', () => {
     // lone panel takes the row, which `auto-fit` is for and `auto-fill` is not
     expect(style).toMatch(/repeat\(auto-fit,\s*minmax\(min\(100%,\s*30rem\),\s*1fr\)\)/)
     expect(style).not.toMatch(/auto-fill/)
+  })
+
+  it('reserves the head of every card with the heads of the app, laid out and never shown', async () => {
+    subtitlesOf = { panelC: 'what panel C answers' }
+    const element = await shell({ page: 'pageB' })
+    const reserves = [...element.shadowRoot.querySelectorAll('.cell')].map((cell) => {
+      const reserve = cell.querySelector(':scope > .reserve')
+      return {
+        hidden: reserve?.getAttribute('aria-hidden'),
+        title: reserve?.querySelector('.reserve-title')?.textContent.trim() ?? null,
+        subtitle: reserve?.querySelector('.reserve-subtitle')?.textContent.trim() ?? null,
+      }
+    })
+    // the texts the panels will draw in their heads, a subtitle only where one is declared
+    expect(reserves).toEqual([
+      { hidden: 'true', title: 'Title of panelB', subtitle: null },
+      { hidden: 'true', title: 'Title of panelC', subtitle: 'what panel C answers' },
+    ])
+    const style = [...element.shadowRoot.querySelectorAll('style')]
+      .map((one) => one.textContent)
+      .join('\n')
+    expect(style).toMatch(/\.cell > \.reserve \{[^}]*visibility: hidden/)
+  })
+
+  it('reserves no head for a panel which declares neither a title nor a subtitle', async () => {
+    declared = app({ pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'] }] })
+    const element = await shell()
+    expect(element.shadowRoot.querySelector('.reserve-head')).not.toBeNull()
+    // the stub derives the heads from the declarations; an empty head is none
+    const answered = {
+      ...declared,
+      shared: {},
+      heads: { pageA: [{ id: 'panelA', title: '', subtitle: '' }] },
+    }
+    vi.stubGlobal('fetch', (url: string) =>
+      url.endsWith('/app')
+        ? Promise.resolve(json(answered))
+        : Promise.reject(new TypeError('Failed to fetch')),
+    )
+    element.remove()
+    const empty = await shell()
+    expect(empty.shadowRoot.querySelector('.reserve')).not.toBeNull()
+    expect(empty.shadowRoot.querySelector('.reserve-head')).toBeNull()
   })
 
   it('paints its own surface and declares the scheme of its controls', async () => {

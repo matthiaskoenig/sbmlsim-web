@@ -434,6 +434,14 @@ export interface AppDeclaration {
    * no part of the declaration of the app.
    */
   shared: Record<string, SharedKnob[]>
+  /**
+   * The panels of a page with their titles and subtitles, by the id of the
+   * page, in the order the page shows them. They are the heads of the
+   * declarations of the panels, which the shell lays the head of each card out
+   * with before its panel has read its declaration; the service derives them
+   * from the panels, so they are no part of the declaration of the app either.
+   */
+  heads: Record<string, PanelSummary[]>
 }
 
 /** A model the endpoint serves, as it is listed. */

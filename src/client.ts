@@ -192,13 +192,39 @@ function isShared(value: unknown): boolean {
 }
 
 /**
+ * Get whether the heads of the panels of an app can be read.
+ *
+ * @param value the `heads` of the body
+ * @returns whether it is an object of lists of panels, each with its id, its
+ *   title and its subtitle
+ */
+function isHeads(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    Object.values(value).every(
+      (page) =>
+        Array.isArray(page) &&
+        page.every(
+          (one) =>
+            isObject(one) &&
+            typeof one.id === 'string' &&
+            typeof one.title === 'string' &&
+            typeof one.subtitle === 'string',
+        ),
+    )
+  )
+}
+
+/**
  * Check that a body carries the fields of an app before it is read.
  *
- * The items of the pages, of the variants and of the shared knobs are checked
- * as well, because the shell walks them to build its navigation, its switcher,
- * its controls and its panels. A body without the shared knobs is no app: the
- * shell would show every panel with controls of its own, which is a page of
- * two states when its panels share a knob.
+ * The items of the pages, of the variants, of the shared knobs and of the
+ * heads are checked as well, because the shell walks them to build its
+ * navigation, its switcher, its controls and its cards. A body without the
+ * shared knobs is no app: the shell would show every panel with controls of
+ * its own, which is a page of two states when its panels share a knob. A body
+ * without the heads is none either, since every card would move when the head
+ * of its panel arrives.
  *
  * @param body the parsed body, of the contract `app/1`
  * @returns the app
@@ -222,7 +248,8 @@ function asApp(body: unknown): AppDeclaration {
         Array.isArray((page as Record<string, unknown>).panels),
     ) ||
     !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string') ||
-    !isShared(body.shared)
+    !isShared(body.shared) ||
+    !isHeads(body.heads)
   ) {
     throw new PanelRequestError('body')
   }

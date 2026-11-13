@@ -37,6 +37,16 @@
  * error line under its plot, draw their plots at one height; a panel alone in
  * a page is a column of its own and is laid out as it always is.
  *
+ * The head of a card is reserved before its panel has read its declaration:
+ * the app carries the title and the subtitle of every panel of a page
+ * (`heads`), and each card holds a copy of the head of its panel which is laid
+ * out and never drawn, in the fonts, the line height and the gap of the head
+ * of the panel and at the width of the card, so the browser wraps it into the
+ * lines the panel's head will take and the head row of the grid is as tall as
+ * the tallest head of the row from the first frame. The panel reserves the
+ * height of its figure from its width itself, and the foot row holds one line
+ * of the provenance, so nothing of a page moves while its panels load.
+ *
  * ## What happens to a page
  *
  * The declaration is read once for the life of the element, and a switch of the
@@ -127,7 +137,14 @@ import type { PropType } from 'vue'
 
 import { DEFAULT_TIMEOUT, FAILURE_MESSAGES, PanelClient, failureKind } from './client'
 import type { FailureKind } from './client'
-import type { AppDeclaration, AppPage, PanelAxis, Provenance, SharedKnob } from './contract'
+import type {
+  AppDeclaration,
+  AppPage,
+  PanelAxis,
+  PanelSummary,
+  Provenance,
+  SharedKnob,
+} from './contract'
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
 import { keepControlKeys, ownValue } from './knob'
@@ -220,6 +237,14 @@ const sharedAtDefaults = computed<boolean>(() =>
     (one) => (ownValue(shared.value, one.knob.id) ?? one.knob.default) === one.knob.default,
   ),
 )
+
+/** The heads of the panels of the page by the id of the panel, as the service states them in the app. */
+const heads = computed<Map<string, PanelSummary>>(() => {
+  const page = current.value
+  return new Map(
+    (page === null ? [] : (app.value?.heads[page.id] ?? [])).map((one) => [one.id, one]),
+  )
+})
 
 /**
  * Get the attribute `values` of a panel of the page.
@@ -530,6 +555,19 @@ onBeforeUnmount(() => {
             :variant="variantOfPanels"
             :values.attr="valuesOf(one)"
           ></component>
+          <div class="reserve" aria-hidden="true">
+            <div
+              v-if="(heads.get(one)?.title ?? '') !== '' || (heads.get(one)?.subtitle ?? '') !== ''"
+              class="reserve-head"
+            >
+              <div v-if="(heads.get(one)?.title ?? '') !== ''" class="reserve-title">
+                {{ heads.get(one)?.title }}
+              </div>
+              <div v-if="(heads.get(one)?.subtitle ?? '') !== ''" class="reserve-subtitle">
+                {{ heads.get(one)?.subtitle }}
+              </div>
+            </div>
+          </div>
         </div>
       </section>
       <p class="live" aria-live="polite">{{ announced }}</p>
@@ -706,14 +744,15 @@ onBeforeUnmount(() => {
 /*
  * The rows a card spans are reserved before its panel has read anything, so a
  * card does not grow under the reader when the declaration and the first run
- * arrive (a subgrid card ignores a `min-height` of its own, its rows do not):
- * the head row holds one line of the title (15px) and one of the subtitle, the
- * foot row one line of the provenance, each in the line height of the panel
- * (1.45). The body row needs none: a panel reserves the height of its figure
- * from its width before it has an answer. A track holds its part, the padding
- * and the border of the card, less half of the difference between the gap of
- * the grid and the gap of the panel (16px and 8px), which the subgrid takes as
- * a margin.
+ * arrive. The head row holds the copy of the head of each panel of the row
+ * (`.reserve`), which the browser lays out as the panel will. The body row
+ * needs nothing: a panel reserves the height of its figure from its width
+ * before it has an answer. The foot row holds one line of the provenance in
+ * the line height of the panel (1.45), as a minimum of the track, since a
+ * subgrid card ignores a `min-height` of its own: the track holds the line, the
+ * padding and the border of the card, less half of the difference between the
+ * gap of the grid and the gap of the panel (16px and 8px), which the subgrid
+ * takes as a margin.
  */
 .grid {
   --_card-pad: 16px;
@@ -721,11 +760,7 @@ onBeforeUnmount(() => {
 
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
-  grid-auto-rows: minmax(
-      calc(15px * 1.45 + 2px + var(--_font-size) * 1.45 + var(--_track-edge)),
-      auto
-    )
-    auto minmax(calc(var(--_font-size-small) * 1.45 + var(--_track-edge)), auto);
+  grid-auto-rows: auto auto minmax(calc(var(--_font-size-small) * 1.45 + var(--_track-edge)), auto);
   gap: 16px;
 }
 
@@ -753,8 +788,45 @@ onBeforeUnmount(() => {
 .cell > * {
   display: grid;
   grid-row: 1 / -1;
+  grid-column: 1;
   grid-template-rows: subgrid;
   row-gap: 0;
+}
+
+/*
+ * The copy of the head of the panel of a card, laid out on the rows of the card
+ * as the panel is (a subgrid of the gap of the panel) and in the type of the
+ * head of the panel (`SbmlsimPanel.ce.vue`, `.head`, `.title`, `.subtitle`),
+ * and never drawn: it holds the head row at the height the head of the panel
+ * takes before the panel has drawn it, and the panel is drawn over it.
+ */
+.cell > .reserve {
+  visibility: hidden;
+  pointer-events: none;
+  row-gap: 8px;
+}
+
+.reserve-head {
+  display: flex;
+  grid-row: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--_font);
+  font-size: var(--_font-size);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.reserve-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.reserve-subtitle {
+  font-size: var(--_font-size);
 }
 
 .cell > ::part(panel) {

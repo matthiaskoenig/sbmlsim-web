@@ -167,6 +167,12 @@ const app: AppDeclaration = {
       },
     ],
   },
+  heads: {
+    pageA: [
+      { id: 'panelA', title: 'Panel A', subtitle: 'what panel A answers' },
+      { id: 'panelB', title: 'Panel B', subtitle: 'what panel B answers' },
+    ],
+  },
 }
 
 describe('the contracts', () => {
@@ -186,6 +192,7 @@ describe('the contracts', () => {
     expect(request.grid).toEqual({ knobB: 3 })
     expect(app.pages[0]?.panels).toEqual([declaration.panel.id, 'panelB'])
     expect(app.shared.pageA?.[0]?.panels.map((one) => one.id)).toEqual(app.pages[0]?.panels)
+    expect(app.heads.pageA?.map((one) => one.id)).toEqual(app.pages[0]?.panels)
   })
 
   it('reads the limits of the endpoint and not its own', () => {

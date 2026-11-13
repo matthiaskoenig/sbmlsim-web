@@ -535,13 +535,57 @@ test.describe('the app shell', () => {
     expect(order).toBeCloseTo(8, 0)
   })
 
-  for (const width of [390, 1280]) {
-    test(`moves nothing while the panels load at ${String(width)} px`, async ({ page }) => {
+  /**
+   * Heads which wrap to several lines and differ between the two panels of a
+   * row, so the head row of a card is as tall as the tallest of them.
+   */
+  const LONG_HEADS: Record<string, { title: string; subtitle: string }> = {
+    renal_plasma: {
+      title: 'Plasma concentration of the drug over the renal function of the patient',
+      subtitle:
+        'How the concentration in the plasma follows the renal function after a single oral dose, from a normal function down to an impaired one, as the studies of the model measured it.',
+    },
+    renal_urine: {
+      title: 'Urinary excretion over the renal function',
+      subtitle:
+        'How much of the dose reaches the urine, and how much later, as the function of the kidneys falls from normal to impaired, for every dose of the studies, after a single oral dose of the drug and over the two days after it.',
+    },
+  }
+
+  for (const [width, long] of [
+    [390, false],
+    [1280, false],
+    [390, true],
+    [1280, true],
+  ] as const) {
+    const heads = long ? ', with heads of several lines' : ''
+    test(`moves nothing while the panels load at ${String(width)} px${heads}`, async ({ page }) => {
+      if (long) {
+        // the app and the declarations name the same heads, as the service
+        // derives both from the panels
+        await page.route('**/api/models/hctz/app', async (route) => {
+          const response = await route.fetch()
+          const body = (await response.json()) as {
+            heads: Record<string, { id: string; title: string; subtitle: string }[]>
+          }
+          for (const one of Object.values(body.heads).flat()) {
+            Object.assign(one, LONG_HEADS[one.id] ?? {})
+          }
+          await route.fulfill({ response, json: body })
+        })
+      }
       // the service answers before the first paint, so its answers are held
       // back as a remote one holds them: the declarations 400 ms, the runs 300 ms
       await page.route(/\/panels\/[^/]+$/, async (route) => {
         await new Promise((resolve) => setTimeout(resolve, 400))
-        await route.continue()
+        if (!long) {
+          await route.continue()
+          return
+        }
+        const response = await route.fetch()
+        const body = (await response.json()) as { panel: { id: string } }
+        Object.assign(body.panel, LONG_HEADS[body.panel.id] ?? {})
+        await route.fulfill({ response, json: body })
       })
       await page.route('**/simulate', async (route) => {
         await new Promise((resolve) => setTimeout(resolve, 300))

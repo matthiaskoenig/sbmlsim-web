@@ -111,7 +111,7 @@ describe('the client of an endpoint', () => {
     expect(series).toHaveLength(1)
   })
 
-  it('reads an app with the knobs its pages share and refuses one without them', async () => {
+  it('reads an app with the knobs its pages share and the heads of its panels, and refuses one without them', async () => {
     const knob = {
       id: 'knobA',
       label: 'knob A',
@@ -144,6 +144,12 @@ describe('the client of an endpoint', () => {
           },
         ],
       },
+      heads: {
+        pageA: [
+          { id: 'panelA', title: 'Panel A', subtitle: 'what A answers' },
+          { id: 'panelB', title: 'Panel B', subtitle: '' },
+        ],
+      },
     }
     let body: unknown = app
     serve(() => Promise.resolve(json(body)))
@@ -156,6 +162,10 @@ describe('the client of an endpoint', () => {
       { ...app, shared: [] },
       { ...app, shared: { pageA: [{ knob: { ...knob, default: '1' }, panels: [] }] } },
       { ...app, shared: { pageA: [{ knob, panels: [{ id: 'panelA' }] }] } },
+      // nor the heads, without which every card moves when its panel draws its head
+      { ...app, heads: undefined },
+      { ...app, heads: [] },
+      { ...app, heads: { pageA: [{ id: 'panelA', title: 'Panel A' }] } },
     ]) {
       body = broken
       expect(await kindOf(client.app('modelA'))).toBe('body')
