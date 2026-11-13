@@ -1045,6 +1045,40 @@ describe('the frame of the value axis', () => {
     expect(valueAxis(element)).toContain('>300<')
   })
 
+  it('keeps the plot box of a panel of two conditions, whichever of them is drawn', async () => {
+    // two series under one curve, one per choice of the knob the run grids
+    // over, their labels of different lengths: the legend is laid out over the
+    // labels the panel declares in their order, so the rows it needs, and with
+    // them the plot box, are the same at both choices
+    const long = 'renal impairment, creatinine clearance 10 ml per minute'
+    const declared = gridsOverChoices()
+    served.panel = () =>
+      Promise.resolve({
+        ...declared,
+        data: [
+          declaredData({ id: 'seriesA', label: long, at: { knobA: 12.5 } }),
+          declaredData({ id: 'seriesB', label: 'healthy', at: { knobA: 25 } }),
+        ],
+      })
+    served.simulate = () => Promise.resolve(choiceRun())
+    served.data = () =>
+      Promise.resolve({
+        contract: 'paneldata/1' as const,
+        series: [
+          { ...studyData().series[0], id: 'seriesA', label: long },
+          { ...studyData().series[0], id: 'seriesB', label: 'healthy' },
+        ],
+      })
+    const element = await started()
+    // the knob starts at 25, where the short series is the one which is drawn
+    expect(figure(element)).toContain('data-series="seriesB"')
+    const box = plotBox(element)
+    move(control(element, 'knobA'), '12.5', 'change')
+    await nextTick()
+    expect(figure(element)).toContain('data-series="seriesA"')
+    expect(plotBox(element)).toEqual(box)
+  })
+
   it('keeps the decades of a logarithmic axis over the whole answer', async () => {
     served.simulate = () =>
       Promise.resolve(

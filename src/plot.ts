@@ -24,7 +24,7 @@
  * - a legend sits beside the plot or below it, packed into rows, whichever of
  *   the two leaves the larger plot box, so a figure which grows never loses
  *   plot at a width where the two trade places; it is laid out over the labels
- *   it may show (`legendReserve`) and drawn with the ones it has, so an entry
+ *   it may show (`declaredLabels`) and drawn with the ones it has, so an entry
  *   which comes and goes does not move the box either,
  * - the label of an axis wraps at its words onto at most `AXIS_LINES` lines of
  *   the length of that axis, which is `_fit_margins` and `_wrap_label` of
@@ -120,18 +120,23 @@ export interface PlotSpec {
    */
   yLimits?: Limits
   /**
-   * The labels the legend keeps room for besides the ones it draws.
+   * The labels of the series the figure may draw under its curves, in the order
+   * the caller declares them, the drawn ones among them.
    *
    * It is what a caller passes whose entries come and go while the figure stays
    * the same figure: a series which is drawn only under some condition is named
-   * here, the legend reserves the width of its column and the rows of a legend
-   * below the plot for it, and nothing is drawn for it. The plot box is then a
-   * function of what the caller may show and not of what it happens to show, so
-   * a curve is not redrawn in a box of another size when a condition is met,
-   * which is the rule the frame of the value axis follows as well. The cost is
-   * a legend which sometimes reserves room it does not use.
+   * here whether or not it is drawn now, the legend takes the width of its
+   * column and the rows of a legend below the plot over this list, and nothing
+   * is drawn for a label which has no series. It is the whole list and not the
+   * labels which are missing, because the rows are packed in the order they are
+   * given: a list which held the drawn entries first would pack the same labels
+   * in another order, and two conditions of one declaration would draw their
+   * curve in boxes of two sizes. The plot box is then a function of what the
+   * caller may show and not of what it happens to show, which is the rule the
+   * frame of the value axis follows as well. The cost is a legend which
+   * sometimes keeps room it does not use.
    */
-  legendReserve?: string[]
+  declaredLabels?: string[]
   /** The width of the figure in pixels. */
   width: number
   /** The height of the figure in pixels. */
@@ -1434,14 +1439,16 @@ function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap:
  * Write the legend of a figure, as the rows below its plot.
  *
  * A legend below the plot writes every entry on one line, since the line it has
- * is the width of the figure and not the width of a column: a label which is
+ * is the width of the plot and not the width of a column: a label which is
  * longer than a whole row is cut with an ellipsis, which is the one case a row
- * cannot hold.
+ * cannot hold. Every row is centred on the plot, as the label of the x axis
+ * above it is, so the plot, its label and its legend are one block; a row too
+ * wide to be centred starts where the plot starts and is cut at its end.
  *
  * @param rows the rows of entries, in their order
- * @param x the pixel every row starts at
+ * @param x the pixel the plot starts at
  * @param y the pixel the first row is centred on
- * @param room the pixels a row has
+ * @param room the pixels a row has, the width of the plot
  * @returns the group of the legend, empty for no row at all
  */
 function belowLegendGroup(rows: Entry[][], x: number, y: number, room: number): string {
@@ -1450,7 +1457,8 @@ function belowLegendGroup(rows: Entry[][], x: number, y: number, room: number): 
   }
   const written = rows
     .map((row, index) => {
-      let at = x
+      const wide = row.reduce((sum, one) => sum + entryRoom(one), 0) + (row.length - 1) * COLUMN_GAP
+      let at = x + Math.max(0, (room - wide) / 2)
       return row
         .map((entry) => {
           const label = fittingLabel(
@@ -1721,11 +1729,11 @@ function layoutFor(spec: PlotSpec): Layout {
   }
 
   const shapes = markerShapes(declared)
-  const entries: Entry[] = []
+  const curveEntries: Entry[] = []
   if (!hasColourbar) {
     const unit = sharedUnit(series)
     for (const [index, one] of series.entries()) {
-      entries.push({
+      curveEntries.push({
         id: one.id,
         label: unit === undefined ? axisLabel(one.label, one.unit) : one.label,
         colour: colours[index] ?? token('fg-soft'),
@@ -1733,24 +1741,29 @@ function layoutFor(spec: PlotSpec): Layout {
       })
     }
   }
-  for (const [index, one] of declared.entries()) {
-    entries.push({
-      id: one.id,
-      label: one.label,
-      colour: colourOf(one.curve ?? one.id),
-      shape: shapes[index] ?? 'circle',
-    })
-  }
+  const pointEntries: Entry[] = declared.map((one, index) => ({
+    id: one.id,
+    label: one.label,
+    colour: colourOf(one.curve ?? one.id),
+    shape: shapes[index] ?? 'circle',
+  }))
+  const entries: Entry[] = [...curveEntries, ...pointEntries]
 
   const barLabels = hasColourbar
     ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
     : []
-  // the legend is laid out over every label it may have to show and drawn with
-  // the ones it shows now, so a figure keeps its plot box when an entry which
-  // is drawn under a condition arrives or leaves
+  // the legend is laid out over every label it may have to show, in the order
+  // the caller declares them, and drawn with the ones it shows now: the rows
+  // are packed in order, so a figure keeps its plot box when an entry which is
+  // drawn under a condition arrives or leaves, whichever of them it is
   const held: Entry[] = [
-    ...entries,
-    ...(spec.legendReserve ?? []).map((label) => ({ id: '', label, colour: '', shape: null })),
+    ...curveEntries,
+    ...(spec.declaredLabels ?? pointEntries.map((one) => one.label)).map((label) => ({
+      id: '',
+      label,
+      colour: '',
+      shape: null,
+    })),
   ]
   const legendRoom = held.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(held.map((o) => o.label)) : 0
   const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
@@ -1763,12 +1776,18 @@ function layoutFor(spec: PlotSpec): Layout {
   // A legend may not take more of the height than `BELOW_SHARE` of it, so a
   // plot with a legend under it is still a plot and not a legend with a strip
   // of plot over it
-  const belowHeight = held.length > 0 ? legendRows(held, width - PAD * 2).length * ROW : 0
+  const columnOf = (wanted: number): number => (wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0)
+  // the band spans the plot box, so its rows are counted against the narrowest
+  // box the margins of the figure can leave, which is the one whose y axis
+  // label takes every line it may: the room a row really has is then never
+  // smaller than the room it was counted against, so the band never grows out
+  // of the height it was given, and at worst it keeps one row it does not need
+  const bandRoom = width - PAD - columnOf(barRoom) - LEFT - (AXIS_LINES - 1) * AXIS_LINE
+  const belowHeight = held.length > 0 ? legendRows(held, bandRoom).length * ROW : 0
   const roomy =
     legendRoom > 0 &&
     belowHeight <= height * BELOW_SHARE &&
     height - BOTTOM - belowHeight - TOP >= MIN_PLOT
-  const columnOf = (wanted: number): number => (wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0)
   const full = axisLabel(spec.yLabel, sharedUnit(series))
   const beside = fitBox(spec, full, width, height, columnOf(Math.max(legendRoom, barRoom)), 0)
   const under = roomy ? fitBox(spec, full, width, height, columnOf(barRoom), belowHeight) : null
@@ -1810,7 +1829,7 @@ function layoutFor(spec: PlotSpec): Layout {
     colours,
     entries,
     hasColourbar,
-    belowRows: below ? legendRows(entries, width - PAD * 2) : [],
+    belowRows: below ? legendRows(entries, box.x1 - box.x0) : [],
     belowHeight: below ? belowHeight : 0,
     xLines,
     yLines,
@@ -1875,8 +1894,11 @@ export function plotGeometry(spec: PlotSpec): PlotGeometry {
  * figure and is read against the height of the plot, and its labels are cut
  * with an ellipsis there; a figure of both keeps the bar beside the plot and
  * puts the legend of its study data below. The legend is laid out over the
- * labels of `legendReserve` as well and drawn without them, so a figure whose
- * entries come and go keeps its plot box where it is.
+ * labels of `declaredLabels`, in the order they are given, and drawn with the
+ * entries it has, so a figure whose entries come and go keeps its plot box
+ * where it is. A legend below the plot spans the plot box and centres its rows
+ * on it, as the label of the x axis is centred, so the foot of the figure is
+ * one block of the plot, its label and its legend.
  *
  * The plot box is clipped, so a value outside of the limits of an axis - the
  * decades a logarithmic axis cuts away - leaves the box instead of drawing over
@@ -1995,9 +2017,9 @@ export function plotSvg(spec: PlotSpec): string {
     : legendGroup(sideEntries, columnX, box.y0 + ROW / 2, legendLabels, wrap)
   const under = belowLegendGroup(
     belowRows,
-    PAD,
+    box.x0,
     height - PAD - belowHeight + ROW / 2,
-    width - PAD * 2,
+    box.x1 - box.x0,
   )
 
   const label = axisLabel(spec.yLabel, sharedUnit(series))

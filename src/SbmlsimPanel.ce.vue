@@ -901,11 +901,16 @@ const drawnData = computed<Points[]>(() => {
   return resolvedData.value.resolved.filter((one) => atState(declared.get(one.id)))
 })
 
-/** The labels of the series which are not drawn now, which hold the legend open. */
-const reservedLabels = computed<string[]>(() => {
-  const drawn = new Set(drawnData.value.map((one) => one.id))
-  return resolvedData.value.resolved.filter((one) => !drawn.has(one.id)).map((one) => one.label)
-})
+/**
+ * The labels of every series the panel can draw, in the order it declares them.
+ *
+ * The legend of the figure is laid out over them and drawn with the series
+ * which are at their condition, so the plot box of a panel is the same box
+ * whichever of its conditioned series is drawn. It is the whole list and not
+ * the ones which are missing, because a legend below the plot packs its rows in
+ * the order it is given them.
+ */
+const declaredLabels = computed<string[]>(() => resolvedData.value.resolved.map((one) => one.label))
 
 /** The series which were already reported, so each is reported once per element. */
 const reported = new Set<string>()
@@ -1082,8 +1087,8 @@ const plot = computed<PlotSpec | null>(() => {
     ...(held === null ? {} : { yLimits: held }),
   }
   const points = drawnData.value
-  const reserve = reservedLabels.value
-  const whole = reserve.length > 0 ? { ...spec, legendReserve: reserve } : spec
+  const labels = declaredLabels.value
+  const whole = labels.length > 0 ? { ...spec, declaredLabels: labels } : spec
   return points.length > 0 ? { ...whole, points } : whole
 })
 

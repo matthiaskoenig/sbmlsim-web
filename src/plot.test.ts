@@ -101,13 +101,13 @@ function texts(svg: string): string[] {
  * The figure of a small spec, byte for byte.
  *
  * It is the pin of every caller which hands the renderer nothing but what it
- * draws: a spec without `yLimits` and without `legendReserve` draws these
+ * draws: a spec without `yLimits` and without `declaredLabels` draws these
  * bytes, so neither field can move the figure of a page which never passes
  * them, and nothing else drifts under them unnoticed either. It is re-taken
  * when the renderer changes its geometry on purpose, which the figure of the
  * change then has to show.
  */
-const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="71.64" y="107" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.55" y="107" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="173.45" y="107" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="224.36" y="107" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96.09" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70.03" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="43.97" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="17.91" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="8" y1="143" x2="26" y2="143"/><text x="32" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
+const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="71.64" y="107" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.55" y="107" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="173.45" y="107" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="224.36" y="107" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96.09" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70.03" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="43.97" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="17.91" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="114.83" y1="143" x2="132.82" y2="143"/><text x="138.82" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
 
 /** The spec `PINNED` was drawn from. */
 function pinned(): PlotSpec {
@@ -435,8 +435,13 @@ describe('plotSvg', () => {
       ...svg.matchAll(/<line class="swatch" [^>]*\sx1="([^"]*)" y1="([^"]*)"/g),
     ].map((one) => ({ x: Number(one[1]), y: Number(one[2]) }))
     expect(swatches).toHaveLength(3)
-    // one entry per row at this width, and a row is one row of a legend tall
-    expect(swatches.map((one) => one.x)).toEqual([8, 8, 8])
+    // one entry per row at this width, every row centred on the plot box, which
+    // is where the label of the x axis is centred, and a row is one row tall
+    const box = plotGeometry(spec(3, { width: 390 })).box
+    const starts = swatches.map((one) => one.x)
+    expect(new Set(starts).size).toBe(1)
+    expect(starts[0] ?? 0).toBeGreaterThan(box.x0)
+    expect(starts[0] ?? 0).toBeLessThan((box.x0 + box.x1) / 2)
     expect((swatches[1]?.y ?? 0) - (swatches[0]?.y ?? 0)).toBe(18)
     // the last row ends inside the figure
     expect(swatches[2]?.y ?? 0).toBeLessThan(300)
@@ -592,12 +597,13 @@ describe('the room the legend keeps', () => {
       height,
       series: [{ ...series(1), label: CONDITIONED[0] ?? '' }],
     })
+    const declared = { ...base, declaredLabels: [CONDITIONED[1] ?? ''] }
     return shown
       ? {
-          ...base,
+          ...declared,
           points: [{ id: 'seriesA', label: CONDITIONED[1] ?? '', curve: 'curve1', x: [0], y: [1] }],
         }
-      : { ...base, legendReserve: [CONDITIONED[1] ?? ''] }
+      : declared
   }
 
   /** The area of the plot box of a figure in square pixels. */
@@ -625,6 +631,23 @@ describe('the room the legend keeps', () => {
     expect(plotGeometry(conditioned(1100, false, 160)).box.y1).toBeLessThan(
       plotGeometry(plain).box.y1,
     )
+  })
+
+  it('keeps the box of a declaration whichever of its conditioned series is drawn', () => {
+    // two series under one curve, each drawn at a state of its own and their
+    // labels of different lengths: the legend packs its rows in the order it is
+    // given its labels, so the row count may not depend on which one is there
+    const two = ['healthy', 'renal impairment, creatinine clearance 10 ml/min']
+    const drawn = (which: number, width: number): PlotSpec => ({
+      ...spec(1, { width, height: 200, series: [{ ...series(1), label: 'urine' }] }),
+      declaredLabels: two,
+      points: [
+        { id: `series${String(which)}`, label: two[which] ?? '', curve: 'curve1', x: [0], y: [1] },
+      ],
+    })
+    for (const width of [316, 390]) {
+      expect(plotGeometry(drawn(0, width)).box).toEqual(plotGeometry(drawn(1, width)).box)
+    }
   })
 
   it('never gives a wider figure a smaller plot', () => {
