@@ -69,9 +69,9 @@ export const PANEL_TAG = 'sbmlsim-panel'
  * The class of `<sbmlsim-panel>`, a custom element with a shadow root.
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
- * `hover`, `data`, `fallback`, `timeout`, `heading-level` and `auto` and the methods
- * `activate()`, `freeze()` and `reset()`, and it dispatches `sbmlsim-error`
- * when a request failed.
+ * `hover`, `data`, `fallback`, `timeout`, `heading-level` and `auto` and the
+ * methods `activate()`, `freeze()` and `reset()`, and it dispatches
+ * `sbmlsim-error` when a request failed.
  */
 export const SbmlsimPanelElement = defineCustomElement(SbmlsimPanel)
 

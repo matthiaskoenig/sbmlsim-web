@@ -457,8 +457,10 @@ function fittingLabel(label: string, room: number, fontSize: number): string {
  * narrow column still tells its curves apart: a cut at the end of the line
  * would leave only the prefix the labels of a panel share. A word which is
  * longer than a line breaks where the line ends, as there is no other place to
- * break it. Past `LEGEND_LINES` lines the last one is cut with an ellipsis,
- * which is how a reader sees that there was more.
+ * break it. Past `LEGEND_LINES` lines the last one keeps the end of the label
+ * and not its start, with the ellipsis in front of it: the words which tell
+ * two labels apart are the last ones, and the first line already shows the
+ * head of the label, so the reader sees both ends and loses the middle.
  *
  * @param label the label
  * @param room the pixels a line has
@@ -497,19 +499,33 @@ function wrapLabel(label: string, room: number, fontSize: number): string[] {
   }
   const kept = lines.slice(0, LEGEND_LINES - 1)
   const rest = lines.slice(LEGEND_LINES - 1).join(' ')
-  return [...kept, rest.length <= width ? rest : rest.slice(0, width - 1) + ELLIPSIS]
+  return [...kept, rest.length <= width ? rest : ELLIPSIS + rest.slice(rest.length - width + 1)]
 }
 
 /**
- * Get how tall a legend is, which the lines its entries wrap to decide.
+ * Get the lines a legend entry is written on.
+ *
+ * @param label the label of the entry
+ * @param room the pixels a line has
+ * @param wrap whether the legend wraps its labels or cuts them on one line
+ * @returns the lines
+ */
+function legendLines(label: string, room: number, wrap: boolean): string[] {
+  return wrap ? wrapLabel(label, room, SMALL_FONT) : [fittingLabel(label, room, SMALL_FONT)]
+}
+
+/**
+ * Get how tall a legend is, which the lines its entries are written on decide.
  *
  * @param entries the entries
  * @param room the pixels a label has
- * @returns the pixels from the first row of the legend to the end of its last
+ * @param wrap whether the legend wraps its labels
+ * @returns the pixels from the top of the first row of the legend to the end of
+ *   its last
  */
-function legendHeight(entries: Entry[], room: number): number {
+function legendHeight(entries: Entry[], room: number, wrap: boolean): number {
   return entries.reduce(
-    (sum, entry) => sum + ROW + (wrapLabel(entry.label, room, SMALL_FONT).length - 1) * LEGEND_LINE,
+    (sum, entry) => sum + ROW + (legendLines(entry.label, room, wrap).length - 1) * LEGEND_LINE,
     0,
   )
 }
@@ -1123,17 +1139,18 @@ function axisGroup(
  * @param entries the entries, in their order
  * @param x the pixel the column of the legend starts at
  * @param y the pixel its first row is centred on
- * @param room the pixels a label has, which wraps one which is longer
+ * @param room the pixels a label has
+ * @param wrap whether a label which is longer wraps; otherwise it is cut on one line
  * @returns the group of the legend, empty for no entry at all
  */
-function legendGroup(entries: Entry[], x: number, y: number, room: number): string {
+function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap: boolean): string {
   if (entries.length === 0) {
     return ''
   }
   let at = y
   const rows = entries
     .map((entry) => {
-      const lines = wrapLabel(entry.label, room, SMALL_FONT)
+      const lines = legendLines(entry.label, room, wrap)
       const swatch = entry.marker
         ? tag('circle', {
             class: 'swatch',
@@ -1530,7 +1547,13 @@ export function plotSvg(spec: PlotSpec): string {
     .join('')
 
   const columnX = box.x1 + COLUMN_GAP
-  const barBottom = box.y1 - (entries.length > 0 ? legendHeight(entries, legendLabels) + ROW : 0)
+  // a figure gets wrapped labels when the wrapped legend fits the room it has
+  // and single-line labels, cut with an ellipsis, when it does not: the
+  // renderer never grows the figure behind the host, and never drops an entry
+  const sideRoom = box.y1 - box.y0 - (hasColourbar ? MIN_PLOT + ROW : 0)
+  const wrap = legendHeight(entries, legendLabels, true) <= sideRoom
+  const barBottom =
+    box.y1 - (entries.length > 0 ? legendHeight(entries, legendLabels, wrap) + ROW : 0)
   const side = hasColourbar
     ? colourbarGroup(
         series,
@@ -1538,8 +1561,15 @@ export function plotSvg(spec: PlotSpec): string {
         box.y0 + MARKER,
         Math.max(box.y0 + MIN_PLOT, barBottom),
         barLabelRoom,
-      ) + legendGroup(entries, columnX, Math.max(box.y0 + MIN_PLOT, barBottom) + ROW, legendLabels)
-    : legendGroup(entries, columnX, box.y0 + ROW / 2, legendLabels)
+      ) +
+      legendGroup(
+        entries,
+        columnX,
+        Math.max(box.y0 + MIN_PLOT, barBottom) + ROW,
+        legendLabels,
+        wrap,
+      )
+    : legendGroup(entries, columnX, box.y0 + ROW / 2, legendLabels, wrap)
 
   const label = axisLabel(spec.yLabel, sharedUnit(series))
   const title = tag('title', {}, escape(`${label} over ${spec.xLabel}`))

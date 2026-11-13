@@ -299,7 +299,55 @@ describe('plotSvg', () => {
         one !== '',
     )
     expect(lines).toHaveLength(2)
-    expect(lines[1]?.endsWith('…')).toBe(true)
+    expect(lines[1]?.startsWith('…')).toBe(true)
+    expect(lines[1]?.endsWith('some')).toBe(true)
+  })
+
+  it('keeps the end of a label which needs more than two lines, where labels differ', () => {
+    const labels = ['plasma concentration total', 'plasma concentration free']
+    const svg = plotSvg(
+      spec(2, { width: 260, series: labels.map((label, i) => ({ ...series(i + 1), label })) }),
+    )
+    const legend = /<g class="legend"[\s\S]*$/.exec(svg)?.[0] ?? ''
+    const entries = [...legend.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map((one) =>
+      texts(one[0]).join(' '),
+    )
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).not.toBe(entries[1])
+    expect(entries[0]?.endsWith('total')).toBe(true)
+    expect(entries[1]?.endsWith('free')).toBe(true)
+  })
+
+  it('wraps a legend only while it fits, and falls back to one line per entry', () => {
+    const many = (count: number): PlotSpec =>
+      spec(count, {
+        width: 390,
+        height: 300,
+        series: Array.from({ length: count }, (_, i) => ({
+          ...series(i + 1),
+          label: `hydrochlorothiazide plasma level ${String(i + 1)}`,
+        })),
+      })
+    const bottom = (svg: string): number => {
+      const legend = /<g class="legend"[\s\S]*$/.exec(svg)?.[0] ?? ''
+      const ys = [...legend.matchAll(/<text[^>]*\sy="([^"]*)"/g)].map((one) => Number(one[1]))
+      return Math.max(...ys)
+    }
+    // the plot box ends 42 px above the bottom of the figure
+    const full = plotSvg(many(10))
+    expect(bottom(full)).toBeLessThanOrEqual(300 - 42)
+    expect(texts(full).filter((one) => one.startsWith('hydrochloro'))).toHaveLength(10)
+    // one line per entry, which is the layout before wrapping
+    const rows = [...full.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map(
+      (one) => texts(one[0]).length,
+    )
+    expect(rows).toEqual(Array.from({ length: 10 }, () => 1))
+    // where there is room the same labels wrap
+    const few = plotSvg(many(2))
+    const wrapped = [...few.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map(
+      (one) => texts(one[0]).length,
+    )
+    expect(wrapped).toEqual([2, 2])
   })
 
   it('spaces the entries of a legend by the lines they wrap to, so none overlaps', () => {

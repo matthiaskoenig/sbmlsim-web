@@ -87,6 +87,13 @@
  * A page which cannot run a script of its own writes the boolean attribute
  * `auto`, which calls `activate()` when the element is connected; without it
  * the element does nothing until the page asks, which is what a deck needs.
+ * What `auto` does is decided by its presence when the element is mounted and
+ * by nothing after it: `auto="false"` still starts the element, since the
+ * attribute is there; `auto` added by a script to an element which is
+ * connected already does nothing; and an element which is disconnected and
+ * connected again, not within one task, is mounted again and so starts again,
+ * with a fresh set of requests. A page which wants any other moment calls
+ * `activate()` itself.
  *
  * The stored result (`fallback`) is a file next to the page and is therefore
  * fetched on `activate()` alongside the declaration and not when a request
