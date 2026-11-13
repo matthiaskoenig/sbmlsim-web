@@ -295,9 +295,9 @@ test.describe('the app shell', () => {
     ])
     await expect(app.locator('.nav .tab[aria-current=page]')).toHaveText('Dose')
     expect(apps.urls()).toHaveLength(1)
-    // the declaration of a panel is read by the shell, for the knobs its page
-    // shares, and by the panel itself
-    expect(renal.urls()).toHaveLength(2)
+    // the declaration of a panel is read by the panel alone: the app says
+    // which knobs its pages share
+    expect(renal.urls()).toHaveLength(1)
     // the page is the attribute, so it can be linked to
     await expect(app).toHaveAttribute('page', 'dose')
     // and back: the panels are created again and read their declarations again
@@ -368,17 +368,23 @@ test.describe('the app shell', () => {
       await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
       const sizes = await app.evaluate((element) => {
         const root = element.shadowRoot
-        // a panel puts the room its card gives it beyond what it draws between
-        // its head and its body, which is the gap of the panel and nothing more
-        // where it draws all it is given
-        const cells = [...(root?.querySelectorAll('sbmlsim-panel') ?? [])].map((panel) => {
-          const inner = panel.shadowRoot
-          const head = inner?.querySelector('.head')?.getBoundingClientRect().bottom ?? 0
-          const body = inner?.querySelector('.body')?.getBoundingClientRect().top ?? 0
-          const gap = Number.parseFloat(
-            getComputedStyle(inner?.querySelector('.panel') ?? panel).rowGap,
-          )
-          return body - head - gap
+        // the room of a card beyond what its panel draws: between the head and
+        // the body, between the body and the foot, and under the foot, each read
+        // off the text and not off the boxes, which a row of the grid stretches
+        const cells = [...(root?.querySelectorAll('.cell') ?? [])].map((cell) => {
+          const inner = cell.querySelector('sbmlsim-panel')?.shadowRoot
+          const box = (selector: string): DOMRect | undefined =>
+            inner?.querySelector(selector)?.getBoundingClientRect()
+          const head = box('.head > :last-child')?.bottom ?? 0
+          const body = box('.body')
+          const foot = box('.foot > :first-child')?.top ?? 0
+          const end = box('.foot > :last-child')?.bottom ?? 0
+          const style = getComputedStyle(cell)
+          const inside =
+            cell.getBoundingClientRect().bottom -
+            Number.parseFloat(style.paddingBottom) -
+            Number.parseFloat(style.borderBottomWidth)
+          return (body?.top ?? 0) - head - 8 + (foot - (body?.bottom ?? 0) - 8) + (inside - end)
         })
         const bar = root?.querySelector('.knobs')
         const knob = root?.querySelector('.knobs .knob')?.getBoundingClientRect().width ?? 0
@@ -398,49 +404,68 @@ test.describe('the app shell', () => {
     })
   }
 
+  /** The plot box of every panel of the app and the room between the parts of each. */
+  function rows(app: Locator): Promise<
+    {
+      top: number
+      bottom: number
+      lines: number
+      room: number
+      error: boolean
+    }[]
+  > {
+    return app.locator('sbmlsim-panel').evaluateAll((all) =>
+      all.map((panel) => {
+        const inner = panel.shadowRoot
+        const box = (selector: string): DOMRect | undefined =>
+          inner?.querySelector(selector)?.getBoundingClientRect()
+        const plot = box('g.axis.y .axis-line')
+        // the text of the head and not its box, which a row of the grid stretches
+        const text = box('.head > :last-child')
+        const head = box('.head > :first-child')
+        const body = box('.body')
+        return {
+          top: plot?.top ?? 0,
+          bottom: plot?.bottom ?? 0,
+          lines: (text?.bottom ?? 0) - (head?.top ?? 0),
+          // the room between the head and the body beyond the gap of the panel
+          room: (body?.top ?? 0) - (text?.bottom ?? 0) - 8,
+          error: inner?.querySelector('.error') !== null,
+        }
+      }),
+    )
+  }
+
+  /** Give the subtitle of the urine panel more lines than the one of the plasma panel. */
+  async function longerUrineSubtitle(page: Page): Promise<void> {
+    // as the apixaban panels have between 1060 and 1180 px; the service is untouched
+    await page.route('**/api/models/hctz/panels/renal_urine', async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { panel: Record<string, string> }
+      body.panel.subtitle = `${body.panel.subtitle ?? ''}, ${'and more words of it '.repeat(6)}`
+      await route.fulfill({ response, json: body })
+    })
+  }
+
   for (const width of [390, 1280]) {
     test(`lines up the plots of a row whose titles take other lines at ${String(width)} px`, async ({
       page,
     }) => {
-      // the subtitle of the urine panel is given more lines than the one of
-      // the plasma panel beside it, as the apixaban panels have between 1060
-      // and 1180 px; the service is untouched
-      await page.route('**/api/models/hctz/panels/renal_urine', async (route) => {
-        const response = await route.fetch()
-        const body = (await response.json()) as { panel: Record<string, string> }
-        body.panel.subtitle = `${body.panel.subtitle ?? ''}, ${'and more words of it '.repeat(6)}`
-        await route.fulfill({ response, json: body })
-      })
+      await longerUrineSubtitle(page)
       await page.setViewportSize({ width, height: 900 })
       const app = await openApp(page)
-      const panels = app.locator('sbmlsim-panel')
-      await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
-      const boxes = await panels.evaluateAll((all) =>
-        all.map((panel) => {
-          const line = panel.shadowRoot?.querySelector('g.axis.y .axis-line')
-          const box = line?.getBoundingClientRect()
-          const head = panel.shadowRoot?.querySelector('.head')?.getBoundingClientRect()
-          const body = panel.shadowRoot?.querySelector('.body')?.getBoundingClientRect()
-          return {
-            top: box?.top ?? 0,
-            bottom: box?.bottom ?? 0,
-            head: head?.height ?? 0,
-            // the room between the head and the body beyond the gap of the panel
-            room: (body?.top ?? 0) - (head?.bottom ?? 0) - 8,
-          }
-        }),
-      )
-      const [plasma, urine] = boxes
+      await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
+      const [plasma, urine] = await rows(app)
       if (plasma === undefined || urine === undefined) {
         throw new Error('the page has two panels')
       }
       // the heads differ by lines either way
-      expect(urine.head - plasma.head).toBeGreaterThan(15)
+      expect(urine.lines - plasma.lines).toBeGreaterThan(15)
       if (width === 1280) {
         expect(Math.abs(urine.top - plasma.top)).toBeLessThan(0.5)
         expect(Math.abs(urine.bottom - plasma.bottom)).toBeLessThan(0.5)
         // the plasma panel takes the lines it lacks as room above its body
-        expect(plasma.room).toBeCloseTo(urine.head - plasma.head, 0)
+        expect(plasma.room).toBeCloseTo(urine.lines - plasma.lines, 0)
         expect(urine.room).toBeCloseTo(0, 0)
       } else {
         // one column: every card is as tall as its own panel and has no room to place
@@ -449,6 +474,129 @@ test.describe('the app shell', () => {
       }
     })
   }
+
+  test('lines up the plots of a row when one has an error line under it', async ({ page }) => {
+    await longerUrineSubtitle(page)
+    // the second run of the plasma panel fails, and every one after it
+    let runs = 0
+    await page.route('**/panels/renal_plasma/simulate', async (route) => {
+      runs += 1
+      await (runs > 1 ? route.abort() : route.continue())
+    })
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const app = await openApp(page)
+    const panels = app.locator('sbmlsim-panel')
+    await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+    const dose = app.locator('.knobs select').nth(1)
+    // a dose the plasma panel cannot run, and back to the one it drew: it draws
+    // that figure again with the line of its failure under it
+    await dose.selectOption({ label: '50 mg' })
+    await expect(panels.nth(0).locator('.error')).toContainText('cannot be drawn')
+    await expect(panels.nth(0).locator('svg path')).toHaveCount(0)
+    await dose.selectOption({ label: '25 mg' })
+    await expect(panels.nth(0).locator('svg path').first()).toBeVisible()
+    await expect(panels.nth(0).locator('.error')).toBeVisible()
+    const [plasma, urine] = await rows(app)
+    if (plasma === undefined || urine === undefined) {
+      throw new Error('the page has two panels')
+    }
+    expect(plasma.error).toBe(true)
+    expect(urine.error).toBe(false)
+    expect(Math.abs(urine.top - plasma.top)).toBeLessThan(0.5)
+    expect(Math.abs(urine.bottom - plasma.bottom)).toBeLessThan(0.5)
+  })
+
+  test('lines up the plot of a panel without a head with the plots beside it', async ({ page }) => {
+    // a panel whose declaration names neither a title nor a subtitle draws no
+    // head, and its body and its foot keep their rows of the grid
+    await page.route('**/api/models/hctz/panels/renal_urine', async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { panel: Record<string, string> }
+      body.panel.title = ''
+      body.panel.subtitle = ''
+      await route.fulfill({ response, json: body })
+    })
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const app = await openApp(page)
+    const panels = app.locator('sbmlsim-panel')
+    await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+    await expect(panels.nth(1).locator('.head')).toHaveCount(0)
+    const [plasma, urine] = await rows(app)
+    if (plasma === undefined || urine === undefined) {
+      throw new Error('the page has two panels')
+    }
+    expect(Math.abs(urine.top - plasma.top)).toBeLessThan(0.5)
+    const order = await panels.nth(1).evaluate((element) => {
+      const inner = element.shadowRoot
+      const body = inner?.querySelector('.body')?.getBoundingClientRect()
+      const foot = inner?.querySelector('.foot')?.getBoundingClientRect()
+      return (foot?.top ?? 0) - (body?.bottom ?? 0)
+    })
+    expect(order).toBeCloseTo(8, 0)
+  })
+
+  test('a panel whose run failed follows the shared controls once it runs again', async ({
+    page,
+  }) => {
+    let failing = false
+    await page.route('**/panels/renal_plasma/simulate', async (route) => {
+      await (failing ? route.abort() : route.continue())
+    })
+    const app = await openApp(page)
+    const panels = app.locator('sbmlsim-panel')
+    await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
+    const [renal, dose] = [app.locator('.knobs select').nth(0), app.locator('.knobs select').nth(1)]
+    failing = true
+    await dose.selectOption({ label: '50 mg' })
+    await expect(panels.nth(0).locator('.error')).toContainText('cannot be drawn')
+    // the panel draws no figure of a state the controls do not show, also
+    // where the grid it holds covers the knob which moves
+    await renal.selectOption({ label: 'impaired' })
+    await expect(panels.nth(0).locator('svg path')).toHaveCount(0)
+    failing = false
+    await renal.selectOption({ label: 'normal' })
+    await expect(panels.nth(0).locator('svg path').first()).toBeVisible()
+    await expect(panels.nth(0).locator('.error')).toHaveCount(0)
+    // its figure is the one a panel alone of its width draws at that state
+    const shown = await panels
+      .nth(0)
+      .locator('svg path')
+      .evaluateAll((all) => all.map((one) => one.getAttribute('d') ?? '').join('|'))
+    const width = await panels.nth(0).evaluate((element) => element.getBoundingClientRect().width)
+    await page.goto('/demo/plain.html')
+    await page.evaluate((wide) => {
+      document.querySelector('sbmlsim-panel')?.remove()
+      const one = document.createElement('sbmlsim-panel')
+      one.style.width = `${String(wide)}px`
+      for (const [name, value] of Object.entries({
+        endpoint: '',
+        model: 'hctz',
+        panel: 'renal_plasma',
+        values: '{"egfr":1,"dose":50}',
+        auto: '',
+      })) {
+        one.setAttribute(name, value)
+      }
+      document.body.append(one)
+    }, width)
+    const alone = page.locator('sbmlsim-panel')
+    await expect(alone.locator('svg path').first()).toBeVisible()
+    await expect
+      .poll(() =>
+        alone
+          .locator('svg path')
+          .evaluateAll((all) => all.map((one) => one.getAttribute('d') ?? '').join('|')),
+      )
+      .toBe(shown)
+  })
+
+  test('keeps the shared controls of a page whose panel cannot be read', async ({ page }) => {
+    await page.route('**/api/models/hctz/panels/renal_urine', (route) => route.abort())
+    const app = await openApp(page)
+    await expect(app.locator('.knobs label')).toHaveText(['renal function', 'dose'])
+    await expect(app.locator('sbmlsim-panel').nth(0).locator('select')).toHaveCount(0)
+    await expect(app.locator('sbmlsim-panel').nth(1).locator('.error')).toBeVisible()
+  })
 
   test('sends the chosen variant to every panel of the page', async ({ page }) => {
     // the HCTZ project has one SBML file, so the app declares one variant; the

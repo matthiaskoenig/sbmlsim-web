@@ -149,10 +149,56 @@ function asDeclaration(body: unknown): PanelDeclaration {
 }
 
 /**
+ * Get whether a value is a knob a control can be built of.
+ *
+ * @param value the item
+ * @returns whether it carries the fields a control reads
+ */
+function isKnob(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.id === 'string' &&
+    typeof value.label === 'string' &&
+    typeof value.kind === 'string' &&
+    Array.isArray(value.choices) &&
+    typeof value.default === 'number'
+  )
+}
+
+/**
+ * Get whether the shared knobs of an app can be read.
+ *
+ * @param value the `shared` of the body
+ * @returns whether it is an object of lists of knobs, each with the panels it sets
+ */
+function isShared(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    Object.values(value).every(
+      (page) =>
+        Array.isArray(page) &&
+        page.every(
+          (one) =>
+            isObject(one) &&
+            isKnob(one.knob) &&
+            Array.isArray(one.panels) &&
+            one.panels.every(
+              (panel) =>
+                isObject(panel) && typeof panel.id === 'string' && typeof panel.title === 'string',
+            ),
+        ),
+    )
+  )
+}
+
+/**
  * Check that a body carries the fields of an app before it is read.
  *
- * The items of the pages and of the variants are checked as well, because the
- * shell walks them to build its navigation, its switcher and its panels.
+ * The items of the pages, of the variants and of the shared knobs are checked
+ * as well, because the shell walks them to build its navigation, its switcher,
+ * its controls and its panels. A body without the shared knobs is no app: the
+ * shell would show every panel with controls of its own, which is a page of
+ * two states when its panels share a knob.
  *
  * @param body the parsed body, of the contract `app/1`
  * @returns the app
@@ -175,7 +221,8 @@ function asApp(body: unknown): AppDeclaration {
         typeof (page as Record<string, unknown>).title === 'string' &&
         Array.isArray((page as Record<string, unknown>).panels),
     ) ||
-    !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string')
+    !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string') ||
+    !isShared(body.shared)
   ) {
     throw new PanelRequestError('body')
   }

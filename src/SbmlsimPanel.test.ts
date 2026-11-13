@@ -1249,7 +1249,7 @@ describe('a payload which cannot be read', () => {
 })
 
 describe('a failure never reaches the page', () => {
-  it('shows the stored result, an error and frozen controls when the endpoint is unreachable', async () => {
+  it('shows the stored result and an error when the endpoint is unreachable', async () => {
     served.panel = unreachable
     served.simulate = unreachable
     const seen: { kind: string; message: string }[] = []
@@ -1268,20 +1268,31 @@ describe('a failure never reaches the page', () => {
     expect(textOf(element, '.provenance')).toContain('stored')
     expect(textOf(element, '.error')).not.toBe('')
     expect(textOf(element, '.error')).not.toContain('endpoint.example.org')
-    expect(shadow(element).querySelector('.panel')?.className).toContain('frozen')
+    // the stored answer is of the declared state, which is no state the panel
+    // could have been moved away from, so nothing says it cannot be drawn
+    expect(textOf(element, '.error')).toBe('The simulation endpoint could not be reached.')
     expect(seen.map((one) => one.kind)).toEqual(['network'])
   })
 
-  it('freezes every control when a simulation fails', async () => {
+  it('keeps its controls when a simulation fails, and runs again on the next release', async () => {
+    // a failure is no freeze: the panel says what failed and the next move of
+    // a knob is the retry, the knob its grid covered among them, since the run
+    // which failed covered nothing
+    vi.useFakeTimers()
     served.simulate = unreachable
     const element = await started()
-    expect(control(element, 'knobA').disabled).toBe(true)
-    expect(control(element, 'knobB').disabled).toBe(true)
-    // the frozen controls are drawn as dead, so none of them may still work
-    for (const one of shadow(element).querySelectorAll('input, select, button')) {
-      expect(one.getAttribute('disabled')).not.toBeNull()
-    }
     expect(textOf(element, '.error')).not.toBe('')
+    expect(control(element, 'knobA').disabled).toBe(false)
+    expect(control(element, 'knobB').disabled).toBe(false)
+    expect(shadow(element).querySelector('.panel')?.className).not.toContain('frozen')
+    served.simulate = () => Promise.resolve(run())
+    move(control(element, 'knobB'), '0.6', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations()).toHaveLength(3)
+    expect(simulations().at(-1)).toEqual({ values: { knobA: 25 }, grid: { knobB: 3 } })
+    expect(textOf(element, '.error')).toBe('')
+    expect(figure(element)).toContain('class="curve"')
   })
 
   it('shows the stored result when the request exceeds the timeout', async () => {
@@ -1668,9 +1679,9 @@ describe('the study data under the curves', () => {
   })
 
   it('leaves a series off when the run of the state it was measured at fails', async () => {
-    // a failed run keeps the answer it had and freezes the figure, so the
-    // pairing of a curve of one condition with the data of another would stand
-    // until the reader moves a knob again
+    // a failed run keeps the answer it had, which is of the state before the
+    // move; drawn under the moved control it would pair a curve of one
+    // condition with the data of another
     vi.useFakeTimers()
     served.panel = () => Promise.resolve(withData({ at: { knobA: 12.5 } }))
     const element = await started()
@@ -1678,9 +1689,14 @@ describe('the study data under the curves', () => {
     served.simulate = unreachable
     move(control(element, 'knobA'), '12.5', 'change')
     await vi.advanceTimersByTimeAsync(500)
-    expect(textOf(element, '.error')).not.toBe('')
-    expect(shadow(element).querySelector('.panel')?.className).toContain('frozen')
-    // the figure is the one of the first run, so the series is not on it
+    // the figure of the first run is of another state than the one the
+    // control shows, so it is not drawn, and the line says so
+    expect(textOf(element, '.error')).toContain('cannot be drawn')
+    expect(figure(element)).toBe('')
+    // the control moved back to the state of the figure draws it again
+    move(control(element, 'knobA'), '25', 'change')
+    expect(figure(element)).toBe('')
+    await nextTick()
     expect(figure(element)).toContain('class="curve"')
     expect(figure(element)).not.toContain('class="points"')
   })
@@ -2009,6 +2025,118 @@ describe('the knobs the host owns', () => {
       { values: { knobA: 25 }, grid: { knobB: 3 } },
       { values: { knobB: 0.6 }, grid: { knobA: 2 } },
     ])
+  })
+
+  it('follows a move of the host after a failed run, or says it cannot draw it', async () => {
+    vi.useFakeTimers()
+    const element = await started({ values: '{"knobA": 25, "knobB": 1}' })
+    served.simulate = unreachable
+    element.setAttribute('values', '{"knobA": 12.5, "knobB": 1}')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    // the answer which is drawn is of the dose before, which no control shows
+    expect(textOf(element, '.error')).toContain('could not be reached')
+    expect(textOf(element, '.error')).toContain('cannot be drawn')
+    expect(figure(element)).toBe('')
+    // and no footer names the run of a figure which is not drawn
+    expect(textOf(element, '.provenance')).toBe('')
+    // a move of the knob the drawn grid covers is no reading of that grid now:
+    // it runs again, and while it cannot answer nothing is drawn
+    const runs = simulations().length
+    element.setAttribute('values', '{"knobA": 12.5, "knobB": 0.6}')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations().length).toBeGreaterThan(runs)
+    expect(figure(element)).toBe('')
+    // with the endpoint back, the next move draws the state of the host
+    served.simulate = () => Promise.resolve(run('knobB'))
+    element.setAttribute('values', '{"knobA": 12.5, "knobB": 0.4}')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations().at(-1)).toEqual({ values: { knobA: 12.5 }, grid: { knobB: 3 } })
+    expect(textOf(element, '.error')).toBe('')
+    expect(figure(element)).toContain('class="curve"')
+  })
+
+  it('reads a knob whose id is a name every object has', async () => {
+    served.panel = () => {
+      const declared = declaration()
+      const [choice, range] = declared.axes
+      if (choice === undefined || range === undefined) {
+        throw new Error('the declaration has two knobs')
+      }
+      return Promise.resolve({
+        ...declared,
+        axes: [
+          { ...choice, id: 'constructor' },
+          { ...range, id: 'toString' },
+          { ...choice, id: '__proto__' },
+        ],
+      })
+    }
+    /** The values of the last run as JSON, which names a property `__proto__` as it is. */
+    const sent = (): string => JSON.stringify(simulations().at(-1)?.values)
+    const alone = await started()
+    expect(shownKnobs(alone)).toEqual(['constructor', 'toString', '__proto__'])
+    expect(sent()).toBe('{"constructor":25,"__proto__":25}')
+    const hosted = await started({ values: '{"constructor": 12.5, "__proto__": 12.5}' })
+    expect(shownKnobs(hosted)).toEqual(['toString'])
+    expect(sent()).toBe('{"constructor":12.5,"__proto__":12.5}')
+    // a move of the host of such a knob is a move as any other
+    vi.useFakeTimers()
+    hosted.setAttribute('values', '{"constructor": 12.5, "__proto__": 25}')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(sent()).toBe('{"constructor":12.5,"toString":1}')
+    expect(simulations().at(-1)?.grid).toEqual(JSON.parse('{"__proto__": 2}'))
+  })
+
+  it('gives a knob the host lets go of its default back', async () => {
+    vi.useFakeTimers()
+    const element = await started({ values: '{"knobA": 12.5}' })
+    for (const [text, warned] of [
+      ['', false],
+      ['{"knobA": 12.5}', false],
+      ['{"knobA": "12.5"}', true],
+    ] as const) {
+      element.setAttribute('values', text)
+      await vi.advanceTimersByTimeAsync(500)
+      await nextTick()
+      const without = text === '' || warned
+      expect(shownKnobs(element), text).toEqual(without ? ['knobA', 'knobB'] : ['knobB'])
+      if (without) {
+        // as a panel which was never given the attribute
+        expect(control(element, 'knobA').value, text).toBe('25')
+        expect(simulations().at(-1), text).toEqual({ values: { knobB: 1 }, grid: { knobA: 2 } })
+      }
+    }
+    element.removeAttribute('values')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(shownKnobs(element)).toEqual(['knobA', 'knobB'])
+  })
+
+  it('offers a reset only where it changes something', async () => {
+    const element = await started({ values: '{"knobA": 12.5}' })
+    const button = part(element, 'button.reset') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    move(control(element, 'knobB'), '0.4', 'input')
+    await nextTick()
+    expect(button.disabled).toBe(false)
+    element.reset()
+    await nextTick()
+    expect(button.disabled).toBe(true)
+    // a panel whose host owns every knob resets its scale and nothing else
+    const owned = await started({ values: '{"knobA": 12.5, "knobB": 1}' })
+    const scale = part(owned, '.toggle input') as HTMLInputElement
+    const ownButton = part(owned, 'button.reset') as HTMLButtonElement
+    expect(ownButton.disabled).toBe(true)
+    scale.checked = true
+    scale.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(ownButton.disabled).toBe(false)
+    ownButton.click()
+    await nextTick()
+    expect(scale.checked).toBe(false)
+    expect(ownButton.disabled).toBe(true)
   })
 })
 

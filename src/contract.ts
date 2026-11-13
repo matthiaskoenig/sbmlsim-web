@@ -393,6 +393,22 @@ export interface AppVariant {
   label: string
 }
 
+/** A panel a shared knob of a page sets. */
+export interface SharedPanel {
+  /** The id of the panel, one of the panels of the page. */
+  id: string
+  /** The title of the panel, which names it to a reader of the control. */
+  title: string
+}
+
+/** A knob more than one panel of a page declares, which the page shows one control of. */
+export interface SharedKnob {
+  /** Its declaration, which every panel of `panels` declares alike. */
+  knob: PanelAxis
+  /** The panels of the page which declare it, in the order the page shows them. */
+  panels: SharedPanel[]
+}
+
 /** The app of a model: the pages of its panels, the `app/1` payload. */
 export interface AppDeclaration {
   /** The version of the payload, `CONTRACTS.app`. */
@@ -411,6 +427,13 @@ export interface AppDeclaration {
   doi: string
   /** The licenses of the model and its data, shown in that footer. */
   licenses: string[]
+  /**
+   * The knobs the panels of a page share, by the id of the page, each in the
+   * order the first panel which declares one lists them; empty for a page whose
+   * panels share none. The service derives them from the panels, so they are
+   * no part of the declaration of the app.
+   */
+  shared: Record<string, SharedKnob[]>
 }
 
 /** A model the endpoint serves, as it is listed. */

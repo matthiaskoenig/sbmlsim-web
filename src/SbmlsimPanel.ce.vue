@@ -48,11 +48,13 @@
  * number, whose knobs the panel sets to those values and draws no control of.
  * The shell of an app writes it for a knob more than one panel of its page
  * declares, which it draws one control of above its grid, so the panels of a
- * page are always of one state; a slide writes it to pin a panel at one dose
- * with no control at all. A change of it is taken as a release of each knob
- * which moved, by the rule above: the gridded knob is read out of the grid, any
- * other one schedules one run which grids over it. Without the attribute, and
- * with one which cannot be read, the panel draws every control it declares.
+ * page are of one state; a slide writes it to pin a panel at one dose with no
+ * control at all. A change of it is taken as a release of each knob which
+ * moved, by the rule above: the gridded knob is read out of the grid, any other
+ * one schedules one run which grids over it, and after a failed run every move
+ * runs again. Without the attribute, and with one which cannot be read, the
+ * panel is the panel which was never given one: it draws every control it
+ * declares, and a knob the host owned and owns no more is back at its default.
  *
  * ## The readout is a view of the drawn grid and nothing else
  *
@@ -92,9 +94,19 @@
  * Every failure - a dead network, a slow endpoint, a refused request, a
  * payload of another contract version, a body which cannot be read - is caught
  * inside the element. It is retried once where retrying can help, and then the
- * element shows the stored result if it has one, freezes the knobs, writes one
- * line a reader can act on and dispatches `sbmlsim-error` so that the page can
- * react. `activate()` resolves either way and never rejects.
+ * element shows the stored result if it has one, writes one line a reader can
+ * act on and dispatches `sbmlsim-error` so that the page can react.
+ * `activate()` resolves either way and never rejects.
+ *
+ * A failure is no freeze: the knobs stay where they are and keep working, and
+ * the next move of any knob, of a control of the panel or of its host, runs
+ * again, the knob the drawn grid covers among them, since the run which failed
+ * covered nothing. Until a run answers, the figure is drawn only while the
+ * answer it holds is of the state the knobs show (`stale`); where a knob stands
+ * elsewhere, the panel draws no figure and its line says that the figure of the
+ * settings shown cannot be drawn, so it never shows a state no control shows.
+ * `freeze()` is the one stop of a panel, the one a shell makes of the panels of
+ * a page it leaves.
  *
  * Every successful simulation is announced with `sbmlsim-result`, never a
  * failure and never the stored fallback, which is no simulation. Its
@@ -154,7 +166,8 @@ import type {
 } from './contract'
 import { interpolate } from './interpolate'
 import KnobControl from './KnobControl.ce.vue'
-import { carries, hostValues, keepControlKeys, knobsOf, shortNumber } from './knob'
+import ResetButton from './ResetButton.ce.vue'
+import { carries, hostValues, keepControlKeys, knobsOf, ownValue, shortNumber } from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
 import { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
 import type { FontSizes, Limits, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
@@ -368,6 +381,8 @@ const READOUT_COLUMN = 8
 const READOUT_MIN = 56
 /** The significant digits a value of the readout is shown with. */
 const READOUT_DIGITS = 4
+/** What the error line adds where the figure of the state of the knobs cannot be drawn, see `stale`. */
+const STALE_MESSAGE = 'The figure of the settings shown cannot be drawn.'
 /** What a value which is no number is shown as, e.g. a point which did not integrate. */
 const NO_VALUE = '-'
 
@@ -521,7 +536,7 @@ watch(root, (box) => {
 const active = ref(false)
 /** Whether a request is in flight, which the figure says with `aria-busy`. */
 const pending = ref(false)
-/** Whether the knobs are frozen, after a failure or after `freeze()`. */
+/** Whether the panel is stopped by `freeze()`, which `activate()` lifts; a failure is none. */
 const frozen = ref(false)
 /** What failed, `null` while nothing has. */
 const failure = ref<FailureKind | null>(null)
@@ -693,7 +708,7 @@ const ownedValues = computed<Record<string, number>>(() =>
 
 /** The knobs the panel draws a control of: the ones its host does not own. */
 const shownAxes = computed<PanelAxis[]>(() =>
-  axes.value.filter((one) => !(one.id in ownedValues.value)),
+  axes.value.filter((one) => !Object.hasOwn(ownedValues.value, one.id)),
 )
 
 /** The title of the panel, empty until the declaration was read. */
@@ -711,6 +726,23 @@ const headingTag = computed<string>(() => {
 
 /** The width the element has, the default before anything was measured. */
 const available = computed<number>(() => (measured.value > 0 ? measured.value : DEFAULT_WIDTH))
+
+/**
+ * Whether `reset()` would change something a reader sees: a knob of the
+ * panel's own away from its default, or the scale of the y axis away from the
+ * one its curves declare. A knob the host owns is no knob of the panel's to
+ * reset, so a panel whose host owns every knob it declares resets its scale.
+ */
+const resettable = computed<boolean>(() => {
+  const declared = declaration.value
+  if (declared === null) {
+    return false
+  }
+  return (
+    logY.value !== initialLog(declared) ||
+    shownAxes.value.some((one) => ownValue(knobValues.value, one.id) !== one.default)
+  )
+})
 
 /**
  * The layout which is drawn: the one the attribute asks for, or the one the
@@ -839,7 +871,7 @@ function drawnValue(id: string): number | null {
   }
   const answer = grid.value
   if (answer === null || answer.dims.some((dim) => dim.id === id)) {
-    const held = knobValues.value[id]
+    const held = ownValue(knobValues.value, id)
     return held === undefined || !Number.isFinite(held) ? knob.default : held
   }
   const at = drawnValues.value
@@ -1248,10 +1280,39 @@ const svg = computed<string>(() => {
 /** Whether there is an answer to draw whose figure could not be built. */
 const drawFailed = computed<boolean>(() => grid.value !== null && svg.value === '')
 
+/**
+ * Whether the answer which is drawn is of another state than the one the
+ * knobs show, after a run which failed.
+ *
+ * While runs answer, the figure runs behind a moved knob by a debounce and a
+ * round trip at most. A run which failed leaves the answer before it, and a
+ * knob it does not grid over may stand at another value than the one that
+ * answer was run at: a knob of the host, which the host keeps moving, or a
+ * control which was released into the failure. Such a figure would show a
+ * state no control shows, so it is not drawn, and the error line says that the
+ * panel cannot show the state its knobs are at. The next run which answers
+ * draws it again; the knob the drawn answer grids over is read out of the grid
+ * and never makes a figure stale.
+ */
+const stale = computed<boolean>(() => {
+  const answer = grid.value
+  if (failure.value === null || answer === null) {
+    return false
+  }
+  const swept = new Set(answer.dims.map((dim) => dim.id))
+  return axes.value.some(
+    (axis) =>
+      !swept.has(axis.id) &&
+      drawnValue(axis.id) !== (ownValue(knobValues.value, axis.id) ?? axis.default),
+  )
+})
+
 /** The line a reader is shown about a failure, empty while nothing failed. */
 const errorMessage = computed<string>(() => {
   if (failure.value !== null) {
-    return FAILURE_MESSAGES[failure.value]
+    return stale.value
+      ? `${FAILURE_MESSAGES[failure.value]} ${STALE_MESSAGE}`
+      : FAILURE_MESSAGES[failure.value]
   }
   return drawFailed.value ? FAILURE_MESSAGES.internal : ''
 })
@@ -1259,7 +1320,8 @@ const errorMessage = computed<string>(() => {
 /** The provenance footer: the engine, the short hash of the run and its seconds. */
 const footer = computed<string>(() => {
   const answer = grid.value
-  if (answer === null) {
+  // the footer names the run of the figure, and a stale figure is not drawn
+  if (answer === null || stale.value) {
     return ''
   }
   const parts = [
@@ -1549,16 +1611,28 @@ function initialLog(declared: PanelDeclaration): boolean {
  * @returns the values of every other knob and the points of that one
  */
 function bodyFor(gridId: string | null): SimulateRequest {
-  const fixed: Record<string, number> = {}
-  const over: Record<string, number> = {}
+  // built of entries, so every knob id is a property of its own, `__proto__` among them
+  const fixed: [string, number][] = []
+  const over: [string, number][] = []
   for (const axis of axes.value) {
     if (axis.id === gridId) {
-      over[axis.id] = gridPoints(axis)
+      over.push([axis.id, gridPoints(axis)])
       continue
     }
-    const value = knobValues.value[axis.id]
-    fixed[axis.id] = value === undefined || !Number.isFinite(value) ? axis.default : value
+    const value = ownValue(knobValues.value, axis.id)
+    fixed.push([axis.id, value === undefined || !Number.isFinite(value) ? axis.default : value])
   }
+  return bodyOf(Object.fromEntries(fixed), Object.fromEntries(over))
+}
+
+/**
+ * Get the body of a simulation of the values and the grid of a run.
+ *
+ * @param fixed the value of every knob the run does not grid over
+ * @param over the points of the knob it grids over
+ * @returns the body, with the variant the panel is given
+ */
+function bodyOf(fixed: Record<string, number>, over: Record<string, number>): SimulateRequest {
   return props.variant === ''
     ? { values: fixed, grid: over }
     : { values: fixed, grid: over, variant: props.variant }
@@ -1609,7 +1683,6 @@ function fail(error: unknown): void {
     return
   }
   failure.value = kind
-  frozen.value = true
   const keep = stored.value
   if (keep !== null) {
     drawStored(keep)
@@ -1683,7 +1756,6 @@ async function simulate(gridId: string | null): Promise<void> {
     drawnValues.value = sent
     fromStore.value = false
     failure.value = null
-    frozen.value = false
     host?.dispatchEvent(
       new CustomEvent('sbmlsim-result', {
         detail: { provenance: answer.provenance, spec_hash: answer.spec_hash },
@@ -1863,10 +1935,24 @@ function onInput(axis: PanelAxis, value: number): void {
  */
 function onChange(axis: PanelAxis, value: number): void {
   knobValues.value = { ...knobValues.value, [axis.id]: value }
-  if (frozen.value || axis.id === gridded.value) {
+  if (frozen.value || !runsFor(axis.id)) {
     return
   }
   schedule(axis.id)
+}
+
+/**
+ * Get whether a release of a knob runs a simulation.
+ *
+ * A knob the drawn grid covers is read out of it, unless the run before
+ * failed: the answer which is drawn is then of another state of the other
+ * knobs than the one the controls show, and only a run can draw that state.
+ *
+ * @param id the id of the knob
+ * @returns whether a run is scheduled for it
+ */
+function runsFor(id: string): boolean {
+  return failure.value !== null || id !== gridded.value
 }
 
 /**
@@ -1882,23 +1968,29 @@ function onChange(axis: PanelAxis, value: number): void {
  */
 function withHost(knobs: PanelAxis[], own: (axis: PanelAxis) => number): Record<string, number> {
   const given = ownedValues.value
-  return Object.fromEntries(knobs.map((one) => [one.id, given[one.id] ?? own(one)]))
+  return Object.fromEntries(knobs.map((one) => [one.id, ownValue(given, one.id) ?? own(one)]))
 }
 
 /**
  * Take a change of the knobs the host owns as a release of each of them.
  *
  * A knob which the host moved is a knob a reader moved somewhere else on the
- * page, so it is taken as the release of the panel's own control would be:
- * a knob the drawn grid covers is read out of it and costs nothing, and any
- * other knob which moved schedules one run, which grids over it, so its next
- * movement costs nothing either. Several knobs which moved at once are one
- * run. A host which writes its values on every movement of a slider pays one
- * run for the first movement of a knob no grid covers and none after it.
+ * page, so it is taken as the release of the panel's own control would be
+ * (`runsFor`): a knob the drawn grid covers is read out of it and costs
+ * nothing, and any other knob which moved schedules one run, which grids over
+ * it, so its next movement costs nothing either; after a failed run every move
+ * runs again. Several knobs which moved at once are one run. A host which
+ * writes its values on every movement of a slider pays one run for the first
+ * movement of a knob no grid covers and none after it.
+ *
+ * A knob the host owned and owns no more, because the attribute no longer
+ * names it or cannot be read, is the panel's own again and goes back to its
+ * declared default, which is the knob of a panel which was never given it.
  *
  * @param given the value of every knob the host owns, by its id
+ * @param before the value of every knob the host owned before
  */
-function takeHostValues(given: Record<string, number>): void {
+function takeHostValues(given: Record<string, number>, before: Record<string, number>): void {
   const declared = declaration.value
   if (declared === null) {
     return
@@ -1907,13 +1999,20 @@ function takeHostValues(given: Record<string, number>): void {
   let moved: string | null = null
   const next = { ...knobValues.value }
   for (const axis of knobsOf(declared)) {
-    const value = given[axis.id]
+    const owned = Object.hasOwn(given, axis.id)
+    const released = !owned && Object.hasOwn(before, axis.id)
+    const value = owned ? given[axis.id] : released ? axis.default : undefined
     if (value === undefined || value === next[axis.id]) {
       continue
     }
-    next[axis.id] = value
+    Object.defineProperty(next, axis.id, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
     changed = true
-    if (axis.id !== gridded.value) {
+    if (runsFor(axis.id)) {
       moved = axis.id
     }
   }
@@ -2062,7 +2161,7 @@ function reset(): void {
   knobValues.value = withHost(knobsOf(declared), (one) => one.default)
   logY.value = initialLog(declared)
   const first = firstGridded(declared)
-  if (!frozen.value && first !== gridded.value) {
+  if (!frozen.value && (failure.value !== null || first !== gridded.value)) {
     schedule(first)
   }
 }
@@ -2095,8 +2194,8 @@ watch(
  * writes the attribute of every panel whenever one of its knobs moves costs a
  * panel which does not declare that knob nothing.
  */
-watch(ownedValues, (given) => {
-  takeHostValues(given)
+watch(ownedValues, (given, before) => {
+  takeHostValues(given, before)
 })
 
 /*
@@ -2150,6 +2249,7 @@ defineExpose({ activate, freeze, reset })
   <div
     v-if="active"
     ref="root"
+    part="panel"
     class="panel"
     :class="[`layout-${drawnLayout}`, { frozen: frozen }]"
   >
@@ -2168,7 +2268,7 @@ defineExpose({ activate, freeze, reset })
           v-for="axis of shownAxes"
           :key="axis.id"
           :axis="axis"
-          :value="knobValues[axis.id] ?? axis.default"
+          :value="ownValue(knobValues, axis.id) ?? axis.default"
           :disabled="frozen"
           @input="onInput(axis, $event)"
           @change="onChange(axis, $event)"
@@ -2178,7 +2278,7 @@ defineExpose({ activate, freeze, reset })
             <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
             <span>logarithmic y</span>
           </label>
-          <button type="button" class="reset" :disabled="frozen" @click="reset()">Reset</button>
+          <ResetButton :disabled="frozen || !resettable" @click="reset()" />
         </div>
       </div>
       <div
@@ -2187,7 +2287,7 @@ defineExpose({ activate, freeze, reset })
         :aria-busy="pending ? 'true' : 'false'"
       >
         <div
-          v-if="svg !== ''"
+          v-if="svg !== '' && !stale"
           ref="plotted"
           class="plot"
           @pointermove="onPointerMove($event)"
@@ -2240,8 +2340,10 @@ defineExpose({ activate, freeze, reset })
         <p v-else-if="errorMessage === ''" class="pending">Loading the panel</p>
       </div>
     </div>
-    <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
-    <p v-if="footer !== ''" class="provenance">{{ footer }}</p>
+    <div v-if="errorMessage !== '' || footer !== ''" class="foot">
+      <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
+      <p v-if="footer !== ''" class="provenance">{{ footer }}</p>
+    </div>
   </div>
 </template>
 
@@ -2281,17 +2383,18 @@ defineExpose({ activate, freeze, reset })
  * to everything in the panel by inheritance.
  */
 /*
- * A panel which is given more height than it needs - a card of a row of an app
- * as tall as the tallest card of the row - puts the room between its head and
- * its body, so the plots of panels whose heads take other numbers of lines
- * line up. A panel which is given no height, alone in a page, is as tall as
- * what it draws and has no room to place.
+ * The panel is a column of three parts, its head, its body and its foot (the
+ * error line and the provenance), and each names the row it is (`grid-row`),
+ * which does nothing in the column it is drawn in alone. The shell of an app
+ * lays the panel out as a subgrid of the rows of its grid (`::part(panel)`), so
+ * the heads of the panels of a row of the app share one row, the bodies the
+ * next and the feet the last one, and the plots of a row line up whatever the
+ * lines of the titles above them and whatever sits below them.
  */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 100%;
   color: var(--_fg);
   font-family: var(--_font);
   font-size: var(--_font-size);
@@ -2305,6 +2408,7 @@ defineExpose({ activate, freeze, reset })
 
 .head {
   display: flex;
+  grid-row: 1;
   flex-direction: column;
   gap: 2px;
 }
@@ -2324,9 +2428,16 @@ defineExpose({ activate, freeze, reset })
 
 .body {
   display: flex;
+  grid-row: 2;
   gap: 16px;
   align-items: flex-start;
-  margin-top: auto;
+}
+
+.foot {
+  display: flex;
+  grid-row: 3;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .controls {
@@ -2383,22 +2494,6 @@ defineExpose({ activate, freeze, reset })
 .toggle input {
   margin: 0;
   accent-color: var(--_accent);
-}
-
-.reset {
-  padding: 3px 10px;
-  border: 1px solid var(--_line);
-  border-radius: 6px;
-  background: var(--_bg-card);
-  color: var(--_fg);
-  font-family: inherit;
-  font-size: var(--_font-size-small);
-  cursor: pointer;
-}
-
-.reset:hover:not(:disabled) {
-  border-color: var(--_accent);
-  color: var(--_accent);
 }
 
 .figure {

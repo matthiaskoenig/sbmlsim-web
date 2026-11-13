@@ -28,6 +28,8 @@ const props = defineProps({
   value: { type: Number, required: true },
   /** Whether the control takes no movement, e.g. of a frozen panel. */
   disabled: { type: Boolean, default: false },
+  /** The id of a text which says what the control sets, none without. */
+  describedBy: { type: String, default: undefined },
 })
 
 const emit = defineEmits<{
@@ -77,6 +79,7 @@ function say(kind: 'input' | 'change', event: Event): void {
         :max="props.axis.max ?? 1"
         :step="rangeStep(props.axis)"
         :value="props.value"
+        :aria-describedby="props.describedBy"
         :disabled="props.disabled"
         @input="say('input', $event)"
         @change="say('change', $event)"
@@ -90,6 +93,7 @@ function say(kind: 'input' | 'change', event: Event): void {
       :id="controlId()"
       class="knob-select"
       :value="props.value"
+      :aria-describedby="props.describedBy"
       :disabled="props.disabled"
       @change="say('change', $event)"
     >

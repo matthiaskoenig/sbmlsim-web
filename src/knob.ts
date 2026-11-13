@@ -210,12 +210,29 @@ export function hostValues(text: string | undefined): HostValues {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { kind: 'malformed', reason: 'is no JSON object' }
   }
-  const values: Record<string, number> = {}
+  const entries: [string, number][] = []
   for (const [id, value] of Object.entries(parsed)) {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
       return { kind: 'malformed', reason: `gives the knob '${id}' no finite number` }
     }
-    values[id] = value
+    entries.push([id, value])
   }
-  return { kind: 'given', values }
+  // `fromEntries` defines every id as a property of its own, `__proto__` among
+  // them, which an assignment would take for the prototype
+  return { kind: 'given', values: Object.fromEntries(entries) }
+}
+
+/**
+ * Get the value a record of knob values holds for a knob of its own.
+ *
+ * A knob id is text of a declaration, so it may be the name of a property every
+ * object inherits, `constructor` or `toString`, which a plain lookup answers
+ * with a function.
+ *
+ * @param values the values by the id of the knob
+ * @param id the id of the knob
+ * @returns its value, `undefined` for a knob the record does not hold
+ */
+export function ownValue(values: Record<string, number>, id: string): number | undefined {
+  return Object.hasOwn(values, id) ? values[id] : undefined
 }

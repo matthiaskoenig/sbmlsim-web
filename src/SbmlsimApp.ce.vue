@@ -7,9 +7,10 @@
  * pages, the switcher of its variants, the controls of the knobs the panels of
  * a page share, a grid of `<sbmlsim-panel>` elements of the page which is shown
  * and a provenance footer. That is all it does. It owns no simulation logic: it
- * reads the declarations of the panels of a page for their knobs and nothing
- * else, never simulates and never reads into the shadow root of a panel, so
- * what a panel shows, and how it fails, is the element of the panel alone.
+ * reads the app and nothing else, never simulates and never reads into the
+ * shadow root of a panel, which it lays out on the rows of its grid through the
+ * part the panel exposes and nothing more, so what a panel shows, and how it
+ * fails, is the element of the panel alone.
  *
  * It has the shadow root, the tokens and the typography of the panel
  * (`SbmlsimPanel.ce.vue` has the reasons, and `theme.css` the table): it
@@ -29,10 +30,12 @@
  * one column of a phone. The width is the one of the shell and not of the
  * window, so an app in a column of a page is as narrow as its column.
  *
- * The cards of a row are as tall as the tallest of them and a panel fills its
- * card, which it does by putting the room it is given between its head and its
- * body: two panels side by side whose titles take other numbers of lines draw
- * their plots at one height, and a panel alone in a page has no such room.
+ * The cards of a row share the rows of the grid: a card spans three, the head,
+ * the body and the foot of its panel, and lays its panel out on them as a
+ * subgrid, through the shadow root of the panel (`::part(panel)`). Two panels
+ * side by side whose titles take other numbers of lines, or of which one has an
+ * error line under its plot, draw their plots at one height; a panel alone in
+ * a page is a column of its own and is laid out as it always is.
  *
  * ## What happens to a page
  *
@@ -58,30 +61,30 @@
  *
  * A knob id which more than one panel of the page declares is one knob of the
  * page: the shell draws one control of it above the grid and every panel which
- * declares it is set from that control, so the plots of a page are always of
- * one state of the model and never of two. A knob id one panel of the page
- * declares stays in that panel. The service refuses an app two of whose panels
- * of one page declare an id differently, so the declaration of the first panel
- * which declares it is the declaration of the knob, and its control is
- * `KnobControl.ce.vue`, the control the panel would have drawn.
+ * declares it is set from that control, so every plot of the page is of the
+ * state the controls show; a panel whose run failed says that it cannot draw
+ * that state rather than draw another one. A knob id one panel of the page
+ * declares stays in that panel. Its control is `KnobControl.ce.vue`, the
+ * control the panel would have drawn, described for a screen reader by the
+ * titles of the panels it sets (`aria-describedby`).
  *
- * Which knobs those are is read from the declarations of the panels of the
- * page (`/panels/{panel}`), which the shell reads before it places the panels,
- * once per panel for the life of the element, so a panel is placed with the
- * attribute `values` it starts with and never starts at another state of a
- * shared knob. A declaration the shell cannot read is a panel which shares
- * nothing: it is placed without `values` and is the panel it is on its own,
- * which shows its own failure. The controls are listed in the order the first
- * panel which declares one lists them, start at the declared default, and
- * start there again whenever the page is shown, as the knobs of its panels do.
+ * Which knobs those are is stated by the service in the app (`shared`): it
+ * works them out of the panels of each page when it starts, refuses a page two
+ * of whose panels declare one id differently, and hands the shell each shared
+ * knob with its declaration and the panels it sets. The shell reads no
+ * declaration of a panel, so a panel which cannot be read changes nothing of
+ * the controls of its page, and the panels are placed with the app. The
+ * controls are listed in the order the first panel which declares one lists
+ * them, start at the declared default, start there again whenever the page is
+ * shown, as the knobs of its panels do, and have a Reset of their own, which
+ * can be pressed while one of them is away from its default.
  *
- * Every panel which declares a shared knob gets the attribute `values`, a JSON
- * object of exactly the shared knobs it declares, written again on every
- * movement of a control (`input` and `change` alike); a panel takes it as the
- * release of its own control, so the knob its grid covers is read out of the
- * grid while it is dragged and any other one costs one run. A panel which
- * declares none of them gets no `values`, so a movement of a shared knob
- * changes nothing of it.
+ * Every panel a shared knob sets gets the attribute `values`, a JSON object of
+ * exactly the shared knobs which set it, written again on every movement of a
+ * control (`input` and `change` alike); a panel takes it as the release of its
+ * own control, so the knob its grid covers is read out of the grid while it is
+ * dragged and any other one costs one run. A panel no shared knob sets gets no
+ * `values`, so a movement of a shared knob changes nothing of it.
  *
  * ## The variant
  *
@@ -124,9 +127,10 @@ import type { PropType } from 'vue'
 
 import { DEFAULT_TIMEOUT, FAILURE_MESSAGES, PanelClient, failureKind } from './client'
 import type { FailureKind } from './client'
-import type { AppDeclaration, AppPage, PanelAxis, Provenance } from './contract'
+import type { AppDeclaration, AppPage, PanelAxis, Provenance, SharedKnob } from './contract'
 import KnobControl from './KnobControl.ce.vue'
-import { keepControlKeys, knobsOf } from './knob'
+import ResetButton from './ResetButton.ce.vue'
+import { keepControlKeys, ownValue } from './knob'
 import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -181,21 +185,8 @@ const announced = ref('')
 /** The controller of the request of the app, so a superseded one is dropped. */
 let flight: AbortController | null = null
 
-/**
- * The knobs of the panels of the page which is shown, by the id of the panel,
- * `null` while they are read; the panels are placed once they are there.
- */
-const pageKnobs = shallowRef<Record<string, PanelAxis[]> | null>(null)
 /** The value of every knob the panels of the page share, by its id. */
 const shared = ref<Record<string, number>>({})
-/**
- * The knobs of every panel the shell read, by the id of the panel, for the
- * life of the element and of its endpoint and model: a declaration is the
- * one of the service, so a page which is shown again is placed at once.
- */
-const knobCache = new Map<string, PanelAxis[]>()
-/** The controller of the requests of the declarations, so a superseded page is dropped. */
-let reading: AbortController | null = null
 
 /** The page which is shown: the one `page` names, else the first one. */
 const current = computed<AppPage | null>(() => {
@@ -213,51 +204,60 @@ const variants = computed(() => {
 const variantOfPanels = computed<string>(() => (variants.value.length > 0 ? chosen.value : ''))
 
 /**
- * The knobs the panels of the page share: the ids more than one of its panels
- * declares, each with the declaration of the first panel which declares it, in
- * the order that panel lists them.
+ * The knobs the panels of the page share, as the service states them in the
+ * app: the ids more than one of its panels declares, each with its declaration
+ * and the panels it sets, in the order the first panel which declares one
+ * lists them.
  */
-const sharedKnobs = computed<PanelAxis[]>(() => {
-  const knobs = pageKnobs.value
+const sharedKnobs = computed<SharedKnob[]>(() => {
   const page = current.value
-  if (knobs === null || page === null) {
-    return []
-  }
-  const declaring = new Map<string, number>()
-  for (const id of new Set(page.panels)) {
-    for (const knob of new Set((knobs[id] ?? []).map((one) => one.id))) {
-      declaring.set(knob, (declaring.get(knob) ?? 0) + 1)
-    }
-  }
-  const listed = new Map<string, PanelAxis>()
-  for (const id of page.panels) {
-    for (const knob of knobs[id] ?? []) {
-      if ((declaring.get(knob.id) ?? 0) > 1 && !listed.has(knob.id)) {
-        listed.set(knob.id, knob)
-      }
-    }
-  }
-  return [...listed.values()]
+  return page === null ? [] : (app.value?.shared[page.id] ?? [])
 })
+
+/** Whether every shared knob of the page is at its declared default, which a reset changes nothing of. */
+const sharedAtDefaults = computed<boolean>(() =>
+  sharedKnobs.value.every(
+    (one) => (ownValue(shared.value, one.knob.id) ?? one.knob.default) === one.knob.default,
+  ),
+)
 
 /**
  * Get the attribute `values` of a panel of the page.
  *
  * @param id the id of the panel
- * @returns the JSON of the shared knobs the panel declares at their values,
- *   `undefined` for a panel which declares none, which is placed without the
+ * @returns the JSON of the shared knobs which set the panel, at their values,
+ *   `undefined` for a panel no shared knob sets, which is placed without the
  *   attribute
  */
 function valuesOf(id: string): string | undefined {
-  const declared = new Set((pageKnobs.value?.[id] ?? []).map((one) => one.id))
-  const given: Record<string, number> = {}
-  for (const knob of sharedKnobs.value) {
-    const value = shared.value[knob.id]
-    if (declared.has(knob.id) && value !== undefined) {
-      given[knob.id] = value
-    }
-  }
-  return Object.keys(given).length === 0 ? undefined : JSON.stringify(given)
+  const given = sharedKnobs.value
+    .filter((one) => one.panels.some((panel) => panel.id === id))
+    .map((one): [string, number] => [
+      one.knob.id,
+      ownValue(shared.value, one.knob.id) ?? one.knob.default,
+    ])
+  // built of entries, so every knob id is a property of its own, `__proto__` among them
+  return given.length === 0 ? undefined : JSON.stringify(Object.fromEntries(given))
+}
+
+/**
+ * Get the id of the text which says which panels a shared control sets.
+ *
+ * @param knob the knob
+ * @returns an id which is unique inside the shadow root of the shell
+ */
+function drivesId(knob: PanelAxis): string {
+  return `drives-${knob.id}`
+}
+
+/**
+ * Get the text which says which panels a shared control sets.
+ *
+ * @param one the shared knob
+ * @returns the titles of its panels, in the order of the page
+ */
+function drivesText(one: SharedKnob): string {
+  return `Sets ${one.panels.map((panel) => panel.title).join(', ')}`
 }
 
 /**
@@ -270,37 +270,9 @@ function moveShared(knob: PanelAxis, value: number): void {
   shared.value = { ...shared.value, [knob.id]: value }
 }
 
-/**
- * Read the knobs of the panels of a page, and start its shared knobs at their defaults.
- *
- * The declarations of the panels already read are not read again. A panel
- * whose declaration cannot be read shares no knob, see the head of the file.
- *
- * @param page the page
- */
-async function readKnobs(page: AppPage): Promise<void> {
-  reading?.abort()
-  const controller = new AbortController()
-  reading = controller
-  pageKnobs.value = null
-  const client = new PanelClient(props.endpoint, props.timeout)
-  const missing = [...new Set(page.panels)].filter((id) => !knobCache.has(id))
-  await Promise.all(
-    missing.map(async (id) => {
-      try {
-        const declared = await client.panel(props.model, id, controller.signal)
-        knobCache.set(id, knobsOf(declared))
-      } catch {
-        // a panel the shell cannot read is placed on its own and shows its own failure
-      }
-    }),
-  )
-  if (reading !== controller) {
-    return
-  }
-  reading = null
-  pageKnobs.value = Object.fromEntries(page.panels.map((id) => [id, knobCache.get(id) ?? []]))
-  shared.value = Object.fromEntries(sharedKnobs.value.map((one) => [one.id, one.default]))
+/** Put every shared knob of the page back to its declared default. */
+function resetShared(): void {
+  shared.value = Object.fromEntries(sharedKnobs.value.map((one) => [one.knob.id, one.knob.default]))
 }
 
 /** The level of the title of the app, within the levels HTML has. */
@@ -457,10 +429,7 @@ watch(
   () => {
     freezeShown()
     answers.value = {}
-    const page = current.value
-    if (page !== null) {
-      void readKnobs(page)
-    }
+    resetShared()
   },
   { flush: 'pre' },
 )
@@ -474,7 +443,6 @@ watch(
   () => {
     freezeShown()
     answers.value = {}
-    knobCache.clear()
     void load()
   },
 )
@@ -485,7 +453,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   flight?.abort()
-  reading?.abort()
 })
 </script>
 
@@ -527,13 +494,18 @@ onBeforeUnmount(() => {
         @keydown="keepControlKeys($event)"
       >
         <KnobControl
-          v-for="knob of sharedKnobs"
-          :key="knob.id"
-          :axis="knob"
-          :value="shared[knob.id] ?? knob.default"
-          @input="moveShared(knob, $event)"
-          @change="moveShared(knob, $event)"
+          v-for="one of sharedKnobs"
+          :key="one.knob.id"
+          :axis="one.knob"
+          :value="ownValue(shared, one.knob.id) ?? one.knob.default"
+          :described-by="drivesId(one.knob)"
+          @input="moveShared(one.knob, $event)"
+          @change="moveShared(one.knob, $event)"
         />
+        <ResetButton :disabled="sharedAtDefaults" @click="resetShared()" />
+        <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" class="unseen">
+          {{ drivesText(one) }}
+        </p>
       </div>
       <!-- a region and no main: the page which embeds the shell has its own landmark;
            `values` is written as the attribute a page writes, and left off a panel
@@ -548,7 +520,6 @@ onBeforeUnmount(() => {
         <div v-for="one in current.panels" :key="one" class="cell">
           <component
             :is="panelTag"
-            v-if="pageKnobs !== null"
             auto
             :endpoint="props.endpoint"
             :model="props.model"
@@ -738,19 +709,20 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
-/* the cards of a row are as tall as the tallest of them, and a panel fills its
- * card, which puts the room it is given above its plot, so the plots of a row
- * line up whatever the lines of the titles above them */
+/*
+ * A card is three rows of the grid, the head, the body and the foot of its
+ * panel, and the card, the panel element and the panel inside its shadow root
+ * (`::part(panel)`) are subgrids of them: the heads of the panels of a row of
+ * the grid share one row, so the plots of a row line up whatever the lines of
+ * the titles above them and whatever sits below them. The gaps inside a card
+ * are the panel's own, the gap between two rows of cards the grid's.
+ */
 .cell {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  row-gap: 0;
   min-width: 0;
-  /* the card does not grow from its loading line to the panel, which would move
-   * the footer under it, and is no taller than the smallest panel it holds: a
-   * panel whose knobs the page shares draws no control of them, and a figure is
-   * 0.6 of its width and at least 200px tall, which is a panel of about 23rem at
-   * the narrowest card of two columns and about 19rem on a phone */
-  min-height: 22rem;
   padding: 16px;
   border: 1px solid var(--_line);
   border-radius: var(--_radius);
@@ -759,10 +731,23 @@ onBeforeUnmount(() => {
 }
 
 .cell > * {
-  flex: 1 0 auto;
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+  row-gap: 0;
 }
 
-.live {
+.cell > ::part(panel) {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+  row-gap: 8px;
+}
+
+/* read by a screen reader and drawn nowhere: the live region of a page switch
+ * and the text which says which panels a shared control sets */
+.live,
+.unseen {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -822,7 +807,6 @@ onBeforeUnmount(() => {
 /* a figure keeps the room on a phone, where the card is nearly the screen */
 @container (max-width: 480px) {
   .cell {
-    min-height: 18rem;
     padding: 12px;
   }
 }

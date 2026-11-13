@@ -35,7 +35,7 @@ interface Call {
 }
 
 /** The app every test starts from: two pages, two variants and the texts of the footer. */
-function app(more: Partial<AppDeclaration> = {}): AppDeclaration {
+function app(more: Partial<AppDeclaration> = {}): Omit<AppDeclaration, 'shared'> {
   return {
     contract: 'app/1',
     title: 'Model A',
@@ -115,7 +115,15 @@ function run(request: SimulateRequest): SimulateResponse {
     contract: 'panel/1',
     spec_hash: 'a'.repeat(64),
     x: [0, 1, 2],
-    dims: [{ id: 'knobA', label: 'knob A', unit: null, values: [0, 0.5, 1] }],
+    // the axis of the answer is the knob the request gridded over
+    dims: [
+      {
+        id: Object.keys(request.grid ?? {})[0] ?? 'knobA',
+        label: 'knob',
+        unit: null,
+        values: [0, 0.5, 1],
+      },
+    ],
     curves: { curveA: [0, 0.5, 1].map((one) => [0, one, 2 * one]) },
     units: { x: 'h', curveA: 'uM' },
     provenance: {
@@ -132,8 +140,37 @@ function run(request: SimulateRequest): SimulateResponse {
   }
 }
 
+/**
+ * Work the shared knobs of an app out of the knobs of its panels, as the
+ * service does: the ids more than one panel of a page declares, in the order
+ * the first panel which declares one lists them.
+ */
+function sharedOf(given: Omit<AppDeclaration, 'shared'>): AppDeclaration['shared'] {
+  return Object.fromEntries(
+    given.pages.map((page) => {
+      const first = new Map<string, PanelAxis>()
+      const declaring = new Map<string, string[]>()
+      for (const id of page.panels) {
+        for (const knob of knobsOf[id] ?? panelDeclaration(id).axes) {
+          if (!first.has(knob.id)) {
+            first.set(knob.id, knob)
+          }
+          declaring.set(knob.id, [...(declaring.get(knob.id) ?? []), id])
+        }
+      }
+      const shared = [...first.values()]
+        .filter((knob) => (declaring.get(knob.id) ?? []).length > 1)
+        .map((knob) => ({
+          knob,
+          panels: (declaring.get(knob.id) ?? []).map((id) => ({ id, title: `Title of ${id}` })),
+        }))
+      return [page.id, shared]
+    }),
+  )
+}
+
 /** The app the stub answers, `null` for a request which cannot reach it. */
-let declared: AppDeclaration | null = app()
+let declared: Omit<AppDeclaration, 'shared'> | null = app()
 
 /** The knobs of a panel by its id, for a panel which declares others than `knobA`. */
 let knobsOf: Record<string, PanelAxis[]> = {}
@@ -216,7 +253,7 @@ beforeEach(() => {
       return Promise.reject(new TypeError('Failed to fetch'))
     }
     if (url.endsWith('/app')) {
-      return Promise.resolve(json(declared))
+      return Promise.resolve(json({ ...declared, shared: sharedOf(declared) }))
     }
     if (url.endsWith('/simulate')) {
       if (hang !== null && init?.signal) {
@@ -251,6 +288,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   document.body.innerHTML = ''
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -644,37 +682,120 @@ describe('the knobs the panels of a page share', () => {
     expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('1')
     expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
     expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
-    // the shell reads a declaration once for its life, a panel once for its own
-    expect(calls.filter((one) => one.url.endsWith('/panels/panelB'))).toHaveLength(3)
+    // the shell reads no declaration of a panel, the panel reads its own on every visit
+    expect(calls.filter((one) => one.url.endsWith('/panels/panelB'))).toHaveLength(2)
   })
 
-  it('places the panels once it knows the knobs they share', async () => {
-    let answer = (): void => {
-      // replaced by the answer of the first declaration the shell reads
-    }
-    const stub = globalThis.fetch
-    let held = true
-    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
-      if (url.endsWith('/panels/panelB') && held) {
-        held = false
-        return new Promise<Response>((resolve) => {
-          answer = () => {
-            resolve(stub(url, init))
-          }
-        })
-      }
-      return stub(url, init)
-    })
+  it('reads which knobs a page shares from the app and no declaration of a panel', async () => {
     const element = await shell({ page: 'pageB' })
-    // a panel placed now would start at a state of the shared knob which is
-    // its own, so the cells wait for the declarations without a panel in them
-    expect(element.shadowRoot.querySelectorAll('.cell')).toHaveLength(2)
-    expect(panels(element)).toEqual([])
-    expect(simulations()).toEqual([])
-    answer()
+    expect(shellKnobs(element)).toEqual(['knob-knobA'])
+    // the only request of the shell is the app; each panel reads itself once
+    expect(calls.filter((one) => one.url.endsWith('/panels/panelB'))).toHaveLength(1)
+    expect(calls.filter((one) => one.url.endsWith('/panels/panelC'))).toHaveLength(1)
+    expect(calls.filter((one) => !one.url.includes('/panels/')).map((one) => one.url)).toEqual([
+      '/api-root/api/models/modelA/app',
+    ])
+  })
+
+  it('draws every panel at the state of the shared controls whatever knob it grids over', async () => {
+    declared = app({
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'] }],
+    })
+    // panelB and panelD grid over their range knob, panelC over the choice
+    knobsOf = {
+      panelB: [rangeKnob('knobR'), choiceKnob('knobS')],
+      panelC: [choiceKnob('knobS'), choiceKnob('knobT')],
+      panelD: [rangeKnob('knobR'), choiceKnob('knobS'), choiceKnob('knobT')],
+    }
+    const element = await shell()
+    vi.useFakeTimers()
+    expect(shellKnobs(element)).toEqual(['knob-knobR', 'knob-knobS', 'knob-knobT'])
+    const select = (id: string): HTMLSelectElement =>
+      part(element, `#knob-${id}`) as HTMLSelectElement
+    const slider = part(element, '#knob-knobR') as HTMLInputElement
+    const moves: [HTMLInputElement | HTMLSelectElement, string, string][] = [
+      [select('knobS'), '12.5', 'change'],
+      [slider, '0.4', 'input'],
+      [slider, '0.3', 'input'],
+      [select('knobT'), '12.5', 'change'],
+      [slider, '0.3', 'change'],
+      [select('knobS'), '25', 'change'],
+      [select('knobT'), '25', 'change'],
+      [select('knobS'), '12.5', 'change'],
+    ]
+    for (const [control, value, kind] of moves) {
+      control.value = value
+      control.dispatchEvent(new Event(kind))
+      await vi.advanceTimersByTimeAsync(30)
+    }
+    await vi.advanceTimersByTimeAsync(500)
+    const state = { knobR: 0.3, knobS: 12.5, knobT: 25 }
+    for (const id of ['panelB', 'panelC', 'panelD']) {
+      const declares = (knobsOf[id] ?? []).map((one) => one.id)
+      const given = JSON.parse(placed(element, id).getAttribute('values') ?? '{}') as Record<
+        string,
+        number
+      >
+      expect(given, id).toEqual(
+        Object.fromEntries(declares.map((knob) => [knob, state[knob as keyof typeof state]])),
+      )
+      // the last run of the panel is at the state of the controls: a knob it
+      // grids over is read out of its answer, every other one was sent
+      const last = simulationsOf(id).at(-1) ?? {}
+      for (const knob of declares) {
+        const sent = last.values?.[knob]
+        const gridded = last.grid?.[knob] !== undefined
+        expect(gridded || sent === state[knob as keyof typeof state], `${id} ${knob}`).toBe(true)
+      }
+      expect(inside(placed(element, id)).querySelector('.error'), id).toBeNull()
+    }
+  })
+
+  it('resets the shared knobs of the page, and only where they moved', async () => {
+    const element = await shell({ page: 'pageB' })
+    const button = part(element, '.knobs button.reset') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    const slider = part(element, '#knob-knobA') as HTMLInputElement
+    slider.value = '0.5'
+    slider.dispatchEvent(new Event('input'))
     await settled()
-    expect(panels(element)).toEqual(['panelB', 'panelC'])
+    expect(button.disabled).toBe(false)
+    button.click()
+    await settled()
+    expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('1')
     expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
+    expect(button.disabled).toBe(true)
+  })
+
+  it('tells a screen reader which panels a shared control sets', async () => {
+    const element = await shell({ page: 'pageB' })
+    const slider = part(element, '#knob-knobA')
+    const described = slider.getAttribute('aria-describedby') ?? ''
+    expect(part(element, `#${described}`).textContent.trim()).toBe(
+      'Sets Title of panelB, Title of panelC',
+    )
+  })
+
+  it('shares a knob whose id is a name every object has', async () => {
+    knobsOf = {
+      panelB: [choiceKnob('constructor'), choiceKnob('__proto__')],
+      panelC: [choiceKnob('constructor'), choiceKnob('__proto__')],
+    }
+    const element = await shell({ page: 'pageB' })
+    expect(shellKnobs(element)).toEqual(['knob-constructor', 'knob-__proto__'])
+    expect((part(element, '#knob-constructor') as HTMLSelectElement).value).toBe('25')
+    expect(placed(element, 'panelB').getAttribute('values')).toBe(
+      '{"constructor":25,"__proto__":25}',
+    )
+    const select = part(element, '#knob-__proto__') as HTMLSelectElement
+    select.value = '12.5'
+    select.dispatchEvent(new Event('change'))
+    await settled()
+    expect(placed(element, 'panelC').getAttribute('values')).toBe(
+      '{"constructor":25,"__proto__":12.5}',
+    )
+    expect(panelKnobs(element, 'panelB')).toEqual([])
   })
 
   it('keeps the keys a shared knob uses from the page', async () => {
@@ -688,7 +809,7 @@ describe('the knobs the panels of a page share', () => {
     expect(seen).toEqual(['n'])
   })
 
-  it('places a panel whose declaration it cannot read on its own', async () => {
+  it('keeps a shared knob of a page whose panel cannot be read', async () => {
     let refused = true
     const stub = globalThis.fetch
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
@@ -699,9 +820,12 @@ describe('the knobs the panels of a page share', () => {
       return stub(url, init)
     })
     const element = await shell({ page: 'pageB' })
-    expect(element.shadowRoot.querySelector('.knobs')).toBeNull()
-    expect(placed(element, 'panelC').hasAttribute('values')).toBe(false)
-    expect(panelKnobs(element, 'panelB')).toEqual(['knob-knobA'])
-    expect(panelKnobs(element, 'panelC')).toEqual(['knob-knobA'])
+    // the panel which could not be read says so, and the page keeps one control
+    expect(shellKnobs(element)).toEqual(['knob-knobA'])
+    expect(panelKnobs(element, 'panelB')).toEqual([])
+    expect(inside(placed(element, 'panelC')).querySelector('.error')?.textContent).toBe(
+      FAILURE_MESSAGES.http,
+    )
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
   })
 })

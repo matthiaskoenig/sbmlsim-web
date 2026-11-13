@@ -111,6 +111,57 @@ describe('the client of an endpoint', () => {
     expect(series).toHaveLength(1)
   })
 
+  it('reads an app with the knobs its pages share and refuses one without them', async () => {
+    const knob = {
+      id: 'knobA',
+      label: 'knob A',
+      target: 'targetA',
+      unit: null,
+      kind: 'range',
+      min: 0,
+      max: 1,
+      steps: 3,
+      choices: [],
+      default: 1,
+    }
+    const app = {
+      contract: 'app/1',
+      title: 'Model A',
+      subtitle: '',
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'] }],
+      variants: [],
+      citation: '',
+      doi: '',
+      licenses: [],
+      shared: {
+        pageA: [
+          {
+            knob,
+            panels: [
+              { id: 'panelA', title: 'Panel A' },
+              { id: 'panelB', title: 'Panel B' },
+            ],
+          },
+        ],
+      },
+    }
+    let body: unknown = app
+    serve(() => Promise.resolve(json(body)))
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    expect((await client.app('modelA')).shared.pageA?.[0]?.knob.id).toBe('knobA')
+    // a shell which read an app without them would give every panel its own
+    // controls, which is a page of two states for a knob its panels share
+    for (const broken of [
+      { ...app, shared: undefined },
+      { ...app, shared: [] },
+      { ...app, shared: { pageA: [{ knob: { ...knob, default: '1' }, panels: [] }] } },
+      { ...app, shared: { pageA: [{ knob, panels: [{ id: 'panelA' }] }] } },
+    ]) {
+      body = broken
+      expect(await kindOf(client.app('modelA'))).toBe('body')
+    }
+  })
+
   it('reads a stored answer off a url of its own', async () => {
     const seen: string[] = []
     serve((url) => {

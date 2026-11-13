@@ -137,11 +137,36 @@ const app: AppDeclaration = {
   contract: 'app/1',
   title: 'Model A',
   subtitle: 'what the model is',
-  pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'] }],
+  pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'] }],
   variants: [],
   citation: 'Author et al. (2026)',
   doi: '10.0000/zenodo.0000000',
   licenses: ['CC BY-SA 4.0'],
+  shared: {
+    pageA: [
+      {
+        knob: {
+          id: 'knobA',
+          label: 'knob A',
+          target: 'targetA',
+          unit: 'dimensionless',
+          kind: 'choice',
+          min: null,
+          max: null,
+          steps: 5,
+          choices: [
+            { label: 'low', value: 0.4 },
+            { label: 'high', value: 1.0 },
+          ],
+          default: 1.0,
+        },
+        panels: [
+          { id: 'panelA', title: 'Panel A' },
+          { id: 'panelB', title: 'Panel B' },
+        ],
+      },
+    ],
+  },
 }
 
 describe('the contracts', () => {
@@ -159,7 +184,8 @@ describe('the contracts', () => {
     expect(declaration.limits.knobs).toBe(4)
     expect(answer.dims[0]?.values).toEqual([0.2, 0.6, 1.0])
     expect(request.grid).toEqual({ knobB: 3 })
-    expect(app.pages[0]?.panels).toEqual([declaration.panel.id])
+    expect(app.pages[0]?.panels).toEqual([declaration.panel.id, 'panelB'])
+    expect(app.shared.pageA?.[0]?.panels.map((one) => one.id)).toEqual(app.pages[0]?.panels)
   })
 
   it('reads the limits of the endpoint and not its own', () => {
