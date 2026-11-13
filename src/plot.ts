@@ -21,6 +21,14 @@
  * - the lines of a dimension get a legend up to `LEGEND_LIMIT` of them and a
  *   colour bar above it (`COLORBAR_FROM = 11` of `sbmlsim.plot.points`), whose
  *   tick labels are every point up to `MAX_TICKS` and every k-th above it,
+ * - a legend whose column would take more than `COLUMN_SHARE` of the width goes
+ *   below the plot and packs its entries into rows, which is the width a phone
+ *   has: a column wider than a third of the figure is a legend with a plot
+ *   beside it,
+ * - the label of an axis wraps at its words onto at most `AXIS_LINES` lines of
+ *   the length of that axis, which is `_fit_margins` and `_wrap_label` of
+ *   `sbmlsim.plot.serialization_matplotlib`; the margin of the figure grows by
+ *   the lines it takes,
  * - a line takes its colour from the colour map at its position, viridis over
  *   its first 85 % (`COLORMAP` and `_COLORMAP_END` of `sbmlsim.plot.points`),
  *   which `RAMP` carries as six anchors a `color-mix` reads between, so the
@@ -78,6 +86,14 @@ export interface Points {
   yerr?: number[]
 }
 
+/** The lower and the upper limit of an axis. */
+export interface Limits {
+  /** The lower limit. */
+  low: number
+  /** The upper limit, greater than the lower one. */
+  high: number
+}
+
 /** Everything one figure draws. */
 export interface PlotSpec {
   /** The x of every value of every series, the output times of a run. */
@@ -90,6 +106,18 @@ export interface PlotSpec {
   series: Series[]
   /** The study data drawn under the curves, none without. */
   points?: Points[]
+  /**
+   * The values the y axis holds, instead of the ones which are drawn.
+   *
+   * It is what a caller passes which draws one of several lines of one answer
+   * at a time: the limits are taken over all of them, so a line moves inside a
+   * frame which holds still rather than redrawing itself inside a frame which
+   * follows it. The limits of the axis are derived from it exactly as they are
+   * derived from the drawn values, so the margin of the axis and, on a
+   * logarithmic axis, the rule of the decades apply to the frame and not to the
+   * line. A figure which does not carry it takes its limits from what it draws.
+   */
+  yLimits?: Limits
   /** The width of the figure in pixels. */
   width: number
   /** The height of the figure in pixels. */
@@ -153,9 +181,20 @@ const BOTTOM = 42
  * The share of the width of a figure the column of a legend or of a colour bar
  * may take. A label is given the room its characters need and no more, and this
  * is where that stops: past about a third of the figure the plot is the thing
- * which suffers, so the labels are cut with an ellipsis instead.
+ * which suffers. A legend which wants more goes below the plot, where it has
+ * the width of the figure for its entries; a colour bar, which is an axis of
+ * the figure and is read against the height of the plot, keeps its column and
+ * has its labels cut with an ellipsis.
  */
 const COLUMN_SHARE = 0.35
+/**
+ * The share of the height of a figure a legend below the plot may take.
+ *
+ * A legend below the plot buys width with height, and past this much height it
+ * has stopped being a trade: such a legend stays beside the plot and is cut
+ * there, as it was before there was a legend below.
+ */
+const BELOW_SHARE = 0.35
 /**
  * The width of a character of a label, a share of its font size. It is an
  * estimate of the mean character of the font of the design system and no
@@ -176,6 +215,10 @@ const ROW = 18
 const LEGEND_LINE = 13
 /** The most lines a legend entry is given before its last line is cut. */
 const LEGEND_LINES = 2
+/** The most lines the label of an axis is given before its last line is cut. */
+const AXIS_LINES = 2
+/** The height of a further line of the label of an axis, in pixels. */
+const AXIS_LINE = 14
 /** The radius of the marker of a study point, in pixels. */
 const MARKER = 3
 /**
@@ -260,14 +303,6 @@ export interface PlotGeometry {
   yAt: (value: number) => number
   /** Whether a value can be drawn on the y axis at all. */
   drawable: (value: number) => boolean
-}
-
-/** The lower and the upper limit of an axis. */
-interface Limits {
-  /** The lower limit. */
-  low: number
-  /** The upper limit, greater than the lower one. */
-  high: number
 }
 
 /** One axis of a figure: its limits, its ticks and the pixel of a value. */
@@ -481,47 +516,29 @@ function fittingLabel(label: string, room: number, fontSize: number): string {
 }
 
 /**
- * Cut the label of an axis to the room it has, keeping its unit.
- *
- * @param label the label, which ends in ` [unit]` where the axis has a unit
- * @param room the pixels the axis is long
- * @returns the label where it fits, else its name cut with an ellipsis in front
- *   of the unit; the unit alone where not even one character of the name fits
- */
-function fittingAxisLabel(label: string, room: number): string {
-  const found = /^(.*?)( \[[^\]]*\])$/.exec(label)
-  if (found === null) {
-    return fittingLabel(label, room, LABEL_FONT)
-  }
-  const [, name = '', unit = ''] = found
-  if (labelRoom(label, LABEL_FONT) <= room + ROUNDING) {
-    return label
-  }
-  const cut = fittingLabel(name, room - labelRoom(unit, LABEL_FONT), LABEL_FONT)
-  return cut === '' ? unit.trim() : `${cut}${unit}`
-}
-
-/**
  * Lay a label out on the lines of the room it has.
  *
  * A label which does not fit one line wraps at its words, so a legend in a
  * narrow column still tells its curves apart: a cut at the end of the line
  * would leave only the prefix the labels of a panel share. A word which is
  * longer than a line breaks where the line ends, as there is no other place to
- * break it. Past `LEGEND_LINES` lines the last one keeps the end of the label
- * and not its start, with the ellipsis in front of it: the words which tell
- * two labels apart are the last ones, and the first line already shows the
- * head of the label, so the reader sees both ends and loses the middle. That
- * end starts at a word wherever the room it has holds one, so the reader is
- * given words and not the tail of a word which reads as another one.
+ * break it. Past `most` lines the last one keeps the end of the label and not
+ * its start, with the ellipsis in front of it: the words which tell two labels
+ * apart are the last ones, and the first line already shows the head of the
+ * label, so the reader sees both ends and loses the middle. That end starts at
+ * a word wherever the room it has holds one, so the reader is given words and
+ * not the tail of a word which reads as another one. The unit of an axis label
+ * is its last word and therefore the one thing a cut label always keeps, which
+ * is what a reader cannot guess.
  *
  * @param label the label
  * @param room the pixels a line has
  * @param fontSize the size of its font in pixels
+ * @param most the lines it is given before its last one is cut
  * @returns the lines, at least one; a single empty line where not even one
  *   character fits
  */
-function wrapLabel(label: string, room: number, fontSize: number): string[] {
+function wrapLabel(label: string, room: number, fontSize: number, most: number): string[] {
   if (labelRoom(label, fontSize) <= room + ROUNDING) {
     return [label]
   }
@@ -547,11 +564,11 @@ function wrapLabel(label: string, room: number, fontSize: number): string[] {
     }
   }
   lines.push(line)
-  if (lines.length <= LEGEND_LINES) {
+  if (lines.length <= most) {
     return lines
   }
-  const kept = lines.slice(0, LEGEND_LINES - 1)
-  const rest = lines.slice(LEGEND_LINES - 1).join(' ')
+  const kept = lines.slice(0, most - 1)
+  const rest = lines.slice(most - 1).join(' ')
   if (rest.length <= width) {
     return [...kept, rest]
   }
@@ -573,7 +590,9 @@ function wrapLabel(label: string, room: number, fontSize: number): string[] {
  * @returns the lines
  */
 function legendLines(label: string, room: number, wrap: boolean): string[] {
-  return wrap ? wrapLabel(label, room, SMALL_FONT) : [fittingLabel(label, room, SMALL_FONT)]
+  return wrap
+    ? wrapLabel(label, room, SMALL_FONT, LEGEND_LINES)
+    : [fittingLabel(label, room, SMALL_FONT)]
 }
 
 /**
@@ -848,11 +867,26 @@ function exponentialTicks(ticks: number[]): boolean {
 /**
  * Get the decimals the tick labels of an axis carry.
  *
+ * The ticks of a linear axis are multiples of the step between two of them, so
+ * the step is what they are written with. The ladder of a logarithmic axis is
+ * thinned where it carries more labels than the axis asked for, and its
+ * smallest tick then needs more decimals than that step: `0.001` of a ladder
+ * thinned to every second decade would be written with the two decimals of the
+ * step below it, which is `0`. Trailing zeros are dropped, so the decimals the
+ * smallest tick needs cost the larger ones nothing.
+ *
  * @param ticks the ticks of the axis
- * @returns the decimals of the smallest step between two of them, at most six
+ * @returns the decimals of the smallest step between two of them and of the
+ *   smallest of them, at most six
  */
 function tickDecimals(ticks: number[]): number {
   let step = Number.POSITIVE_INFINITY
+  let smallest = Number.POSITIVE_INFINITY
+  for (const value of ticks) {
+    if (value !== 0 && Number.isFinite(value)) {
+      smallest = Math.min(smallest, Math.abs(value))
+    }
+  }
   for (let index = 1; index < ticks.length; index += 1) {
     const before = ticks[index - 1]
     const value = ticks[index]
@@ -864,7 +898,11 @@ function tickDecimals(ticks: number[]): number {
   if (!Number.isFinite(step)) {
     step = only === undefined || only === 0 ? 1 : Math.abs(only)
   }
-  return clamp(Math.ceil(-Math.log10(step)), 0, 6)
+  const needed = Math.max(
+    Math.ceil(-Math.log10(step)),
+    Number.isFinite(smallest) ? Math.ceil(-Math.log10(smallest)) : 0,
+  )
+  return clamp(needed, 0, 6)
 }
 
 /**
@@ -1170,14 +1208,17 @@ function markersOf(points: Points, colour: string, shape: MarkerShape, x: Axis, 
  * @param axis the axis
  * @param horizontal whether it is the x axis
  * @param box the plot box
- * @param full the label of the axis, with its unit
+ * @param lines the label of the axis, with its unit, on the lines it wraps to
+ * @param room the pixels the margin of the axis has, which is where its label
+ *   and its tick labels are written
  * @returns the group of the axis
  */
 function axisGroup(
   axis: Axis,
   horizontal: boolean,
   box: { x0: number; y0: number; x1: number; y1: number },
-  full: string,
+  lines: string[],
+  room: number,
 ): string {
   const decimals = tickDecimals(axis.ticks)
   const exponential = exponentialTicks(axis.ticks)
@@ -1232,27 +1273,34 @@ function axisGroup(
     })
     .join('')
   const middle = horizontal ? (box.x0 + box.x1) / 2 : (box.y0 + box.y1) / 2
-  // a label which is longer than its axis is cut with an ellipsis, as a legend
-  // entry is, and not left to run out of the figure; the unit is what a reader
-  // cannot guess, so it is the name which is cut and the unit stays
-  const label = fittingAxisLabel(full, horizontal ? box.x1 - box.x0 : box.y1 - box.y0)
-  const title = horizontal
-    ? text(label, {
-        class: 'axis-label',
-        style: `fill:${token('fg')};stroke:none;font-size:${token('font-size')}`,
-        x: coord(middle),
-        y: coord(box.y1 + BOTTOM - PAD - LABEL_GAP),
-        'text-anchor': 'middle',
-      })
-    : text(label, {
-        class: 'axis-label',
-        style: `fill:${token('fg')};stroke:none;font-size:${token('font-size')}`,
-        x: coord(PAD),
-        y: coord(middle),
-        transform: `rotate(-90 ${coord(PAD)} ${coord(middle)})`,
-        'text-anchor': 'middle',
-        'dominant-baseline': 'hanging',
-      })
+  // a label which is longer than its axis wraps at its words onto the lines the
+  // margin was grown for, and the last of them is cut with an ellipsis in front
+  // of it, which keeps the unit at its end: the unit is what a reader cannot
+  // guess. The x label is written upwards from the bottom of its margin and the
+  // y label rightwards from the left edge of the figure, so the line nearest
+  // the plot is the last one of the label and the first one of it respectively
+  const style = `fill:${token('fg')};stroke:none;font-size:${token('font-size')}`
+  const title = lines
+    .map((line, index) =>
+      horizontal
+        ? text(line, {
+            class: 'axis-label',
+            style,
+            x: coord(middle),
+            y: coord(box.y1 + room - PAD - LABEL_GAP - (lines.length - 1 - index) * AXIS_LINE),
+            'text-anchor': 'middle',
+          })
+        : text(line, {
+            class: 'axis-label',
+            style,
+            x: coord(PAD + index * AXIS_LINE),
+            y: coord(middle),
+            transform: `rotate(-90 ${coord(PAD + index * AXIS_LINE)} ${coord(middle)})`,
+            'text-anchor': 'middle',
+            'dominant-baseline': 'hanging',
+          }),
+    )
+    .join('')
   return tag(
     'g',
     {
@@ -1266,7 +1314,77 @@ function axisGroup(
 }
 
 /**
- * Write the legend of a figure.
+ * Write one entry of a legend: its swatch and the lines of its label.
+ *
+ * @param entry the entry
+ * @param x the pixel its swatch starts at
+ * @param y the pixel its first line is centred on
+ * @param lines the lines of its label
+ * @returns the group of the entry
+ */
+function legendEntry(entry: Entry, x: number, y: number, lines: string[]): string {
+  const swatch = entry.shape
+    ? markerTag(entry.shape, entry.colour, x + SWATCH / 2, y, 'swatch')
+    : tag('line', {
+        class: 'swatch',
+        style: `stroke:${entry.colour};stroke-width:${token('curve-width')}`,
+        x1: coord(x),
+        y1: coord(y),
+        x2: coord(x + SWATCH),
+        y2: coord(y),
+      })
+  const written = lines
+    .map((line, index) =>
+      text(line, {
+        x: coord(x + SWATCH + LABEL_GAP * 2),
+        y: coord(y + index * LEGEND_LINE),
+        'dominant-baseline': 'central',
+      }),
+    )
+    .join('')
+  return tag('g', { class: 'legend-entry', 'data-series': entry.id }, `${swatch}${written}`)
+}
+
+/**
+ * Get the pixels one entry of a legend needs on a line of its own.
+ *
+ * @param entry the entry
+ * @returns its swatch, the gap after it and the characters of its label
+ */
+function entryRoom(entry: Entry): number {
+  return SWATCH + LABEL_GAP * 2 + labelRoom(entry.label, SMALL_FONT)
+}
+
+/**
+ * Pack the entries of a legend into the rows of the width it has.
+ *
+ * @param entries the entries, in their order
+ * @param room the pixels a row has
+ * @returns the rows, in their order; an entry which is wider than a row on its
+ *   own gets a row of its own, where its label is cut when it is written
+ */
+function legendRows(entries: Entry[], room: number): Entry[][] {
+  const rows: Entry[][] = []
+  let row: Entry[] = []
+  let used = 0
+  for (const entry of entries) {
+    const needed = entryRoom(entry)
+    if (row.length > 0 && used + COLUMN_GAP + needed > room + ROUNDING) {
+      rows.push(row)
+      row = []
+      used = 0
+    }
+    used += used === 0 ? needed : COLUMN_GAP + needed
+    row.push(entry)
+  }
+  if (row.length > 0) {
+    rows.push(row)
+  }
+  return rows
+}
+
+/**
+ * Write the legend of a figure, as the column right of its plot.
  *
  * @param entries the entries, in their order
  * @param x the pixel the column of the legend starts at
@@ -1283,27 +1401,9 @@ function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap:
   const rows = entries
     .map((entry) => {
       const lines = legendLines(entry.label, room, wrap)
-      const swatch = entry.shape
-        ? markerTag(entry.shape, entry.colour, x + SWATCH / 2, at, 'swatch')
-        : tag('line', {
-            class: 'swatch',
-            style: `stroke:${entry.colour};stroke-width:${token('curve-width')}`,
-            x1: coord(x),
-            y1: coord(at),
-            x2: coord(x + SWATCH),
-            y2: coord(at),
-          })
-      const written = lines
-        .map((line, index) =>
-          text(line, {
-            x: coord(x + SWATCH + LABEL_GAP * 2),
-            y: coord(at + index * LEGEND_LINE),
-            'dominant-baseline': 'central',
-          }),
-        )
-        .join('')
+      const written = legendEntry(entry, x, at, lines)
       at += ROW + (lines.length - 1) * LEGEND_LINE
-      return tag('g', { class: 'legend-entry', 'data-series': entry.id }, `${swatch}${written}`)
+      return written
     })
     .join('')
   return tag(
@@ -1313,6 +1413,51 @@ function legendGroup(entries: Entry[], x: number, y: number, room: number, wrap:
       style: `fill:${token('fg')};font-size:${token('font-size-small')}`,
     },
     rows,
+  )
+}
+
+/**
+ * Write the legend of a figure, as the rows below its plot.
+ *
+ * A legend below the plot writes every entry on one line, since the line it has
+ * is the width of the figure and not the width of a column: a label which is
+ * longer than a whole row is cut with an ellipsis, which is the one case a row
+ * cannot hold.
+ *
+ * @param rows the rows of entries, in their order
+ * @param x the pixel every row starts at
+ * @param y the pixel the first row is centred on
+ * @param room the pixels a row has
+ * @returns the group of the legend, empty for no row at all
+ */
+function belowLegendGroup(rows: Entry[][], x: number, y: number, room: number): string {
+  if (rows.length === 0) {
+    return ''
+  }
+  const written = rows
+    .map((row, index) => {
+      let at = x
+      return row
+        .map((entry) => {
+          const label = fittingLabel(
+            entry.label,
+            x + room - at - SWATCH - LABEL_GAP * 2,
+            SMALL_FONT,
+          )
+          const one = legendEntry(entry, at, y + index * ROW, [label])
+          at += entryRoom(entry) + COLUMN_GAP
+          return one
+        })
+        .join('')
+    })
+    .join('')
+  return tag(
+    'g',
+    {
+      class: 'legend below',
+      style: `fill:${token('fg')};font-size:${token('font-size-small')}`,
+    },
+    written,
   )
 }
 
@@ -1408,6 +1553,14 @@ interface Layout {
   entries: Entry[]
   /** Whether the column right of the plot is a colour bar and not a legend. */
   hasColourbar: boolean
+  /** The rows of the legend below the plot, empty for a legend beside it. */
+  belowRows: Entry[][]
+  /** The label of the x axis on the lines it wraps to. */
+  xLines: string[]
+  /** The label of the y axis, with the unit of its curves, on its lines. */
+  yLines: string[]
+  /** The pixels below the plot box, which the x axis writes in. */
+  bottomRoom: number
   /** The pixels a label of the legend has. */
   legendLabels: number
   /** The pixels a label of the colour bar has. */
@@ -1505,31 +1658,65 @@ function layoutFor(spec: PlotSpec): Layout {
   const legendRoom =
     entries.length > 0 ? SWATCH + LABEL_GAP * 2 + widest(entries.map((one) => one.label)) : 0
   const barRoom = hasColourbar ? COLOURBAR_BAR + TICK + LABEL_GAP + widest(barLabels) : 0
-  const wanted = Math.max(legendRoom, barRoom)
-  const column = wanted > 0 ? Math.min(COLUMN_GAP + wanted, Math.round(width * COLUMN_SHARE)) : 0
+  const cap = Math.round(width * COLUMN_SHARE)
+  // a legend which wants more than the share of the width a column may have
+  // goes below the plot, where a row is as wide as the figure, unless the rows
+  // it needs there take more of the height than a legend may: a plot with a
+  // legend under it is still a plot, a plot with a legend over half of it is not
+  const belowRows = entries.length > 0 ? legendRows(entries, width - PAD * 2) : []
+  const belowHeight = belowRows.length * ROW
+  const below =
+    legendRoom > 0 &&
+    COLUMN_GAP + legendRoom > cap &&
+    belowHeight <= height * BELOW_SHARE &&
+    height - BOTTOM - belowHeight - TOP >= MIN_PLOT
+  const wanted = below ? barRoom : Math.max(legendRoom, barRoom)
+  const column = wanted > 0 ? Math.min(COLUMN_GAP + wanted, cap) : 0
+  const under = below ? belowHeight : 0
+
+  // the label of an axis takes the length of that axis, which the margin the
+  // other label needs is part of. Two passes settle both: the lines are counted
+  // against the margins of the pass before, a count only grows as a margin does,
+  // and a count which grew is at `AXIS_LINES`, which is where it stops
+  const full = axisLabel(spec.yLabel, sharedUnit(series))
+  let left = LEFT
+  let bottomRoom = BOTTOM
+  let xLines: string[] = [spec.xLabel]
+  let yLines: string[] = [full]
+  for (let pass = 0; pass < 2; pass += 1) {
+    const right = Math.max(left + MIN_PLOT, width - PAD - column)
+    const foot = Math.max(TOP + MIN_PLOT, height - bottomRoom - under)
+    xLines = wrapLabel(spec.xLabel, right - left, LABEL_FONT, AXIS_LINES)
+    yLines = wrapLabel(full, foot - TOP, LABEL_FONT, AXIS_LINES)
+    left = LEFT + (yLines.length - 1) * AXIS_LINE
+    bottomRoom = BOTTOM + (xLines.length - 1) * AXIS_LINE
+  }
   const box: PlotBox = {
-    x0: LEFT,
+    x0: left,
     y0: TOP,
-    x1: Math.max(LEFT + MIN_PLOT, width - PAD - column),
-    y1: Math.max(TOP + MIN_PLOT, height - BOTTOM),
+    x1: Math.max(left + MIN_PLOT, width - PAD - column),
+    y1: Math.max(TOP + MIN_PLOT, height - bottomRoom - under),
   }
 
   const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
-  const ys: number[] = []
-  for (const one of series) {
-    for (let index = 0; index < Math.min(spec.x.length, one.values.length); index += 1) {
-      const value = one.values[index]
-      if (value !== undefined) {
-        ys.push(value)
+  const frame = spec.yLimits
+  const ys: number[] = frame === undefined ? [] : [frame.low, frame.high]
+  if (frame === undefined) {
+    for (const one of series) {
+      for (let index = 0; index < Math.min(spec.x.length, one.values.length); index += 1) {
+        const value = one.values[index]
+        if (value !== undefined) {
+          ys.push(value)
+        }
       }
     }
-  }
-  for (const one of points) {
-    for (const [index, value] of one.y.entries()) {
-      const error = one.yerr?.[index]
-      ys.push(value)
-      if (error !== undefined && Number.isFinite(error)) {
-        ys.push(value - Math.abs(error), value + Math.abs(error))
+    for (const one of points) {
+      for (const [index, value] of one.y.entries()) {
+        const error = one.yerr?.[index]
+        ys.push(value)
+        if (error !== undefined && Number.isFinite(error)) {
+          ys.push(value - Math.abs(error), value + Math.abs(error))
+        }
       }
     }
   }
@@ -1545,6 +1732,10 @@ function layoutFor(spec: PlotSpec): Layout {
     colours,
     entries,
     hasColourbar,
+    belowRows: below ? belowRows : [],
+    xLines,
+    yLines,
+    bottomRoom,
     legendLabels: column - COLUMN_GAP - SWATCH - LABEL_GAP * 2,
     barLabelRoom: column - COLUMN_GAP - COLOURBAR_BAR - TICK - LABEL_GAP,
     colourOf,
@@ -1581,8 +1772,9 @@ export function plotGeometry(spec: PlotSpec): PlotGeometry {
  * scales with the box a host gives it, `role="img"` and a `<title>` as its
  * first child, so a reader which does not see it is told what it shows. Every
  * part of it carries a class - `background`, `axis`, `tick`, `axis-label`,
- * `points`, `errorbar`, `marker`, `curve`, `legend`, `legend-entry`,
- * `colourbar`, `swatch`, `bar` - and every colour, font and stroke width is a
+ * `points`, `errorbar`, `marker`, `curve`, `legend` (`legend below` for one
+ * under the plot), `legend-entry`, `colourbar`, `swatch`, `bar` - and every
+ * colour, font and stroke width is a
  * token of the design system with the value of the sbmlsim report as its
  * fallback; the figure paints `--sbmlsim-figure-bg` behind itself, which is
  * `transparent` until a host asks for a surface, so a figure is part of its
@@ -1590,9 +1782,15 @@ export function plotGeometry(spec: PlotSpec): PlotGeometry {
  *
  * The column right of the plot, the legend or the colour bar, is as wide as the
  * characters of its longest label need (`EM`, an estimate of the font and no
- * measurement) and at most `COLUMN_SHARE` of the figure; a label which does not
- * fit that is cut with an ellipsis, since a cut label is worse than a narrower
- * plot and an ellipsis is better than either.
+ * measurement) and at most `COLUMN_SHARE` of the figure. A legend which wants
+ * more than that goes below the plot instead (`class="legend below"`), packed
+ * into rows of the width of the figure, which is what a figure on a phone does:
+ * a column wider than a third of the figure leaves a plot nobody can read. A
+ * colour bar keeps its column whatever its labels need, since it is an axis of
+ * the figure and is read against the height of the plot, and its labels are cut
+ * with an ellipsis there; a figure of both keeps the bar beside the plot and
+ * puts the legend of its study data below. A legend whose rows would take more
+ * than `BELOW_SHARE` of the height stays beside the plot and is cut.
  *
  * The plot box is clipped, so a value outside of the limits of an axis - the
  * decades a logarithmic axis cuts away - leaves the box instead of drawing over
@@ -1619,6 +1817,10 @@ export function plotSvg(spec: PlotSpec): string {
     colours,
     entries,
     hasColourbar,
+    belowRows,
+    xLines,
+    yLines,
+    bottomRoom,
     legendLabels,
     barLabelRoom,
     colourOf,
@@ -1679,13 +1881,15 @@ export function plotSvg(spec: PlotSpec): string {
     .join('')
 
   const columnX = box.x1 + COLUMN_GAP
+  const underneath = belowRows.length > 0
   // a figure gets wrapped labels when the wrapped legend fits the room it has
   // and single-line labels, cut with an ellipsis, when it does not: the
   // renderer never grows the figure behind the host, and never drops an entry
+  const sideEntries = underneath ? [] : entries
   const sideRoom = box.y1 - box.y0 - (hasColourbar ? MIN_PLOT + ROW : 0)
-  const wrap = legendHeight(entries, legendLabels, true) <= sideRoom
+  const wrap = legendHeight(sideEntries, legendLabels, true) <= sideRoom
   const barBottom =
-    box.y1 - (entries.length > 0 ? legendHeight(entries, legendLabels, wrap) + ROW : 0)
+    box.y1 - (sideEntries.length > 0 ? legendHeight(sideEntries, legendLabels, wrap) + ROW : 0)
   const side = hasColourbar
     ? colourbarGroup(
         series,
@@ -1695,13 +1899,19 @@ export function plotSvg(spec: PlotSpec): string {
         barLabelRoom,
       ) +
       legendGroup(
-        entries,
+        sideEntries,
         columnX,
         Math.max(box.y0 + MIN_PLOT, barBottom) + ROW,
         legendLabels,
         wrap,
       )
-    : legendGroup(entries, columnX, box.y0 + ROW / 2, legendLabels, wrap)
+    : legendGroup(sideEntries, columnX, box.y0 + ROW / 2, legendLabels, wrap)
+  const under = belowLegendGroup(
+    belowRows,
+    PAD,
+    height - PAD - belowRows.length * ROW + ROW / 2,
+    width - PAD * 2,
+  )
 
   const label = axisLabel(spec.yLabel, sharedUnit(series))
   const title = tag('title', {}, escape(`${label} over ${spec.xLabel}`))
@@ -1715,9 +1925,10 @@ export function plotSvg(spec: PlotSpec): string {
   })
   const body =
     `${title}${defs}${background}` +
-    `${axisGroup(x, true, box, spec.xLabel)}${axisGroup(y, false, box, label)}` +
+    `${axisGroup(x, true, box, xLines, bottomRoom)}${axisGroup(y, false, box, yLines, box.x0)}` +
     tag('g', { class: 'data', 'clip-path': `url(#${clip})` }, drawnPoints + drawnSeries) +
-    side
+    side +
+    under
 
   return tag(
     'svg',

@@ -104,6 +104,9 @@
  * The stored result (`fallback`) is a file next to the page and is therefore
  * fetched on `activate()` alongside the declaration and not when a request
  * fails: an endpoint which cannot be reached cannot serve the fallback either.
+ * It must be an answer of the panel at the values its declaration states for
+ * its knobs, since the payload of an answer carries no knob state and is
+ * therefore read at those defaults, see the prop `fallback`.
  */
 
 import {
@@ -139,7 +142,7 @@ import type {
 } from './contract'
 import { interpolate } from './interpolate'
 import { plotGeometry, plotSvg, seriesColour } from './plot'
-import type { PlotGeometry, PlotSpec, Points, Series } from './plot'
+import type { Limits, PlotGeometry, PlotSpec, Points, Series } from './plot'
 
 /** How the controls are placed next to the figure. */
 type LayoutName = 'auto' | 'sidebar' | 'stacked' | 'toolbar'
@@ -188,9 +191,18 @@ interface DroppedSeries {
 
 /** The study data of the panel, split into what is drawn and what is not. */
 interface ResolvedData {
-  /** The series which are drawn, in the order of the answer. */
+  /**
+   * The series the panel can draw, whatever the knobs are at, in the order of
+   * the answer.
+   *
+   * It is what the frame of the value axis is held open by: a series which
+   * appears when a reader reaches the state it was measured under must not move
+   * the axis when it appears, and must not be outside of it before it does.
+   */
+  resolved: Points[]
+  /** The ones of them which are drawn now, i.e. at the state of the knobs. */
   drawn: Points[]
-  /** The ones which are not, with the reason. */
+  /** The ones which are drawn under no state, with the reason. */
   dropped: DroppedSeries[]
 }
 
@@ -389,7 +401,18 @@ const props = defineProps({
    * it, and so does one whose declaration carries none.
    */
   data: { type: String as PropType<Switch>, default: 'on' },
-  /** The url of a stored answer of a run, drawn when the endpoint does not answer. */
+  /**
+   * The url of a stored answer of a run, drawn when the endpoint does not
+   * answer.
+   *
+   * It must be an answer of this panel at the values its declaration states for
+   * its knobs. The payload of an answer carries no state of the knobs - its
+   * provenance names the model, the variant, the engine, the seconds and the
+   * moment it was created, and its `dims` name the gridded axis alone - so the
+   * element reads a stored answer at those declared defaults and cannot know of
+   * one which was computed at another state: such a fallback is drawn as if it
+   * were the default state, and nothing here can notice it.
+   */
   fallback: { type: String, default: '' },
   /** The milliseconds one request is given before it is stopped. */
   timeout: { type: Number, default: DEFAULT_TIMEOUT },
@@ -813,11 +836,12 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
  * declares one of its own, so a series which does not match is one of another
  * scale, which a figure of one y axis cannot draw without lying about it.
  *
- * A series which was measured under a state of the knobs (`at`) is left out
- * while the figure is not at it, and is none of the three: it is data of a
- * condition the figure does not show right now, not a series the panel cannot
- * draw, so nothing is said about it and it comes back with the answer of its
- * state (`drawnValue`).
+ * A series which was measured under a state of the knobs (`at`) is left out of
+ * `drawn` while the figure is not at it, and is none of the three: it is data
+ * of a condition the figure does not show right now, not a series the panel
+ * cannot draw, so nothing is said about it, it stays in `resolved`, which holds
+ * the frame of the value axis open for it, and it comes back with the answer of
+ * its state (`drawnValue`).
  *
  * This is a view of the answer and nothing else. What a reader is told about a
  * dropped series is said by the watcher below, where a side effect runs once.
@@ -825,18 +849,16 @@ function atState(declared: PanelDataDeclaration | undefined): boolean {
 const resolvedData = computed<ResolvedData>(() => {
   const answer = grid.value
   if (answer === null || props.data === 'off') {
-    return { drawn: [], dropped: [] }
+    return { resolved: [], drawn: [], dropped: [] }
   }
   const given = dataOf(declaration.value)
   const declared = new Map(given.map((one) => [one.id, one]))
   const ranks = declaredRanks(given)
   const units = new Map(drawnCurves.value.map((one) => [one.id, one.unit]))
+  const resolved: Points[] = []
   const drawn: Points[] = []
   const dropped: DroppedSeries[] = []
   for (const one of seriesOf(study.value)) {
-    if (!atState(declared.get(one.id))) {
-      continue
-    }
     const curve = declared.get(one.id)?.curve ?? one.id
     const unit = units.get(curve)
     const delivered = one.unit ?? null
@@ -862,9 +884,12 @@ const resolvedData = computed<ResolvedData>(() => {
     if (Array.isArray(errors)) {
       points.yerr = errors.map((value) => (typeof value === 'number' ? value : Number.NaN))
     }
-    drawn.push(points)
+    resolved.push(points)
+    if (atState(declared.get(one.id))) {
+      drawn.push(points)
+    }
   }
-  return { drawn, dropped }
+  return { resolved, drawn, dropped }
 })
 
 /** The study data as it is drawn, empty while there is none to draw. */
@@ -923,6 +948,78 @@ watch(
   { immediate: true },
 )
 
+/**
+ * The values the y axis of the figure holds, `null` while there are none.
+ *
+ * The figure draws one line per curve, interpolated out of the answer at the
+ * value the gridded knob has now, and a model which answers a knob
+ * proportionally draws the same line inside a frame which follows it: the knob
+ * moves and the figure redraws pixel for pixel the same curve with other
+ * numbers on its axis. The frame is therefore taken over the whole answer -
+ * every point of the grid of every drawn curve - and over every series of the
+ * study data the panel can draw, whether or not the knobs are at the state it
+ * was measured under, so a line moves inside an axis which holds still and a
+ * series which appears at its condition neither moves the axis nor sits outside
+ * of it. A line which is drawn is a weighted mean of the points of the grid
+ * which bound it, so it is always inside the frame.
+ *
+ * A new answer is a new frame, which is right: a grid covers the knob which is
+ * being moved, and the axis has to hold still across that movement and not
+ * across a simulation of another state.
+ *
+ * A series beyond the x of the curves is no point of the figure, as the
+ * renderer has it, so it holds nothing open either.
+ */
+const frame = computed<Limits | null>(() => {
+  const answer = grid.value
+  if (answer === null) {
+    return null
+  }
+  const log = logY.value
+  let low = Number.POSITIVE_INFINITY
+  let high = Number.NEGATIVE_INFINITY
+  const hold = (value: number | null | undefined): void => {
+    if (value === null || value === undefined || !Number.isFinite(value)) {
+      return
+    }
+    if (log && value <= 0) {
+      return
+    }
+    low = Math.min(low, value)
+    high = Math.max(high, value)
+  }
+  const failed = new Set(answer.status.failed)
+  for (const one of drawnCurves.value) {
+    const rows = answer.curves[one.id] ?? []
+    for (const [index, row] of rows.entries()) {
+      if (failed.has(index)) {
+        continue
+      }
+      for (const value of row) {
+        hold(value)
+      }
+    }
+  }
+  const times = answer.x.filter((at) => Number.isFinite(at))
+  const first = Math.min(...times)
+  const last = Math.max(...times)
+  for (const one of resolvedData.value.resolved) {
+    for (const [index, value] of one.y.entries()) {
+      const at = one.x[index]
+      if (at === undefined || !Number.isFinite(at) || at < first || at > last) {
+        continue
+      }
+      hold(value)
+      const error = one.yerr?.[index]
+      if (error !== undefined && Number.isFinite(error)) {
+        hold(value - Math.abs(error))
+        hold(value + Math.abs(error))
+      }
+    }
+  }
+  return Number.isFinite(low) && Number.isFinite(high) ? { low, high } : null
+})
+
 /** The figure as it is drawn now, `null` while there is nothing to draw. */
 const plot = computed<PlotSpec | null>(() => {
   const answer = grid.value
@@ -939,6 +1036,7 @@ const plot = computed<PlotSpec | null>(() => {
     }
     return one.unit === null || one.unit === '' ? drawn : { ...drawn, unit: one.unit }
   })
+  const held = frame.value
   const spec: PlotSpec = {
     x: answer.x,
     xLabel: xLabel.value,
@@ -947,6 +1045,7 @@ const plot = computed<PlotSpec | null>(() => {
     width: figureWidth.value,
     height: figureHeight.value,
     logY: logY.value,
+    ...(held === null ? {} : { yLimits: held }),
   }
   const points = drawnData.value
   return points.length > 0 ? { ...spec, points } : spec

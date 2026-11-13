@@ -32,9 +32,52 @@ function spec(count: number, more: Partial<PlotSpec> = {}): PlotSpec {
   }
 }
 
+/**
+ * The labels which fill the legend of `columnLegend` up to `LEGEND_LIMIT`.
+ *
+ * They are long enough that one of them fills a row below the plot on its own,
+ * which is what makes the rows too tall for a legend there.
+ */
+const FILLERS = Array.from(
+  { length: 10 },
+  (_, index) => `hydrochlorothiazide plasma level ${String(index + 1)}`,
+)
+
+/**
+ * Build a spec whose legend keeps the column right of its plot.
+ *
+ * A legend goes below the plot when its column would want more than
+ * `COLUMN_SHARE` of the width, unless the rows it would need there take more of
+ * the height than a legend may. The labels are longer than that column and the
+ * fillers are enough of them for the second, which is the figure whose legend
+ * is still wrapped and cut in its column; the fillers fill it to the ten series
+ * which still get a legend, so the figure never turns into a colour bar.
+ *
+ * @param labels the labels under test, which come first
+ * @param more what the spec carries on top of the width and the height
+ * @returns the spec
+ */
+function columnLegend(labels: string[], more: Partial<PlotSpec> = {}): PlotSpec {
+  const all = [...labels, ...FILLERS].slice(0, 10)
+  return spec(all.length, {
+    width: 480,
+    height: 400,
+    series: all.map((label, index) => ({ ...series(index + 1), label })),
+    ...more,
+  })
+}
+
 /** Count how often a text occurs in another. */
 function occurrences(text: string, what: string): number {
   return text.split(what).length - 1
+}
+
+/** Get the texts of every entry of the legend, in their order. */
+function legendEntries(svg: string): string[] {
+  const legend = /<g class="legend[^"]*"[\s\S]*$/.exec(svg)?.[0] ?? ''
+  return [...legend.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map((one) =>
+    texts(one[0]).join(' '),
+  )
 }
 
 /** Get the `d` of every path of a class. */
@@ -54,7 +97,34 @@ function texts(svg: string): string[] {
   return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((one) => one[1] ?? '')
 }
 
+/**
+ * The figure of a small spec as the renderer drew it before there was a frame
+ * for the value axis.
+ *
+ * It is the pin of every caller which does not hand one over: a spec without
+ * `yLimits` has to draw the bytes it drew before the field existed, so the
+ * field cannot move a figure of a page which never passes it.
+ */
+const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-153_65-118"><rect x="64" y="14" width="89.65" height="104"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="118" x2="153.65" y2="118"/><g class="tick"><line x1="68.08" y1="118" x2="68.08" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="68.08" y="125" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="95.24" y1="118" x2="95.24" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="95.24" y="125" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="122.41" y1="118" x2="122.41" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.41" y="125" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="149.57" y1="118" x2="149.57" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="149.57" y="125" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="108.83" y="149" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="118"/><g class="tick"><line x1="60" y1="113.27" x2="64" y2="113.27"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="113.27" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="81.76" x2="64" y2="81.76"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="81.76" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="50.24" x2="64" y2="50.24"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="50.24" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="18.73" x2="64" y2="18.73"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="18.73" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="66" transform="rotate(-90 8 66)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-153_65-118)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M68.08 113.27 L95.24 81.76 L122.41 50.24 L149.57 18.73"/></g><g class="legend" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="165.65" y1="23" x2="183.65" y2="23"/><text x="189.65" y="23" dominant-baseline="central">Curve 1</text></g></g></svg>`
+
+/** The spec `PINNED` was drawn from. */
+function pinned(): PlotSpec {
+  return {
+    x: [0, 1, 2, 3],
+    xLabel: 'time [h]',
+    yLabel: 'value',
+    series: [series(1)],
+    width: 240,
+    height: 160,
+    logY: false,
+  }
+}
+
 describe('plotSvg', () => {
+  it('draws the figure it drew before there was a frame for the value axis', () => {
+    expect(plotSvg(pinned())).toBe(PINNED)
+  })
+
   it('draws one path per series', () => {
     expect(paths(plotSvg(spec(1)), 'curve')).toHaveLength(1)
     expect(paths(plotSvg(spec(4)), 'curve')).toHaveLength(4)
@@ -114,6 +184,22 @@ describe('plotSvg', () => {
       }),
     )
     expect(texts(small)).toContain('0.03')
+  })
+
+  it('keeps the colour bar of a figure in its column and puts its legend below', () => {
+    // a colour bar is an axis of the figure and is read against the height of
+    // the plot, so it keeps its column at any width; the legend of the study
+    // data under it is a list and goes below the plot
+    const svg = plotSvg(
+      spec(11, {
+        width: 390,
+        points: [{ id: 'curve1', label: 'a very long series label of a study', x: [0], y: [1] }],
+      }),
+    )
+    expect(svg).toContain('class="colourbar"')
+    expect(svg).toContain('class="legend below"')
+    expect(plotRight(svg)).toBeLessThan(390 - 8)
+    expect(legendEntries(svg)).toEqual(['a very long series label of a study'])
   })
 
   it('draws a legend up to ten series and a colour bar above ten', () => {
@@ -298,25 +384,10 @@ describe('plotSvg', () => {
     expect(texts(long)).toContain('Curve 1 of a study')
   })
 
-  it('wraps a long legend label onto two lines instead of cutting it', () => {
-    // the figure of a panel of 736 px is about 490 px wide, the rest is the controls
-    const svg = plotSvg(
-      spec(2, {
-        width: 490,
-        series: [
-          { ...series(1), label: 'hydrochlorothiazide plasma', unit: 'umol' },
-          { ...series(2), label: 'hydrochlorothiazide urine', unit: 'umol' },
-        ],
-      }),
-    )
-    const all = texts(svg)
-    expect(all).toContain('hydrochlorothiazide')
-    expect(all).toContain('plasma')
-    expect(all).toContain('urine')
-    expect(all.some((one) => one.endsWith('…'))).toBe(false)
-  })
-
-  it('keeps two labels with a long shared prefix distinguishable in a narrow figure', () => {
+  it('puts a legend which wants more than a third of the width below the plot', () => {
+    // the figure of a panel at the width of a phone: a column of these labels
+    // would leave a plot nobody can read, so the legend goes under the plot,
+    // which gets the whole width, and the labels are written out in full
     const svg = plotSvg(
       spec(2, {
         width: 390,
@@ -326,22 +397,59 @@ describe('plotSvg', () => {
         ],
       }),
     )
-    const legend = /<g class="legend"[\s\S]*$/.exec(svg)?.[0] ?? ''
-    const entries = [...legend.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map((one) =>
-      texts(one[0]).join(' '),
+    expect(svg).toContain('class="legend below"')
+    // the plot ends at the padding of the figure, i.e. there is no column
+    expect(plotRight(svg)).toBe(390 - 8)
+    expect(legendEntries(svg)).toEqual(['hydrochlorothiazide plasma', 'hydrochlorothiazide urine'])
+  })
+
+  it('keeps a legend which fits its column beside the plot', () => {
+    const svg = plotSvg(spec(2, { width: 390 }))
+    expect(svg).not.toContain('class="legend below"')
+    expect(svg).toContain('class="legend"')
+    expect(plotRight(svg)).toBeLessThan(390 - 8)
+  })
+
+  it('packs the entries of a legend below the plot into the rows of the figure', () => {
+    const svg = plotSvg(
+      spec(3, {
+        width: 390,
+        series: Array.from({ length: 3 }, (_, index) => ({
+          ...series(index + 1),
+          label: `hydrochlorothiazide plasma level ${String(index + 1)}`,
+        })),
+      }),
     )
-    expect(entries).toHaveLength(2)
-    expect(entries[0]).not.toBe(entries[1])
-    expect(entries[0]?.endsWith('plasma')).toBe(true)
-    expect(entries[1]?.endsWith('urine')).toBe(true)
+    expect(svg).toContain('class="legend below"')
+    const swatches = [
+      ...svg.matchAll(/<line class="swatch" [^>]*\sx1="([^"]*)" y1="([^"]*)"/g),
+    ].map((one) => ({ x: Number(one[1]), y: Number(one[2]) }))
+    expect(swatches).toHaveLength(3)
+    // one entry per row at this width, and a row is one row of a legend tall
+    expect(swatches.map((one) => one.x)).toEqual([8, 8, 8])
+    expect((swatches[1]?.y ?? 0) - (swatches[0]?.y ?? 0)).toBe(18)
+    // the last row ends inside the figure
+    expect(swatches[2]?.y ?? 0).toBeLessThan(300)
+  })
+
+  it('leaves the plot a figure whose legend has no room below it', () => {
+    // ten entries of these labels are ten rows below the plot, which is more of
+    // the height than a legend may take, so the legend keeps its column there
+    const svg = plotSvg(columnLegend([]))
+    expect(svg).not.toContain('class="legend below"')
+    expect(plotRight(svg)).toBeLessThan(480 - 8)
+  })
+
+  it('wraps a long legend label onto two lines instead of cutting it', () => {
+    const svg = plotSvg(columnLegend(['plasma concentration total']))
+    expect(legendEntries(svg)[0]).toBe('plasma concentration total')
+    // the whole label is written, on the two lines of its words
+    expect(texts(svg)).toContain('plasma concentration')
+    expect(texts(svg)).toContain('total')
   })
 
   it('cuts the last line of a label which two lines do not hold with an ellipsis', () => {
-    const svg = plotSvg(
-      spec(1, {
-        series: [{ ...series(1), label: 'A very long legend entry indeed, and then some' }],
-      }),
-    )
+    const svg = plotSvg(columnLegend(['A very long legend entry indeed, and then some']))
     const lines = texts(svg).filter(
       (one) =>
         'A very long legend entry indeed, and then some'.includes(one.replace('…', '')) &&
@@ -354,7 +462,7 @@ describe('plotSvg', () => {
 
   it('starts the kept end of a cut label at a word, and inside one without', () => {
     const lastLine = (label: string): string => {
-      const svg = plotSvg(spec(1, { series: [{ ...series(1), label }] }))
+      const svg = plotSvg(columnLegend([label]))
       return texts(svg).find((one) => one.startsWith('…')) ?? ''
     }
     // the words of the end are words of the label and no tail of one
@@ -365,66 +473,38 @@ describe('plotSvg', () => {
   })
 
   it('keeps the end of a label which needs more than two lines, where labels differ', () => {
-    const labels = ['plasma concentration total', 'plasma concentration free']
-    const svg = plotSvg(
-      spec(2, { width: 260, series: labels.map((label, i) => ({ ...series(i + 1), label })) }),
-    )
-    const legend = /<g class="legend"[\s\S]*$/.exec(svg)?.[0] ?? ''
-    const entries = [...legend.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map((one) =>
-      texts(one[0]).join(' '),
-    )
-    expect(entries).toHaveLength(2)
+    const svg = plotSvg(columnLegend(['plasma concentration total', 'plasma concentration free']))
+    const entries = legendEntries(svg)
     expect(entries[0]).not.toBe(entries[1])
     expect(entries[0]?.endsWith('total')).toBe(true)
     expect(entries[1]?.endsWith('free')).toBe(true)
   })
 
   it('wraps a legend only while it fits, and falls back to one line per entry', () => {
-    const many = (count: number): PlotSpec =>
-      spec(count, {
-        width: 390,
-        height: 300,
-        series: Array.from({ length: count }, (_, i) => ({
-          ...series(i + 1),
-          label: `hydrochlorothiazide plasma level ${String(i + 1)}`,
-        })),
-      })
+    const lines = (svg: string): number[] =>
+      [...svg.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map((one) => texts(one[0]).length)
     const bottom = (svg: string): number => {
-      const legend = /<g class="legend"[\s\S]*$/.exec(svg)?.[0] ?? ''
+      const legend = /<g class="legend[^"]*"[\s\S]*$/.exec(svg)?.[0] ?? ''
       const ys = [...legend.matchAll(/<text[^>]*\sy="([^"]*)"/g)].map((one) => Number(one[1]))
       return Math.max(...ys)
     }
-    // the plot box ends 42 px above the bottom of the figure
-    const full = plotSvg(many(10))
+    // a column of ten labels of two lines each does not fit the plot box, so
+    // every entry is written on one line and cut
+    const full = plotSvg(columnLegend([], { height: 300 }))
     expect(bottom(full)).toBeLessThanOrEqual(300 - 42)
-    expect(texts(full).filter((one) => one.startsWith('hydrochloro'))).toHaveLength(10)
-    // one line per entry, which is the layout before wrapping
-    const rows = [...full.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map(
-      (one) => texts(one[0]).length,
-    )
-    expect(rows).toEqual(Array.from({ length: 10 }, () => 1))
-    // where there is room the same labels wrap
-    const few = plotSvg(many(2))
-    const wrapped = [...few.matchAll(/<g class="legend-entry"[\s\S]*?<\/g>/g)].map(
-      (one) => texts(one[0]).length,
-    )
-    expect(wrapped).toEqual([2, 2])
+    expect(lines(full)).toEqual(Array.from({ length: 10 }, () => 1))
+    expect(texts(full).some((one) => one.endsWith('…'))).toBe(true)
+    // where the column is tall enough the same labels wrap onto two lines
+    const tall = plotSvg(columnLegend([]))
+    expect(lines(tall)).toEqual(Array.from({ length: 10 }, () => 2))
   })
 
   it('spaces the entries of a legend by the lines they wrap to, so none overlaps', () => {
-    const svg = plotSvg(
-      spec(2, {
-        width: 390,
-        series: [
-          { ...series(1), label: 'hydrochlorothiazide plasma' },
-          { ...series(2), label: 'b' },
-        ],
-      }),
-    )
+    const svg = plotSvg(columnLegend(['hydrochlorothiazide plasma']))
     const swatches = [...svg.matchAll(/<line class="swatch"[^>]*\sy1="([^"]*)"/g)].map((one) =>
       Number(one[1]),
     )
-    expect(swatches).toHaveLength(2)
+    expect(swatches).toHaveLength(10)
     expect((swatches[1] ?? 0) - (swatches[0] ?? 0)).toBeGreaterThan(18)
   })
 
@@ -491,6 +571,48 @@ describe('plotSvg', () => {
   })
 })
 
+describe('the limits of the value axis', () => {
+  /** Get the labels of the ticks of the y axis, in their order. */
+  function yTicks(svg: string): string[] {
+    const after = svg.split('<g class="axis ')[2] ?? ''
+    const group = after.split('<g class="data"')[0] ?? ''
+    return [...group.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((one) => one[1] ?? '')
+  }
+
+  it('takes them from what is drawn where the spec carries none', () => {
+    const ticks = yTicks(plotSvg(spec(1)))
+    expect(ticks[0]).toBe('1')
+    expect(ticks).toContain('4')
+    expect(ticks).not.toContain('100')
+  })
+
+  it('takes them from the spec where it carries them', () => {
+    // the line reaches 4 of an axis which holds 100: the axis is the frame the
+    // caller gave and not the one the line would ask for
+    const svg = plotSvg(spec(1, { yLimits: { low: 0, high: 100 } }))
+    expect(yTicks(svg)).toContain('100')
+    expect(yTicks(svg)).toContain('0')
+    const path = paths(svg, 'curve')[0] ?? ''
+    const ys = [...path.matchAll(/[ML][\d.-]+ ([\d.-]+)/g)].map((one) => Number(one[1]))
+    // the whole line sits in the lower fifth of a box which ends at 258
+    expect(Math.min(...ys)).toBeGreaterThan(200)
+  })
+
+  it('applies the decades of a logarithmic axis to the limits it is given', () => {
+    const svg = plotSvg(spec(1, { logY: true, yLimits: { low: 1e-9, high: 1e3 } }))
+    // six decades below the largest value of the frame, as for drawn values
+    expect(yTicks(svg)).toContain('0.001')
+    expect(svg).not.toContain('1e-9')
+    expect(svg).not.toContain('1e-8')
+  })
+
+  it('draws a figure of the limits of its own values alike either way', () => {
+    // the frame of a caller which hands over what the figure would compute
+    // itself is the figure the caller had without it
+    expect(plotSvg(spec(1, { yLimits: { low: 1, high: 4 } }))).toBe(plotSvg(spec(1)))
+  })
+})
+
 describe('plotGeometry', () => {
   it('gives the box the figure draws its axes along', () => {
     const one = spec(1)
@@ -527,13 +649,65 @@ describe('plotGeometry', () => {
 })
 
 describe('the label of an axis', () => {
-  it('is cut in its name and keeps its unit where it is longer than its axis', () => {
+  /**
+   * Get the lines the label of an axis is written on, in their order.
+   *
+   * The figure writes the x axis before the y axis, so the two groups are the
+   * two pieces the figure splits into at the start of an axis.
+   */
+  function labelLines(svg: string, horizontal: boolean): string[] {
+    const after = svg.split('<g class="axis ')[horizontal ? 1 : 2] ?? ''
+    const group = after.split('<g class="data"')[0] ?? ''
+    return [...group.matchAll(/<text class="axis-label"[^>]*>([^<]*)<\/text>/g)].map(
+      (one) => one[1] ?? '',
+    )
+  }
+
+  it('is one line and the room of one line where it fits', () => {
+    const svg = plotSvg(spec(1))
+    expect(labelLines(svg, false)).toEqual(['value [mM]'])
+    expect(labelLines(svg, true)).toEqual(['time [h]'])
+  })
+
+  it('wraps at its words where it is longer than its axis, and keeps its unit', () => {
+    const name = 'plasma concentration of hydrochlorothiazide'
+    const lines = labelLines(plotSvg(spec(1, { yLabel: name, height: 234, width: 390 })), false)
+    expect(lines.length).toBeGreaterThan(1)
+    // the lines are the words of the label and the unit is at its end
+    expect(lines.join(' ')).toContain('plasma')
+    expect(lines[lines.length - 1]?.endsWith('[mM]')).toBe(true)
+  })
+
+  it('gives the margin of its axis the lines it wraps to', () => {
+    const name = 'plasma concentration of hydrochlorothiazide'
+    const one = plotSvg(spec(1, { height: 234, width: 390 }))
+    const two = plotSvg(spec(1, { yLabel: name, height: 234, width: 390 }))
+    // the plot starts further right by the line the label needs, so a wrapped
+    // label is written beside the tick labels and never over them
+    const left = (svg: string): number =>
+      Number(/<line class="axis-line"[^>]*\sx1="([^"]*)"/.exec(svg)?.[1] ?? Number.NaN)
+    expect(left(two) - left(one)).toBe(14)
+  })
+
+  it('cuts the last line of a label which two lines do not hold, keeping its unit', () => {
     const name = 'a curve of a very long name which runs past the axis it labels'
-    const narrow = texts(plotSvg(spec(1, { yLabel: name, height: 160, width: 300 })))
-    const cut = narrow.find((one) => one.endsWith('\u2026 [mM]'))
-    expect(cut).toBeDefined()
-    // the name is cut and the unit, which a reader cannot guess, stays
-    expect(name.startsWith((cut ?? '').slice(0, -'\u2026 [mM]'.length))).toBe(true)
-    expect(texts(plotSvg(spec(1, { yLabel: 'value' })))).toContain('value [mM]')
+    const lines = labelLines(plotSvg(spec(1, { yLabel: name, height: 160, width: 300 })), false)
+    expect(lines).toHaveLength(2)
+    expect(lines[1]?.startsWith('\u2026')).toBe(true)
+    expect(lines[1]?.endsWith('[mM]')).toBe(true)
+  })
+
+  it('wraps the label of the x axis the same way', () => {
+    const label = 'time after the administration of the dose [h]'
+    const lines = labelLines(plotSvg(spec(1, { xLabel: label, width: 300, height: 220 })), true)
+    expect(lines.length).toBeGreaterThan(1)
+    expect(lines[lines.length - 1]?.endsWith('[h]')).toBe(true)
+    // and the figure keeps its lines inside itself
+    const ys = [
+      ...plotSvg(spec(1, { xLabel: label, width: 300, height: 220 })).matchAll(
+        /<text class="axis-label"[^>]*\sy="([^"]*)"/g,
+      ),
+    ].map((one) => Number(one[1]))
+    expect(Math.max(...ys)).toBeLessThanOrEqual(220)
   })
 })

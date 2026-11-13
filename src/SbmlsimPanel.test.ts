@@ -919,6 +919,87 @@ describe('the figure', () => {
   })
 })
 
+describe('the frame of the value axis', () => {
+  /**
+   * Get the y axis of the figure: its line, its ticks and its label.
+   *
+   * The figure writes the x axis, the y axis and then the curves, so the y axis
+   * is what stands between the second axis and the data.
+   */
+  function valueAxis(element: PanelElement): string {
+    const after = figure(element).split('<g class="axis ')[2] ?? ''
+    return after.split('<g class="data"')[0] ?? ''
+  }
+
+  /** Get the path of the first curve of the figure. */
+  function curve(element: PanelElement): string {
+    return /<path class="curve"[^>]*\sd="([^"]*)"/.exec(figure(element))?.[1] ?? ''
+  }
+
+  it('holds still while the knob the answer grids over moves', async () => {
+    // the defect this frame answers: the limits of a line which is scaled by a
+    // knob are scaled with it, so the figure redraws the same picture with
+    // other numbers on its axis and the knob appears to do nothing
+    const element = await started()
+    const axis = valueAxis(element)
+    const line = curve(element)
+    move(control(element, 'knobB'), '0.2', 'input')
+    await nextTick()
+    expect(curve(element)).not.toBe(line)
+    expect(valueAxis(element)).toBe(axis)
+    // and the line of the whole answer is inside the frame it is drawn in
+    expect(figure(element)).not.toContain('NaN')
+  })
+
+  it('is held open by a series the knobs are not at, and does not move when they are', async () => {
+    // the study data of a panel is conditioned: a series is drawn only at the
+    // state it was measured under, so the frame is taken over every series the
+    // panel can draw and a series which appears never moves the axis
+    served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 12.5 } }))
+    served.simulate = () => Promise.resolve(choiceRun())
+    served.data = () => Promise.resolve(studyData({ y: [0, 400, 900] }))
+    const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    const axis = valueAxis(element)
+    // the axis already reaches the series, which is above every curve
+    expect(axis).toContain('>800<')
+    // the knob of the choices is the one the answer grids over, so its release
+    // moves the figure out of the grid and asks for no simulation
+    move(control(element, 'knobA'), '12.5', 'change')
+    await nextTick()
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    expect(valueAxis(element)).toBe(axis)
+  })
+
+  it('keeps the decades of a logarithmic axis over the whole answer', async () => {
+    served.simulate = () =>
+      Promise.resolve(
+        run('knobB', [
+          [1e-6, 1e-5, 1e-4],
+          [1e-3, 1e-2, 1e-1],
+          [1, 10, 100],
+        ]),
+      )
+    const element = await started()
+    const toggle = shadow(element).querySelector('.toggle input')
+    if (!(toggle instanceof HTMLInputElement)) {
+      throw new Error('the panel has no toggle of the scale of its y axis')
+    }
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change'))
+    await nextTick()
+    // six decades below the largest value of the answer, which is 1000 of the
+    // second curve, and not six below the line which is drawn
+    const axis = valueAxis(element)
+    expect(axis).toContain('>0.001<')
+    expect(axis).not.toContain('1e-6')
+    move(control(element, 'knobB'), '0.2', 'input')
+    await nextTick()
+    expect(valueAxis(element)).toBe(axis)
+  })
+})
+
 describe('a payload which cannot be read', () => {
   it('shows the error line and never a blank element for a knob it cannot read', async () => {
     served.panel = () => Promise.resolve({ ...declaration(), axes: [null] })
