@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { marginFits, plotGeometry, plotSvg, tableMeasure } from './plot'
 import type { PlotSpec, Points, Series, TextMeasure } from './plot'
@@ -6,6 +6,12 @@ import type { PlotSpec, Points, Series, TextMeasure } from './plot'
 // Every id below is a neutral one: a curve, a series and a knob are data of a
 // payload and never of this library, so no model and no entity of a model is
 // named here.
+
+// The invariants of the renderer are checked over sweeps of thousands of
+// figures, the longest of which takes close to the default bound of a test of
+// five seconds, so a machine busy with anything else failed it for time and not
+// for a figure (5.6 s under a load of 7). They get a bound a sweep stays within.
+vi.setConfig({ testTimeout: 60_000 })
 
 /** Build a series of `values` over four x, with a straight ramp as its values. */
 function series(index: number, values?: number[]): Series {
