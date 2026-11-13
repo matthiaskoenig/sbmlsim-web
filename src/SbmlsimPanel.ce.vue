@@ -704,26 +704,24 @@ const yLabel = computed<string>(() => {
 })
 
 /**
- * Get the values of a knob the figure draws.
+ * Get the value of a knob the figure is drawn at.
+ *
+ * It is the value of its control, the knob a grid runs over included: a grid
+ * is the points a movement is read between and not a family of curves, so the
+ * figure draws one line per curve, at the value every knob has now, whether
+ * that line was simulated or interpolated.
  *
  * @param id the id of the knob
- * @param answer the run which is drawn
- * @returns every value of its axis for a knob the run grids over, which draws
- *   a line per point of it, and the single value its control is at for one
- *   which is not gridded; no value at all for an id which is no knob of the
- *   panel, which no state of the knobs ever matches
+ * @returns its value, its default while its control has none; `null` for an id
+ *   which is no knob of the panel, which no state of the knobs ever matches
  */
-function drawnValues(id: string, answer: SimulateResponse): number[] {
-  const axis = answer.dims.find((one) => one.id === id)
-  if (axis !== undefined) {
-    return Array.isArray(axis.values) ? axis.values : []
-  }
+function drawnValue(id: string): number | null {
   const knob = axes.value.find((one) => one.id === id)
   if (knob === undefined) {
-    return []
+    return null
   }
   const value = values.value[id]
-  return [value === undefined || !Number.isFinite(value) ? knob.default : value]
+  return value === undefined || !Number.isFinite(value) ? knob.default : value
 }
 
 /**
@@ -735,17 +733,16 @@ function drawnValues(id: string, answer: SimulateResponse): number[] {
  *
  * @param declared the declaration of the series, `undefined` for a series the
  *   declaration does not carry
- * @param answer the run which is drawn
- * @returns whether every knob the series names is drawn at the value it names;
- *   a series which names none is at every state
+ * @returns whether every knob the series names is at the value it names; a
+ *   series which names none is at every state
  */
-function atState(declared: PanelDataDeclaration | undefined, answer: SimulateResponse): boolean {
+function atState(declared: PanelDataDeclaration | undefined): boolean {
   const state: unknown = declared?.at
   if (typeof state !== 'object' || state === null) {
     return true
   }
-  return Object.entries(state as Record<string, unknown>).every(([id, value]) =>
-    drawnValues(id, answer).includes(value as number),
+  return Object.entries(state as Record<string, unknown>).every(
+    ([id, value]) => drawnValue(id) === (value as number),
   )
 }
 
@@ -781,7 +778,7 @@ const resolvedData = computed<ResolvedData>(() => {
   const drawn: Points[] = []
   const dropped: DroppedSeries[] = []
   for (const one of seriesOf(study.value)) {
-    if (!atState(declared.get(one.id), answer)) {
+    if (!atState(declared.get(one.id))) {
       continue
     }
     const curve = declared.get(one.id)?.curve ?? one.id

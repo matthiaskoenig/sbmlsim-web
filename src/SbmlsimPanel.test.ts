@@ -1322,14 +1322,22 @@ describe('the study data under the curves', () => {
     expect(figure(element)).not.toContain('class="points"')
   })
 
-  it('draws a series of a state of a knob the run grids over, at every point of it', async () => {
-    // the run covers every choice of the knob it grids over, so the data of
-    // one of them is drawn next to the line of that choice
+  it('draws a series of a state of the knob the run grids over only at that choice', async () => {
+    // a grid is the points a movement is read between and not a family of
+    // curves: the figure draws the one line of the choice the knob is at, so
+    // the data of another choice is drawn only once the reader picks it
+    vi.useFakeTimers()
     served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 12.5 } }))
     served.simulate = () => Promise.resolve(choiceRun())
     const element = await started()
+    expect(figure(element)).not.toContain('class="points"')
+    move(control(element, 'knobA'), '12.5', 'change')
+    await nextTick()
     expect(figure(element)).toContain('class="points" data-series="seriesA"')
-    // a value which is no point of that axis is drawn nowhere
+    // the move was read out of the grid, so the figure it is drawn on is the
+    // one the first run answered
+    expect(simulations()).toHaveLength(1)
+    // a value which is no choice of that knob is drawn nowhere
     served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 50 } }))
     expect(figure(await started())).not.toContain('class="points"')
   })

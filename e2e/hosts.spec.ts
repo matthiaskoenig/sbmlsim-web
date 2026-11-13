@@ -50,10 +50,15 @@ test.describe('the element works on every host', () => {
       const before = await curves(panel)
       expect(before).not.toBe('')
 
-      const knob = panel.locator('input[type=range]').first()
+      // the first control of the panel, which is the knob the run grids over:
+      // a slider on the deck, a select on the two pages of the renal panel.
+      // `Home` is its lowest value, which both kinds of control take and which
+      // the figure must show: a step of the dose slider does not move a pixel,
+      // since the axis is scaled to the data and the model is nearly linear in
+      // the dose, so the curve of a smaller dose is the same curve
+      const knob = panel.locator('input[type=range], select').first()
       await knob.focus()
-      await page.keyboard.press('ArrowLeft')
-      await page.keyboard.press('ArrowLeft')
+      await page.keyboard.press('Home')
       await expect.poll(() => curves(panel)).not.toBe(before)
       // a move of the gridded knob is read out of the grid which is drawn, and
       // the pause is longer than the debounce of a release
@@ -81,6 +86,7 @@ test.describe('the slides', () => {
   test('a mouse drag moves the knob and leaves the slide', async ({ page }) => {
     await open(page, 'slides.html')
     const knob = page.locator('sbmlsim-panel input[type=range]').first()
+    const before = await knob.inputValue()
     const box = await knob.boundingBox()
     if (box === null) {
       throw new Error('the knob has no box')
@@ -91,7 +97,7 @@ test.describe('the slides', () => {
     await page.mouse.move(box.x + box.width * 0.1, y, { steps: 8 })
     await page.mouse.up()
     expect(await slideIndex(page)).toBe(1)
-    expect(await knob.inputValue()).not.toBe('1')
+    expect(await knob.inputValue()).not.toBe(before)
   })
 
   test('the panel is readable on a dark reveal theme', async ({ page }) => {

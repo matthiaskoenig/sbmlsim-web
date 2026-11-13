@@ -35,18 +35,22 @@
     <div class="reveal">
       <div class="slides">
         <section>
-          <h2>Hydrochlorothiazide in renal impairment</h2>
+          <h2>Hydrochlorothiazide</h2>
           <p>Use the arrow keys to move between slides.</p>
         </section>
         <section id="panel-slide">
           <!--
             A touch on a knob must not turn the page, so the element is marked
-            for reveal.js, which ignores the swipes which start on it.
+            for reveal.js, which ignores the swipes which start on it. The deck
+            shows the panel of the dose, whose knobs are a slider and a select,
+            because a drag and the arrow keys on a slider are what a deck has to
+            keep to the knob; the panel with the study data is on the other two
+            hosts.
           -->
           <sbmlsim-panel
             endpoint=""
             model="hctz"
-            panel="renal"
+            panel="dose_plasma"
             heading-level="3"
             data-prevent-swipe
           ></sbmlsim-panel>
