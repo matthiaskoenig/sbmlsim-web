@@ -70,8 +70,19 @@ describe('the bundle a page loads', () => {
     expect(library.register()).toBe(false)
   })
 
+  it('carries the same library as one script tag with the global of a page', () => {
+    // the page of a course platform loads this file, which a static server
+    // serves as a script where it serves a `.cjs` file as a download
+    const context: Record<string, unknown> = { console }
+    createContext(context)
+    runInNewContext(built('sbmlsim-web.iife.js'), context)
+    const library = context.sbmlsimWeb as Library
+    expect(library.PANEL_TAG).toBe('sbmlsim-panel')
+    expect(typeof library.SbmlsimPanelElement).toBe('function')
+  })
+
   it('leaves nothing of the bundler behind for a browser to trip over', () => {
-    for (const name of ['sbmlsim-web.js', 'sbmlsim-web.umd.cjs']) {
+    for (const name of ['sbmlsim-web.js', 'sbmlsim-web.umd.cjs', 'sbmlsim-web.iife.js']) {
       expect(built(name)).not.toMatch(/\bprocess\s*\.\s*env\b/)
     }
   })

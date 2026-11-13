@@ -595,6 +595,19 @@ describe('the declaration and the controls', () => {
     expect(part(element, '.knob-value').getAttribute('aria-live')).toBe('off')
   })
 
+  it('keeps the keys a knob uses from the page and lets every other key through', async () => {
+    // a deck which turns its slide on an arrow key reads the element and not
+    // the knob as the target of the key, so the knob has to keep its keys
+    const element = await started()
+    const knob = part(element, 'input[type=range]')
+    const seen: string[] = []
+    document.addEventListener('keydown', (event) => seen.push(event.key))
+    for (const key of ['ArrowLeft', 'Home', 'n']) {
+      knob.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, composed: true }))
+    }
+    expect(seen).toEqual(['n'])
+  })
+
   it('puts the value a knob starts at on the ladder of its step', async () => {
     // a browser snaps a control to the nearest value of the ladder its step
     // builds, so a default which is not on it is a figure of one value next

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sbmlsim-web on a plain page</title>
+  </head>
+  <body>
+    <!--
+      The page of a course platform or a file share: one script tag, one element
+      tag and the call which starts the panel. Nothing is built, bundled or
+      served from anywhere but this directory and the endpoint, which here is the
+      origin of the page itself.
+    -->
+    <script src="../dist/sbmlsim-web.iife.js"></script>
+    <sbmlsim-panel endpoint="" model="hctz" panel="renal"></sbmlsim-panel>
+    <script>
+      document.querySelector('sbmlsim-panel').activate()
+    </script>
+  </body>
+</html>

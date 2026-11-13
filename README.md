@@ -67,11 +67,16 @@ npm ci
 npm run lint       # eslint and prettier
 npm test           # vitest
 npm run typecheck  # the whole project, the tests included
-npm run build      # dist/sbmlsim-web.js (ESM), dist/sbmlsim-web.umd.cjs (UMD), dist/types
+npm run build      # dist/sbmlsim-web.js (ESM), .umd.cjs (UMD), .iife.js (IIFE), dist/types
+npm run e2e        # the demo pages in Chrome against a live endpoint, see below
 npm run format     # write what prettier wants
 ```
 
-Vue is bundled into both builds, so a host page needs nothing else: it reads `dist/sbmlsim-web.js` with a `<script type="module">` or through a bundler, and `dist/sbmlsim-web.umd.cjs` is the same library for a `require` and for a page which wants the `sbmlsimWeb` global.
+Vue is bundled into every build, so a host page needs nothing else: it reads `dist/sbmlsim-web.js` with a `<script type="module">` or through a bundler, `dist/sbmlsim-web.umd.cjs` is the same library for a `require`, and `dist/sbmlsim-web.iife.js` is the one for a page which wants the `sbmlsimWeb` global from a plain `<script src>`, which a static server serves as a script where it serves a `.cjs` file as a download.
+
+## The demo pages and the end to end tests
+
+`demo/` has the three hosts the element is tested on: `plain.html` (one script tag and one element tag, the page of a course platform), `slides.html` (reveal.js on a dark theme, which activates a panel when its slide is shown and freezes it when it is left) and `docs.md` (a raw HTML block in a markdown page, which `scripts/stage-demo.mjs` renders to `docs.html` for the tests). `npm run e2e` stages them and serves them with the endpoint of the python package, `python -m sbmlsim.serve --static`, so a page and its API are one origin, and drives the installed Chrome through playwright. The endpoint is the checkout in `SBMLSIM_REPO` (`../sbmlsim` without), serving `examples.panels.hctz:PROJECT`; where there is no such checkout the command says that it skipped and exits 0.
 
 ## License
 

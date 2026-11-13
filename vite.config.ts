@@ -1,12 +1,16 @@
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vitest/config'
 
-// The library is built twice: an ES module, which a bundler and a
-// `<script type="module">` of a page read, and a UMD bundle for a `require` and
-// for a page which wants the global. The package is `"type": "module"`, so the
-// UMD bundle is a `.cjs` file, which is what makes `require` of it work. Vue is
-// bundled into both, so a host page (the documentation, a slide deck, a course)
-// needs nothing else.
+// The library is built three times: an ES module, which a bundler and a
+// `<script type="module">` of a page read, a UMD bundle for a `require`, and an
+// IIFE bundle for a page which wants the global `sbmlsimWeb` from one plain
+// `<script src>`. The package is `"type": "module"`, so the UMD bundle is a
+// `.cjs` file, which is what makes `require` of it work, and which a naive
+// static server (a course platform, a file share) serves as
+// `application/octet-stream`, which a browser refuses to run as a script; the
+// IIFE bundle is a `.js` file for exactly that page. Vue is bundled into all of
+// them, so a host page (the documentation, a slide deck, a course) needs
+// nothing else.
 //
 // The build replaces what the esm-bundler build of vue leaves to its bundler:
 // `process.env.NODE_ENV`, which no page defines and which a bundle that reads
@@ -34,8 +38,17 @@ export default defineConfig(({ command }) => ({
     lib: {
       entry: 'src/index.ts',
       name: 'sbmlsimWeb',
-      formats: ['es', 'umd'],
-      fileName: (format) => (format === 'es' ? 'sbmlsim-web.js' : 'sbmlsim-web.umd.cjs'),
+      formats: ['es', 'umd', 'iife'],
+      fileName: (format) => {
+        switch (format) {
+          case 'es':
+            return 'sbmlsim-web.js'
+          case 'iife':
+            return 'sbmlsim-web.iife.js'
+          default:
+            return 'sbmlsim-web.umd.cjs'
+        }
+      },
     },
   },
   test: {

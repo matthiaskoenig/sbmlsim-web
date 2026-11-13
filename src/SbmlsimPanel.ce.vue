@@ -1533,6 +1533,40 @@ function onChange(axis: PanelAxis, event: Event): void {
   schedule(axis.id)
 }
 
+/** The keys a range input and a select act on themselves. */
+const CONTROL_KEYS = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+])
+
+/**
+ * Keep the keys a knob acts on to the knob.
+ *
+ * A key event leaves the shadow root retargeted at the element, so a host which
+ * decides on the target - reveal.js skips a key whose active element is an
+ * `input` - sees the element and not the knob, and a deck would turn the slide
+ * under a reader who moves a knob with the arrow keys. The event stops here
+ * instead, at the knob, and only for the keys the knob uses: every other key
+ * reaches the host as it does without the element.
+ *
+ * @param event the `keydown` event of the controls
+ */
+function onControlKey(event: KeyboardEvent): void {
+  const target = event.target
+  const isControl =
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLInputElement && target.type === 'range')
+  if (isControl && CONTROL_KEYS.has(event.key)) {
+    event.stopPropagation()
+  }
+}
+
 /**
  * Read the size of the font the readout is drawn in, in pixels.
  *
@@ -1715,7 +1749,12 @@ defineExpose({ activate, freeze, reset })
       <p v-if="subtitle !== ''" class="subtitle">{{ subtitle }}</p>
     </header>
     <div class="body">
-      <div class="controls" role="group" aria-label="Simulation settings">
+      <div
+        class="controls"
+        role="group"
+        aria-label="Simulation settings"
+        @keydown="onControlKey($event)"
+      >
         <div v-for="axis of axes" :key="axis.id" class="knob">
           <label class="knob-label" :for="controlId(axis)">{{ knobLabel(axis) }}</label>
           <div v-if="axis.kind === 'range'" class="knob-row">

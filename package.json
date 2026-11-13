@@ -23,20 +23,25 @@
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint . && prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "vue": "3.5.45"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.65.0",
+    "@types/node": "26.6.6",
     "@vitejs/plugin-vue": "6.0.11",
     "eslint": "10.14.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-vue": "10.12.1",
     "globals": "17.14.0",
     "happy-dom": "21.0.4",
+    "marked": "18.2.0",
     "prettier": "3.10.1",
+    "reveal.js": "6.0.2",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.2",
     "vite": "8.3.8",
