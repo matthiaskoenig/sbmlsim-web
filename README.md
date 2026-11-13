@@ -35,23 +35,24 @@ A page writes one tag and calls `activate()` on it:
 </script>
 ```
 
-| attribute  | what it is                                                                                                            |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| `endpoint` | the service the panel talks to; empty is the origin of the page, which is the teaching mode                           |
-| `model`    | the id of the model, as the endpoint serves it                                                                        |
-| `panel`    | the id of the panel of that model                                                                                     |
-| `layout`   | `auto` (the default, the controls beside the figure above 560 px and under it below), `sidebar`, `stacked`, `toolbar` |
-| `theme`    | `auto` (the default, `prefers-color-scheme`), `light`, `dark`                                                         |
-| `fallback` | the url of a stored answer of a run, drawn when the endpoint does not answer                                          |
-| `timeout`  | the milliseconds one request is given, 8000 without                                                                   |
+| attribute       | what it is                                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | the service the panel talks to; empty is the origin of the page, which is the teaching mode                           |
+| `model`         | the id of the model, as the endpoint serves it                                                                        |
+| `panel`         | the id of the panel of that model                                                                                     |
+| `layout`        | `auto` (the default, the controls beside the figure above 560 px and under it below), `sidebar`, `stacked`, `toolbar` |
+| `theme`         | `auto` (the default, `prefers-color-scheme`), `light`, `dark`                                                         |
+| `fallback`      | the url of a stored answer of a run, drawn when the endpoint does not answer                                          |
+| `timeout`       | the milliseconds one request is given, 8000 without                                                                   |
+| `heading-level` | the level the title of the panel is drawn at, 2 without; a page writes the level below its own heading here           |
 
 `activate()` starts it, `freeze()` stops every pending request and freezes the knobs, and `reset()` puts the knobs back to the values the declaration states. Nothing is fetched and nothing is drawn before `activate()`, so a slide deck or a long page mounts its panels lazily. The element registers itself on import under `sbmlsim-panel`; `register(tagName)` gives it another tag.
 
-**A request grids over at most one knob.** The first run grids over the first `range` knob of the panel at its declared `steps`, with every other knob at its default, and while that knob moves every movement is read out of the grid locally: five moves of it are no request at all. Releasing any other knob schedules one run which grids over **that** knob instead and holds the one which was gridded before at the value it now has, so the knob a reader is working with is always the one which costs nothing. An `input` event interpolates and redraws, a `change` event schedules a run, and a scheduled run which is superseded is cancelled rather than raced.
+**A request grids over at most one knob.** The first run grids over the first `range` knob of the panel at its declared `steps`, with every other knob at its default, and while that knob moves every movement is read out of the grid locally: five moves of it are no request at all. Releasing any other knob schedules one run which grids over **that** knob instead and holds the one which was gridded before at the value it now has, so the knob a reader is working with is always the one which costs nothing. An `input` event interpolates and redraws, a `change` event schedules a run, and a scheduled run which is superseded is cancelled rather than raced. The knob which counts as the gridded one is the knob the run which is scheduled or in flight grids over and not the one the last answer gridded over, so a knob released while a run is on its way gets a run of its own instead of a figure which contradicts it.
 
 **Nothing rejects into the page.** A dead network, a slow endpoint, a refused request, a payload of another contract version and a body which cannot be read are all caught inside the element, retried once where that can help, and resolved into the stored result with frozen knobs and one line a reader can act on. The line names no url and no host. The element also dispatches `sbmlsim-error` (`{detail: {kind, message}}`, bubbling and composed) so a page can react. The stored result is fetched on `activate()` next to the declaration and not when a request fails, because an endpoint which cannot be reached cannot serve a fallback either.
 
-The element has a shadow root, so the styles of the host page cannot reach it and it cannot leak into the page; the `--sbmlsim-*` tokens, which `theme.css` declares on `:host` as well as on `:root`, are the one hook from outside.
+The element has a shadow root, so the styles of the host page cannot reach it and it cannot leak into the page; the `--sbmlsim-*` tokens are the one hook from outside, and they work from the element and from anything above it. The element declares no token of its own on its host: it reads every one of them into a private token with the value of the design as the fallback, so a documentation theme, the dark switch of a slide deck or a branded container which sets `--sbmlsim-accent` on a wrapper is what the panel takes. A rule of the page which matches the element itself wins over all of it, `theme="light"` and `theme="dark"` come next as the explicit opt-in they are, then an ancestor, then `prefers-color-scheme`, then the table of `theme.css`. Nothing of the typography and nothing of the colour of the panel is declared on the host either, because a declaration of the page which matches the element, `* { font-family: ... }` among them, beats one of the shadow tree there and everything in the panel would inherit it.
 
 ## Build
 

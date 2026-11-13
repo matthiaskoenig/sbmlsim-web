@@ -470,39 +470,69 @@ function linearTicks(limits: Limits, count: number): number[] {
 }
 
 /**
+ * Get the values of a ladder of steps per decade inside limits.
+ *
+ * @param limits the limits of the axis, both positive
+ * @param steps the steps of one decade, e.g. 1, 2 and 5
+ * @returns the values of the ladder inside the limits, in their order
+ */
+function decadeLadder(limits: Limits, steps: number[]): number[] {
+  const values: number[] = []
+  const first = Math.floor(Math.log10(limits.low))
+  const last = Math.ceil(Math.log10(limits.high))
+  for (let exponent = first; exponent <= last && values.length < 1000; exponent += 1) {
+    for (const step of steps) {
+      const value = step * 10 ** exponent
+      if (value >= limits.low * (1 - 1e-9) && value <= limits.high * (1 + 1e-9)) {
+        values.push(value)
+      }
+    }
+  }
+  return values
+}
+
+/**
  * Get the ticks of a logarithmic axis.
  *
- * The ticks are the 1, 2 and 5 of every decade the limits cover; above `count`
- * of them the decades alone, and above `count` decades every k-th of them.
+ * The ticks are the finest of three ladders which is no longer than the axis
+ * asked for: the 1, 2 and 5 of every decade, the 1 and the 3 of every decade,
+ * and the decades alone, of which every k-th is taken when even those are too
+ * many. The rung of the 1 and the 3 is what an axis of two to three decades
+ * needs: its full ladder is seven or eight values and its decades are two or
+ * three, so an axis as tall as a figure would otherwise carry two labels. For
+ * the same reason a ladder of fewer than `LEAST_TICKS` values gives way to the
+ * next finer one, which carries more labels than were asked for and is the
+ * better of the two.
  *
  * @param limits the limits of the axis, both positive
  * @param count how many ticks are wanted
  * @returns the ticks inside the limits, in their order
  */
 function logTicks(limits: Limits, count: number): number[] {
-  const ladder: { value: number; decade: boolean }[] = []
-  const first = Math.floor(Math.log10(limits.low))
-  const last = Math.ceil(Math.log10(limits.high))
-  for (let exponent = first; exponent <= last && ladder.length < 1000; exponent += 1) {
-    for (const step of [1, 2, 5]) {
-      const value = step * 10 ** exponent
-      if (value >= limits.low * (1 - 1e-9) && value <= limits.high * (1 + 1e-9)) {
-        ladder.push({ value, decade: step === 1 })
-      }
-    }
+  const ladders = [
+    decadeLadder(limits, [1, 2, 5]),
+    decadeLadder(limits, [1, 3]),
+    decadeLadder(limits, [1]),
+  ].filter((one) => one.length > 0)
+  let index = 0
+  while (index < ladders.length - 1 && (ladders[index]?.length ?? 0) > count) {
+    index += 1
   }
-  if (ladder.length === 0) {
+  const fitted = ladders[index]
+  if (fitted === undefined) {
     return [limits.low, limits.high]
   }
-  if (ladder.length <= count) {
-    return ladder.map((one) => one.value)
+  if (fitted.length < LEAST_TICKS) {
+    const finer = ladders[index - 1]
+    if (finer !== undefined) {
+      return finer
+    }
   }
-  const decades = ladder.filter((one) => one.decade)
-  if (decades.length === 0) {
-    return [ladder[0]?.value ?? limits.low]
+  if (fitted.length <= count) {
+    return fitted
   }
-  const every = Math.max(1, Math.ceil(decades.length / count))
-  return decades.filter((_, index) => index % every === 0).map((one) => one.value)
+  const every = Math.max(1, Math.ceil(fitted.length / count))
+  return fitted.filter((_, at) => at % every === 0)
 }
 
 /**

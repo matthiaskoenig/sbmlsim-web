@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
-import type { PanelDeclaration, SimulateRequest, SimulateResponse } from './contract'
+import type { PanelAxis, PanelDeclaration, SimulateRequest, SimulateResponse } from './contract'
 import { PANEL_TAG, register } from './index'
 
 // The element runs in a dom, which is `happy-dom` for this file alone: every
@@ -27,6 +27,22 @@ interface Call {
   url: string
   /** The body of a POST, `null` for a GET. */
   body: SimulateRequest | null
+}
+
+/** The range knob of the declaration, the one a grid runs over by default. */
+function knob(): PanelAxis {
+  return {
+    id: 'knobB',
+    label: 'knob B',
+    target: 'targetB',
+    unit: 'dimensionless',
+    kind: 'range',
+    min: 0.2,
+    max: 1,
+    steps: 3,
+    choices: [],
+    default: 1,
+  }
 }
 
 /** The declaration every test starts from: a choice knob and a range knob. */
@@ -55,18 +71,7 @@ function declaration(): PanelDeclaration {
         ],
         default: 25,
       },
-      {
-        id: 'knobB',
-        label: 'knob B',
-        target: 'targetB',
-        unit: 'dimensionless',
-        kind: 'range',
-        min: 0.2,
-        max: 1,
-        steps: 3,
-        choices: [],
-        default: 1,
-      },
+      knob(),
     ],
     curves: [
       { id: 'curveA', label: 'curve A', unit: 'uM', scale: 'linear' },
@@ -219,27 +224,50 @@ function move(target: HTMLInputElement | HTMLSelectElement, value: string, kind:
 }
 
 /** Put an element of the library in the page, with the attributes a host writes. */
-async function mount(attributes: Record<string, string> = {}): Promise<PanelElement> {
+async function mount(
+  attributes: Record<string, string> = {},
+  parent: HTMLElement = document.body,
+): Promise<PanelElement> {
   const element = document.createElement(PANEL_TAG) as PanelElement
   for (const [name, value] of Object.entries(attributes)) {
     element.setAttribute(name, value)
   }
-  document.body.append(element)
+  parent.append(element)
   await nextTick()
   return element
 }
 
 /** Put an element in the page and start it. */
-async function started(attributes: Record<string, string> = {}): Promise<PanelElement> {
-  const element = await mount({
-    endpoint: '/api-root',
-    model: 'modelA',
-    panel: 'panelA',
-    ...attributes,
-  })
+async function started(
+  attributes: Record<string, string> = {},
+  parent: HTMLElement = document.body,
+): Promise<PanelElement> {
+  const element = await mount(
+    { endpoint: '/api-root', model: 'modelA', panel: 'panelA', ...attributes },
+    parent,
+  )
   await element.activate()
   await nextTick()
   return element
+}
+
+/** Get one part of the panel, which has to be there. */
+function part(element: PanelElement, selector: string): Element {
+  const found = shadow(element).querySelector(selector)
+  if (found === null) {
+    throw new Error(`the panel has no '${selector}'`)
+  }
+  return found
+}
+
+/** Put a container in the page which carries tokens of its own. */
+function branded(tokens: Record<string, string>): HTMLElement {
+  const container = document.createElement('div')
+  for (const [name, value] of Object.entries(tokens)) {
+    container.style.setProperty(name, value)
+  }
+  document.body.append(container)
+  return container
 }
 
 /** Report a width to every observer the element created. */
@@ -292,6 +320,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  document.head.innerHTML = ''
   document.body.innerHTML = ''
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -343,6 +372,41 @@ describe('the declaration and the controls', () => {
     expect(footer).toContain(HASH.slice(0, 8))
     expect(footer).not.toContain(HASH.slice(0, 9))
     expect(footer).toContain('0.079 s')
+  })
+
+  it('draws the title at the level of heading the page asks for', async () => {
+    expect(shadow(await started()).querySelector('h2.title')).not.toBeNull()
+    expect(shadow(await started({ 'heading-level': '3' })).querySelector('h3.title')).not.toBeNull()
+  })
+
+  it('leaves the value of a knob to its slider to announce', async () => {
+    // an `output` is a live region of its own, which would announce every
+    // step of a drag next to what the slider announces itself
+    const element = await started()
+    expect(part(element, '.knob-value').getAttribute('aria-live')).toBe('off')
+  })
+
+  it('puts the value a knob starts at on the ladder of its step', async () => {
+    // a browser snaps a control to the nearest value of the ladder its step
+    // builds, so a default which is not on it is a figure of one value next
+    // to a control and a screen reader of another
+    for (const bounds of [
+      { min: 0.2, max: 2, default: 1 },
+      { min: 0, max: 1, default: 1 / 3 },
+    ]) {
+      served.panel = () => {
+        const declared = declaration()
+        return Promise.resolve({
+          ...declared,
+          axes: [{ ...knob(), ...bounds }],
+        })
+      }
+      const slider = control(await started(), 'knobB')
+      const step = Number(slider.getAttribute('step'))
+      const steps = (bounds.default - bounds.min) / step
+      expect(step).toBeGreaterThan(0)
+      expect(Math.abs(steps - Math.round(steps))).toBeLessThan(1e-6)
+    }
   })
 
   it('resets the knobs to the declared defaults', async () => {
@@ -401,33 +465,66 @@ describe('one request per release, never one per movement', () => {
   it('drops the answer of a request which is no longer the latest one', async () => {
     vi.useFakeTimers()
     let release = (): void => {
-      // replaced by the first run over the choice knob, resolved last on purpose
+      // replaced by the run over the choice knob, which answers last on purpose
     }
-    let over = 0
+    let runs = 0
     served.simulate = (body) => {
-      if (body.grid?.knobA === undefined) {
-        return Promise.resolve(run())
+      runs += 1
+      if (body.grid?.knobA !== undefined) {
+        // the run over the choice knob ignores the stop which supersedes it,
+        // so its answer arrives after the answer of the run which did
+        return new Promise((resolve) => {
+          release = () => {
+            resolve(run('knobA', undefined, 'stale000stale000'))
+          }
+        })
       }
-      over += 1
-      if (over > 1) {
-        return Promise.resolve(run('knobA', undefined, 'fresh000fresh000'))
-      }
-      return new Promise((resolve) => {
-        release = () => {
-          resolve(run('knobA', undefined, 'stale000stale000'))
-        }
-      })
+      return Promise.resolve(run('knobB', undefined, runs === 1 ? HASH : 'fresh000fresh000'))
     }
     const element = await started()
     move(control(element, 'knobA'), '12.5', 'change')
     await vi.advanceTimersByTimeAsync(500)
-    move(control(element, 'knobA'), '25', 'change')
+    move(control(element, 'knobB'), '0.4', 'change')
     await vi.advanceTimersByTimeAsync(500)
     release()
     await vi.advanceTimersByTimeAsync(500)
     await nextTick()
     expect(textOf(element, '.provenance')).toContain('fresh000')
     expect(textOf(element, '.provenance')).not.toContain('stale000')
+  })
+
+  it('simulates a knob which is released while a run is in flight', async () => {
+    vi.useFakeTimers()
+    let release = (): void => {
+      // replaced by the run over the choice knob, which is held in flight
+    }
+    served.simulate = (body) => {
+      if (body.grid?.knobA === undefined) {
+        return Promise.resolve(run())
+      }
+      return new Promise((resolve) => {
+        release = () => {
+          resolve(run('knobA'))
+        }
+      })
+    }
+    const element = await started()
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    // the grid of the run in flight covers the choice knob and not the range
+    // knob, so releasing the range knob now has to run again over it; the knob
+    // the last answer gridded over is not the one to compare against
+    move(control(element, 'knobB'), '0.4', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    release()
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations()).toEqual([
+      { values: { knobA: 25 }, grid: { knobB: 3 } },
+      { values: { knobB: 1 }, grid: { knobA: 2 } },
+      { values: { knobA: 12.5 }, grid: { knobB: 3 } },
+    ])
+    expect(control(element, 'knobB').value).toBe('0.4')
   })
 })
 
@@ -462,6 +559,26 @@ describe('the layout and the theme', () => {
     element.style.setProperty('--sbmlsim-ramp-1', 'rgb(1 2 3)')
     expect(getComputedStyle(element).getPropertyValue('--sbmlsim-ramp-1')).toBe('rgb(1 2 3)')
     expect(figure(element)).toContain('var(--sbmlsim-ramp-1')
+  })
+
+  it('takes a token from a container of the page and not only from the element', async () => {
+    const container = branded({ '--sbmlsim-fg': 'rgb(1 2 3)' })
+    // a panel which declared the public tokens on its host would mask the
+    // container, because a declaration beats what an element inherits
+    const inside = await started({}, container)
+    expect(getComputedStyle(part(inside, '.panel')).color).toBe('rgb(1 2 3)')
+    const outside = await started()
+    expect(getComputedStyle(part(outside, '.panel')).color).toBe('rgb(27 31 36)')
+  })
+
+  it('keeps a rule of the page which matches the element out of the panel', async () => {
+    // a declaration of the page beats one of the shadow tree on the host, so
+    // a panel which carried its typography there would hand the page every
+    // element in it by inheritance
+    document.head.innerHTML = '<style>* { font-family: cursive; color: rgb(255 0 0); }</style>'
+    const element = await started()
+    expect(getComputedStyle(part(element, '.panel')).color).not.toBe('rgb(255 0 0)')
+    expect(getComputedStyle(part(element, '.knob-label')).fontFamily).not.toContain('cursive')
   })
 
   it('draws without a ResizeObserver and never throws where there is none', async () => {
@@ -510,6 +627,30 @@ describe('the figure', () => {
   })
 })
 
+describe('a payload which cannot be read', () => {
+  it('shows the error line and never a blank element for a knob it cannot read', async () => {
+    served.panel = () => Promise.resolve({ ...declaration(), axes: [null] })
+    const element = await started({ fallback: './stored.json' })
+    expect(shadow(element).querySelector('.panel')).not.toBeNull()
+    expect(textOf(element, '.error')).not.toBe('')
+    expect(figure(element)).toContain('<svg')
+    expect(textOf(element, '.provenance')).toContain('stored')
+  })
+
+  it('leaves out a knob it cannot draw and keeps the rest of the panel', async () => {
+    served.panel = () => {
+      const declared = declaration()
+      // the guard of the client takes an object with an id for a knob, so
+      // this one reaches the element and is no control it can build
+      return Promise.resolve({ ...declared, axes: [...declared.axes, { id: 'knobC' }] })
+    }
+    const element = await started()
+    expect(shadow(element).querySelectorAll('.knob')).toHaveLength(2)
+    expect(textOf(element, '.error')).toBe('')
+    expect(figure(element)).toContain('<svg')
+  })
+})
+
 describe('a failure never reaches the page', () => {
   it('shows the stored result, an error and frozen controls when the endpoint is unreachable', async () => {
     served.panel = unreachable
@@ -534,11 +675,15 @@ describe('a failure never reaches the page', () => {
     expect(seen.map((one) => one.kind)).toEqual(['network'])
   })
 
-  it('freezes every knob when a simulation fails', async () => {
+  it('freezes every control when a simulation fails', async () => {
     served.simulate = unreachable
     const element = await started()
     expect(control(element, 'knobA').disabled).toBe(true)
     expect(control(element, 'knobB').disabled).toBe(true)
+    // the frozen controls are drawn as dead, so none of them may still work
+    for (const one of shadow(element).querySelectorAll('input, select, button')) {
+      expect(one.getAttribute('disabled')).not.toBeNull()
+    }
     expect(textOf(element, '.error')).not.toBe('')
   })
 

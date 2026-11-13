@@ -8,22 +8,35 @@
  * another notation: a figure carries its tokens with their values as fallbacks,
  * and a test of the renderer greps the output for a hard coded `#rrggbb`.
  *
- * Every token is overridable from outside. A host which loads this file sets
- * its own value on the element it draws a panel in, e.g.
- * `.my-figure { --sbmlsim-accent: rgb(0 0 0); }`, which wins over the rules
- * below whether the panel is in the page or in a shadow root; a page which
- * never loads this file still gets these values, because they are the
- * fallbacks of the `var()` of every figure.
+ * ## Every token is overridable from outside, from anywhere above the panel
  *
- * The dark values follow `prefers-color-scheme`, as the reports do. A host with
- * a switch of its own (a documentation theme, a slide deck) sets the tokens
- * under its own selector the same way, and an element which carries
- * `theme="light"` or `theme="dark"` takes those values whatever the system
- * says: the media query leaves a `theme="light"` host alone and the last block
- * of this file puts the dark values on a `theme="dark"` host.
+ * A declaration on `:host` beats what the host inherits from the page, so an
+ * element which declared the tokens there would ignore a page which themes a
+ * region - a documentation theme, the dark mode of a slide deck, a branded
+ * container - and would only listen to a rule which matches the element
+ * itself. The element therefore declares no `--sbmlsim-*` token on its host at
+ * all. It declares one private token per public one,
+ * `--_fg: var(--sbmlsim-fg, <the value of this table>)`, which only *reads*
+ * the public one, so a value from anywhere above the panel wins and the table
+ * below is the fallback; the panel then re-exports the private tokens under
+ * the public names inside its shadow root (`.panel` of `SbmlsimPanel.ce.vue`),
+ * so the figure, which writes `var(--sbmlsim-ramp-1, ...)` itself, sees the
+ * same values.
+ *
+ * The `:root` block is the same table for a page which loads this file
+ * (`sbmlsim-web/theme.css`) to set a baseline of its own, and for the elements
+ * of a report which are no panel.
+ *
+ * ## Which value wins
+ *
+ * A rule of the page which matches the element itself wins over everything
+ * below, because a declaration of the outer tree beats one of the inner tree
+ * on the host. `theme="light"` and `theme="dark"` come next: they are an
+ * explicit opt-in of the page, so they set the public tokens on the host and
+ * win over an ancestor. An ancestor of the element comes next, then
+ * `prefers-color-scheme`, then this table.
  */
 
-:host,
 :root {
   /* surfaces and text */
   --sbmlsim-bg: rgb(255 255 255);
@@ -79,7 +92,6 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :host(:not([theme='light'])),
   :root {
     --sbmlsim-bg: rgb(20 23 28);
     --sbmlsim-bg-soft: rgb(26 30 36);
@@ -110,11 +122,116 @@
 }
 
 /*
- * The dark values on a host which asks for them, whatever the system says.
- * They are the same values as above: a custom property has no mixin, so the
- * one table which is written twice is the price of an element a page can put
- * into dark on its own.
+ * The private tokens of the panel: the table above, read through the public
+ * token of each, so that a value set anywhere above the element wins and
+ * nothing of this file is declared on the host under a public name.
  */
+:host {
+  --_bg: var(--sbmlsim-bg, rgb(255 255 255));
+  --_figure-bg: var(--sbmlsim-figure-bg, transparent);
+  --_bg-soft: var(--sbmlsim-bg-soft, rgb(246 247 249));
+  --_bg-card: var(--sbmlsim-bg-card, rgb(255 255 255));
+  --_fg: var(--sbmlsim-fg, rgb(27 31 36));
+  --_fg-soft: var(--sbmlsim-fg-soft, rgb(91 100 114));
+  --_line: var(--sbmlsim-line, rgb(227 230 234));
+  --_accent: var(--sbmlsim-accent, rgb(59 91 219));
+
+  --_training: var(--sbmlsim-training, rgb(47 158 68));
+  --_validation: var(--sbmlsim-validation, rgb(28 126 214));
+  --_outlier: var(--sbmlsim-outlier, rgb(232 89 12));
+  --_excluded: var(--sbmlsim-excluded, rgb(134 142 150));
+
+  --_radius: var(--sbmlsim-radius, 10px);
+  --_shadow: var(--sbmlsim-shadow, 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%));
+
+  --_font: var(
+    --sbmlsim-font,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+  --_font-mono: var(--sbmlsim-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  --_font-size: var(--sbmlsim-font-size, 12px);
+  --_font-size-small: var(--sbmlsim-font-size-small, 11px);
+
+  --_axis-width: var(--sbmlsim-axis-width, 1px);
+  --_curve-width: var(--sbmlsim-curve-width, 1.8px);
+  --_data-width: var(--sbmlsim-data-width, 1px);
+
+  --_ramp-1: var(--sbmlsim-ramp-1, rgb(68 1 84));
+  --_ramp-2: var(--sbmlsim-ramp-2, rgb(68 58 131));
+  --_ramp-3: var(--sbmlsim-ramp-3, rgb(48 106 142));
+  --_ramp-4: var(--sbmlsim-ramp-4, rgb(32 146 140));
+  --_ramp-5: var(--sbmlsim-ramp-5, rgb(59 187 117));
+  --_ramp-6: var(--sbmlsim-ramp-6, rgb(155 217 60));
+}
+
+/*
+ * The dark values of the private tokens, which are the fallbacks of the same
+ * public ones: a page which sets a token keeps it in both schemes, and a page
+ * which sets none gets this table. A host which asks for `theme="light"` is
+ * left alone, so a light page under a dark system has a remedy.
+ */
+@media (prefers-color-scheme: dark) {
+  :host(:not([theme='light'])) {
+    --_bg: var(--sbmlsim-bg, rgb(20 23 28));
+    --_bg-soft: var(--sbmlsim-bg-soft, rgb(26 30 36));
+    --_bg-card: var(--sbmlsim-bg-card, rgb(26 30 36));
+    --_fg: var(--sbmlsim-fg, rgb(230 233 238));
+    --_fg-soft: var(--sbmlsim-fg-soft, rgb(154 164 178));
+    --_line: var(--sbmlsim-line, rgb(42 48 56));
+    --_accent: var(--sbmlsim-accent, rgb(116 143 252));
+
+    --_training: var(--sbmlsim-training, rgb(81 207 102));
+    --_validation: var(--sbmlsim-validation, rgb(77 171 247));
+    --_outlier: var(--sbmlsim-outlier, rgb(255 146 43));
+    --_excluded: var(--sbmlsim-excluded, rgb(173 181 189));
+
+    --_shadow: var(--sbmlsim-shadow, none);
+
+    --_ramp-1: var(--sbmlsim-ramp-1, rgb(59 82 139));
+    --_ramp-2: var(--sbmlsim-ramp-2, rgb(42 120 142));
+    --_ramp-3: var(--sbmlsim-ramp-3, rgb(30 156 137));
+    --_ramp-4: var(--sbmlsim-ramp-4, rgb(68 191 112));
+    --_ramp-5: var(--sbmlsim-ramp-5, rgb(155 217 60));
+    --_ramp-6: var(--sbmlsim-ramp-6, rgb(253 231 37));
+  }
+}
+
+/*
+ * The two schemes a host asks for by name, whatever the system says and
+ * whatever an ancestor sets: these are the public tokens on the host, because
+ * `theme="light"` and `theme="dark"` are the one explicit opt-in of the page.
+ * They are the tables above, which a custom property has no mixin for.
+ */
+:host([theme='light']) {
+  --sbmlsim-bg: rgb(255 255 255);
+  --sbmlsim-bg-soft: rgb(246 247 249);
+  --sbmlsim-bg-card: rgb(255 255 255);
+  --sbmlsim-fg: rgb(27 31 36);
+  --sbmlsim-fg-soft: rgb(91 100 114);
+  --sbmlsim-line: rgb(227 230 234);
+  --sbmlsim-accent: rgb(59 91 219);
+
+  --sbmlsim-training: rgb(47 158 68);
+  --sbmlsim-validation: rgb(28 126 214);
+  --sbmlsim-outlier: rgb(232 89 12);
+  --sbmlsim-excluded: rgb(134 142 150);
+
+  --sbmlsim-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+
+  --sbmlsim-ramp-1: rgb(68 1 84);
+  --sbmlsim-ramp-2: rgb(68 58 131);
+  --sbmlsim-ramp-3: rgb(48 106 142);
+  --sbmlsim-ramp-4: rgb(32 146 140);
+  --sbmlsim-ramp-5: rgb(59 187 117);
+  --sbmlsim-ramp-6: rgb(155 217 60);
+}
+
 :host([theme='dark']) {
   --sbmlsim-bg: rgb(20 23 28);
   --sbmlsim-bg-soft: rgb(26 30 36);

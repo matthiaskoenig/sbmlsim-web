@@ -96,6 +96,26 @@ describe('plotSvg', () => {
     expect(texts(close)).toContain('0.001')
   })
 
+  it('labels a log axis of two decades at more than its decades', () => {
+    // the ladder of 1, 2 and 5 is nine labels over these two and a half
+    // decades, which is more than an axis of this height carries, and the
+    // decades alone are the two of 0.01 and 0.1
+    const svg = plotSvg(spec(1, { series: [series(1, [0.004, 0.05, 0.3, 0.6])], logY: true }))
+    expect(texts(svg)).toContain('0.03')
+    expect(texts(svg)).toContain('0.3')
+    // and a figure of the height of a panel at the width of a phone, whose
+    // axis asks for the three of `LEAST_TICKS`, carries more than its decades
+    const small = plotSvg(
+      spec(1, {
+        series: [series(1, [0.004, 0.05, 0.3, 0.6])],
+        logY: true,
+        width: 326,
+        height: 200,
+      }),
+    )
+    expect(texts(small)).toContain('0.03')
+  })
+
   it('draws a legend up to ten series and a colour bar above ten', () => {
     expect(plotSvg(spec(10))).toContain('class="legend"')
     expect(plotSvg(spec(10))).not.toContain('class="colourbar"')

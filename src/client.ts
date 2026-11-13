@@ -105,11 +105,24 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Get whether every item of a list is an object carrying a string `id`.
+ *
+ * @param items the items of a list of a payload
+ * @returns whether each of them can be read as one of its kind
+ */
+function allIdentified(items: unknown[]): boolean {
+  return items.every((one) => isObject(one) && typeof one.id === 'string')
+}
+
+/**
  * Check that a body carries the fields of a declaration before it is read.
  *
  * The check is the shape and not the values: a payload may grow a field within
  * its version, so an unknown field is ignored, while a body whose `axes` is no
- * array is no declaration whatever its `contract` says.
+ * array is no declaration whatever its `contract` says. The items of the three
+ * lists are checked as well, because the panel walks them to build its
+ * controls, its curves and its series: a body which is checked here is a body
+ * every reader of it can read without a guard of its own.
  *
  * @param body the parsed body, of the contract `panel/1`
  * @returns the declaration
@@ -123,12 +136,25 @@ function asDeclaration(body: unknown): PanelDeclaration {
     !Array.isArray(body.axes) ||
     !Array.isArray(body.curves) ||
     !Array.isArray(body.data) ||
+    !allIdentified(body.axes) ||
+    !allIdentified(body.curves) ||
+    !allIdentified(body.data) ||
     !isObject(body.simulation) ||
     !isObject(body.limits)
   ) {
     throw new PanelRequestError('body')
   }
   return body as unknown as PanelDeclaration
+}
+
+/**
+ * Get whether an item of `dims` is an axis of a grid.
+ *
+ * @param value the item
+ * @returns whether it carries the id and the values the interpolation reads
+ */
+function isAxisOfGrid(value: unknown): boolean {
+  return isObject(value) && typeof value.id === 'string' && Array.isArray(value.values)
 }
 
 /**
@@ -153,6 +179,7 @@ function asGrid(body: unknown): SimulateResponse {
     !isObject(body.units) ||
     !isObject(body.status) ||
     !Array.isArray(body.status.failed) ||
+    !body.dims.every(isAxisOfGrid) ||
     !isObject(body.provenance) ||
     typeof body.provenance.engine !== 'string' ||
     typeof body.provenance.seconds !== 'number'

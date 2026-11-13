@@ -4,9 +4,16 @@
  *
  * The element is a custom element with a shadow root, so the styles of the
  * page it sits in - a documentation theme, a slide deck, a course - cannot
- * reach the panel and the panel cannot leak into the page. The
- * `--sbmlsim-*` tokens of `theme.css` are the one hook from outside, which is
- * why they are declared on `:host` as well as on `:root`.
+ * reach the panel and the panel cannot leak into the page. The `--sbmlsim-*`
+ * tokens are the one hook from outside: `theme.css` reads every one of them
+ * into a private token of the panel, which `.panel` re-exports under its
+ * public name inside the shadow root, so a token set on the element or on
+ * anything above it wins over the table of the design (the head of
+ * `theme.css` has the order). Nothing of the typography and nothing of the
+ * colour is declared on `:host` for the same reason the tokens are not: a
+ * declaration of the page which matches the element itself, `* { color: red }`
+ * among them, beats a declaration of the shadow tree on the host, and
+ * everything in the panel would inherit it.
  *
  * ## One request per release, never one per movement
  *
@@ -21,7 +28,12 @@
  * fetched: five moves of it are no request at all. Moving any other knob
  * schedules one simulation on release, which grids over **that** knob instead
  * and holds the one which was gridded before at the value it now has, so the
- * knob a reader is working with is always the one which costs nothing.
+ * knob a reader is working with is always the one which costs nothing. The
+ * knob which counts as the gridded one is the one the simulation which is
+ * scheduled or in flight grids over and not the one the last answer gridded
+ * over: a knob released while a simulation is on its way is a knob no grid
+ * covers yet, and dropping its release would leave the figure contradicting
+ * the control.
  *
  * An `input` event - a knob being dragged - interpolates and redraws and never
  * fetches. A `change` event - the knob released, a choice picked - schedules a
@@ -44,7 +56,16 @@
  * fails: an endpoint which cannot be reached cannot serve the fallback either.
  */
 
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useHost, useTemplateRef } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  useHost,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import type { PropType } from 'vue'
 
 import {
@@ -58,6 +79,7 @@ import type { FailureKind } from './client'
 import type {
   CurveScale,
   PanelAxis,
+  PanelCurve,
   PanelDeclaration,
   SimulateRequest,
   SimulateResponse,
@@ -117,7 +139,26 @@ const KNOB_DIGITS = 4
 const SECOND_DIGITS = 2
 /** The steps a range knob moves in, which is finer than the grid it reads. */
 const RANGE_STEPS = 100
-/** The label of the y axis of a figure of more than one curve, which names none. */
+/** How far from a whole number of steps a value may lie and still be on a ladder. */
+const ON_LADDER = 1e-6
+/**
+ * The level the title of a panel is drawn at unless a page asks for another.
+ *
+ * `defineProps` is hoisted above the body of the script and may not read a
+ * constant of it, which is why the prop writes the number once more.
+ */
+const DEFAULT_HEADING = 2
+/** The smallest level a heading of HTML has. */
+const LEAST_HEADING = 1
+/** The largest level a heading of HTML has. */
+const MOST_HEADING = 6
+/**
+ * The label of the y axis of a figure of more than one curve, which names none.
+ *
+ * It is the name a reader who does not see the figure is given for the axis,
+ * so it has to be a word; should `panel/1` ever carry a label for the y axis,
+ * that label is the one to use and this is its fallback.
+ */
 const GENERIC_Y = 'value'
 /** The separator of the parts of the provenance footer. */
 const FOOTER_SEPARATOR = ' · '
@@ -141,6 +182,12 @@ const props = defineProps({
   fallback: { type: String, default: '' },
   /** The milliseconds one request is given before it is stopped. */
   timeout: { type: Number, default: DEFAULT_TIMEOUT },
+  /**
+   * The level the title of the panel is drawn at, 2 by default. A page which
+   * puts a panel under a heading of its own writes the level below it, so the
+   * outline of the document does not step.
+   */
+  headingLevel: { type: Number, default: 2 },
 })
 
 const host = useHost()
@@ -170,7 +217,14 @@ const stored = shallowRef<SimulateResponse | null>(null)
 const fromStore = ref(false)
 /** The value of every knob by its id, in the unit of the knob. */
 const values = shallowRef<Record<string, number>>({})
-/** The id of the knob the drawn grid runs over, `null` for a grid of one point. */
+/**
+ * The id of the knob the latest run grids over, `null` for a run of one point.
+ *
+ * It is set when a run is scheduled or issued and not when its answer arrives:
+ * a knob released while a run is in flight would otherwise be taken for one
+ * the grid already covers, no run would be made for it, and the figure would
+ * keep contradicting the control a reader just moved.
+ */
 const gridded = ref<string | null>(null)
 /** Whether the y axis is drawn logarithmically. */
 const logY = ref(false)
@@ -215,14 +269,68 @@ function shortNumber(value: number, digits: number): string {
   return Number.isFinite(value) ? String(Number(value.toPrecision(digits))) : ''
 }
 
+/**
+ * Get whether a value of a payload carries the fields a field names.
+ *
+ * @param value the value
+ * @param strings the fields which have to be text
+ * @returns whether it is an object carrying every one of them
+ */
+function carries(value: unknown, strings: string[]): boolean {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const fields = value as Record<string, unknown>
+  return strings.every((name) => typeof fields[name] === 'string')
+}
+
+/**
+ * Get the knobs of a declaration which can be drawn as a control.
+ *
+ * The guard of the client refuses a declaration whose knobs are not objects
+ * with an id, so this is the second lock of that door: a panel draws no
+ * control it cannot build, and a hole in the guard therefore costs a knob and
+ * never the element, which has an error line to show.
+ *
+ * @param declared the declaration, `null` until it was read
+ * @returns the knobs which can be drawn, in the order of the declaration
+ */
+function knobsOf(declared: PanelDeclaration | null): PanelAxis[] {
+  const given: unknown[] = declared?.axes ?? []
+  return given.filter(
+    (one): one is PanelAxis =>
+      carries(one, ['id', 'label', 'kind']) &&
+      Array.isArray((one as PanelAxis).choices) &&
+      typeof (one as PanelAxis).default === 'number',
+  )
+}
+
+/**
+ * Get the curves of a declaration which can be drawn.
+ *
+ * @param declared the declaration, `null` until it was read
+ * @returns the curves which can be drawn, in the order of the declaration
+ */
+function curvesOf(declared: PanelDeclaration | null): PanelCurve[] {
+  const given: unknown[] = declared?.curves ?? []
+  return given.filter((one): one is PanelCurve => carries(one, ['id', 'label']))
+}
+
 /** The knobs of the panel in the order the declaration states them. */
-const axes = computed<PanelAxis[]>(() => declaration.value?.axes ?? [])
+const axes = computed<PanelAxis[]>(() => knobsOf(declaration.value))
 
 /** The title of the panel, empty until the declaration was read. */
 const title = computed<string>(() => declaration.value?.panel.title ?? '')
 
 /** The question the panel answers, empty for a panel without one. */
 const subtitle = computed<string>(() => declaration.value?.panel.subtitle ?? '')
+
+/** The heading the title is drawn as, `h2` unless the page asks for another. */
+const headingTag = computed<string>(() => {
+  const asked = Math.round(props.headingLevel)
+  const level = Number.isFinite(asked) ? clamp(asked, LEAST_HEADING, MOST_HEADING) : DEFAULT_HEADING
+  return `h${String(level)}`
+})
 
 /** The width the element has, the default before anything was measured. */
 const available = computed<number>(() => (measured.value > 0 ? measured.value : DEFAULT_WIDTH))
@@ -276,7 +384,7 @@ function unitOf(id: string, declared: string | null): string | null {
 
 /** The curves which are drawn: the declared ones, or the ones a stored answer carries. */
 const drawnCurves = computed<DrawnCurve[]>(() => {
-  const declared = declaration.value?.curves ?? []
+  const declared = curvesOf(declaration.value)
   if (declared.length > 0) {
     return declared.map((one) => ({
       id: one.id,
@@ -349,16 +457,33 @@ const plot = computed<PlotSpec | null>(() => {
   }
 })
 
-/** The figure as one inline SVG element, empty while there is nothing to draw. */
+/**
+ * The figure as one inline SVG element, empty while there is nothing to draw.
+ *
+ * A figure which cannot be built is empty and not an exception: the render of
+ * the element must not depend on a payload being well formed, or a hole in a
+ * guard would take the whole panel down and with it the error line which is
+ * the one thing a reader could still be told.
+ */
 const svg = computed<string>(() => {
-  const spec = plot.value
-  return spec === null ? '' : plotSvg(spec)
+  try {
+    const spec = plot.value
+    return spec === null ? '' : plotSvg(spec)
+  } catch {
+    return ''
+  }
 })
 
+/** Whether there is an answer to draw whose figure could not be built. */
+const drawFailed = computed<boolean>(() => grid.value !== null && svg.value === '')
+
 /** The line a reader is shown about a failure, empty while nothing failed. */
-const errorMessage = computed<string>(() =>
-  failure.value === null ? '' : FAILURE_MESSAGES[failure.value],
-)
+const errorMessage = computed<string>(() => {
+  if (failure.value !== null) {
+    return FAILURE_MESSAGES[failure.value]
+  }
+  return drawFailed.value ? FAILURE_MESSAGES.internal : ''
+})
 
 /** The provenance footer: the engine, the short hash of the run and its seconds. */
 const footer = computed<string>(() => {
@@ -413,11 +538,30 @@ function shownValue(axis: PanelAxis): string {
 }
 
 /**
+ * Get a step of the ladder 1, 2, 5 near a wanted one.
+ *
+ * @param wanted the step which is wanted, a positive number
+ * @returns the step of the ladder closest above it
+ */
+function niceStep(wanted: number): number {
+  const magnitude = 10 ** Math.floor(Math.log10(wanted))
+  const share = wanted / magnitude
+  return (share <= 1.5 ? 1 : share <= 3 ? 2 : share <= 7 ? 5 : 10) * magnitude
+}
+
+/**
  * Get the step a range knob moves in.
  *
  * It is finer than the grid the knob is read from on purpose: the grid is
  * where the simulations are, the knob is where the reader is, and the
  * interpolation between them is what makes a movement cost nothing.
+ *
+ * The value a knob starts at has to lie on the ladder the step builds, or the
+ * browser snaps the control to the nearest value which does and the reader is
+ * shown, and told by a screen reader, a number the panel is not simulating. A
+ * nice step near a hundredth of the span usually lands on it; where it does
+ * not, the distance from the smallest value to the declared one is divided
+ * into a whole number of steps of about that size instead.
  *
  * @param axis the knob, of the kind `range`
  * @returns the step, 1 for a knob whose bounds are no span
@@ -426,7 +570,19 @@ function rangeStep(axis: PanelAxis): number {
   const low = axis.min ?? 0
   const high = axis.max ?? 0
   const span = high - low
-  return span > 0 ? span / RANGE_STEPS : 1
+  if (!(span > 0)) {
+    return 1
+  }
+  const nice = niceStep(span / RANGE_STEPS)
+  const offset = axis.default - low
+  if (!(offset > 0)) {
+    return nice
+  }
+  const steps = offset / nice
+  if (Math.abs(steps - Math.round(steps)) <= ON_LADDER) {
+    return nice
+  }
+  return offset / Math.max(1, Math.round(steps))
 }
 
 /**
@@ -450,8 +606,9 @@ function gridPoints(axis: PanelAxis): number {
  *   `null` for a panel without a knob at all
  */
 function firstGridded(declared: PanelDeclaration): string | null {
-  const ranged = declared.axes.find((one) => one.kind === 'range')
-  return (ranged ?? declared.axes[0])?.id ?? null
+  const knobs = knobsOf(declared)
+  const ranged = knobs.find((one) => one.kind === 'range')
+  return (ranged ?? knobs[0])?.id ?? null
 }
 
 /**
@@ -464,7 +621,8 @@ function firstGridded(declared: PanelDeclaration): string | null {
  * @returns whether the axis starts logarithmic
  */
 function initialLog(declared: PanelDeclaration): boolean {
-  return declared.curves.length > 0 && declared.curves.every((one) => one.scale === 'log')
+  const curves = curvesOf(declared)
+  return curves.length > 0 && curves.every((one) => one.scale === 'log')
 }
 
 /**
@@ -568,6 +726,7 @@ async function simulate(gridId: string | null): Promise<void> {
   const controller = new AbortController()
   flight = controller
   const own = (sequence += 1)
+  gridded.value = gridId
   pending.value = true
   try {
     const answer = await attempt(() =>
@@ -576,7 +735,6 @@ async function simulate(gridId: string | null): Promise<void> {
     if (own !== sequence) {
       return
     }
-    gridded.value = gridId
     grid.value = answer
     fromStore.value = false
     failure.value = null
@@ -605,6 +763,7 @@ function schedule(gridId: string | null): void {
   if (timer !== null) {
     clearTimeout(timer)
   }
+  gridded.value = gridId
   timer = setTimeout(() => {
     timer = null
     void simulate(gridId)
@@ -627,7 +786,7 @@ async function load(): Promise<void> {
     const declared = await attempt(() => talking.panel(props.model, props.panel, controller.signal))
     flight = null
     declaration.value = declared
-    values.value = Object.fromEntries(declared.axes.map((one) => [one.id, one.default]))
+    values.value = Object.fromEntries(knobsOf(declared).map((one) => [one.id, one.default]))
     logY.value = initialLog(declared)
     await simulate(firstGridded(declared))
   } catch (error) {
@@ -820,13 +979,19 @@ function reset(): void {
   if (declared === null) {
     return
   }
-  values.value = Object.fromEntries(declared.axes.map((one) => [one.id, one.default]))
+  values.value = Object.fromEntries(knobsOf(declared).map((one) => [one.id, one.default]))
   logY.value = initialLog(declared)
   const first = firstGridded(declared)
   if (!frozen.value && first !== gridded.value) {
     schedule(first)
   }
 }
+
+watch(drawFailed, (failed) => {
+  if (failed) {
+    fail(new PanelRequestError('internal'))
+  }
+})
 
 onBeforeUnmount(() => {
   stopWork()
@@ -844,7 +1009,7 @@ defineExpose({ activate, freeze, reset })
     :class="[`layout-${drawnLayout}`, { frozen: frozen }]"
   >
     <header v-if="title !== '' || subtitle !== ''" class="head">
-      <h2 v-if="title !== ''" class="title">{{ title }}</h2>
+      <component :is="headingTag" v-if="title !== ''" class="title">{{ title }}</component>
       <p v-if="subtitle !== ''" class="subtitle">{{ subtitle }}</p>
     </header>
     <div class="body">
@@ -863,7 +1028,9 @@ defineExpose({ activate, freeze, reset })
               @input="onInput(axis, $event)"
               @change="onChange(axis, $event)"
             />
-            <output class="knob-value" :for="controlId(axis)">{{ shownValue(axis) }}</output>
+            <output class="knob-value" :for="controlId(axis)" aria-live="off">{{
+              shownValue(axis)
+            }}</output>
           </div>
           <select
             v-else
@@ -880,7 +1047,7 @@ defineExpose({ activate, freeze, reset })
         </div>
         <div class="options">
           <label class="toggle">
-            <input type="checkbox" :checked="logY" @change="onLog($event)" />
+            <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
             <span>logarithmic y</span>
           </label>
           <button type="button" class="reset" :disabled="frozen" @click="reset()">Reset</button>
@@ -905,6 +1072,12 @@ defineExpose({ activate, freeze, reset })
 
 <style>
 /*
+ * The host carries the box of the element and nothing else. Every colour and
+ * every piece of typography is declared on `.panel` below, because a rule of
+ * the page which matches the element - `* { color: red }`, `section * { }`,
+ * `sbmlsim-panel { }` - beats a declaration of this tree on the host, and
+ * everything in the panel would inherit the value of the page.
+ *
  * `color-scheme` is what the browser draws the native widgets of the controls
  * with - the arrow of a select, the box of a checkbox, the face of a button -
  * and it follows the `theme` attribute as the tokens do, so a dark panel has
@@ -912,10 +1085,7 @@ defineExpose({ activate, freeze, reset })
  */
 :host {
   display: block;
-  color: var(--sbmlsim-fg);
   color-scheme: light dark;
-  font-family: var(--sbmlsim-font);
-  font-size: var(--sbmlsim-font-size);
 }
 
 :host([theme='light']) {
@@ -926,10 +1096,26 @@ defineExpose({ activate, freeze, reset })
   color-scheme: dark;
 }
 
+/*
+ * The panel reads the private tokens of `theme.css`, which carry what a page
+ * set anywhere above the element and the table of the design as their
+ * fallback. Its typography and its colour are declared here and not on
+ * `:host`, so a rule of the page which matches the element cannot hand them
+ * to everything in the panel by inheritance.
+ */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  color: var(--_fg);
+  font-family: var(--_font);
+  font-size: var(--_font-size);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .head {
@@ -940,15 +1126,15 @@ defineExpose({ activate, freeze, reset })
 
 .title {
   margin: 0;
-  color: var(--sbmlsim-fg);
+  color: var(--_fg);
   font-size: 15px;
   font-weight: 600;
 }
 
 .subtitle {
   margin: 0;
-  color: var(--sbmlsim-fg-soft);
-  font-size: var(--sbmlsim-font-size);
+  color: var(--_fg-soft);
+  font-size: var(--_font-size);
 }
 
 .body {
@@ -1002,8 +1188,8 @@ defineExpose({ activate, freeze, reset })
 }
 
 .knob-label {
-  color: var(--sbmlsim-fg-soft);
-  font-size: var(--sbmlsim-font-size-small);
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
 }
 
 .knob-row {
@@ -1015,26 +1201,26 @@ defineExpose({ activate, freeze, reset })
 .knob-row input {
   flex: 1 1 auto;
   min-width: 0;
-  accent-color: var(--sbmlsim-accent);
+  accent-color: var(--_accent);
 }
 
 .knob-value {
   min-width: 4ch;
-  color: var(--sbmlsim-fg);
-  font-family: var(--sbmlsim-font-mono);
-  font-size: var(--sbmlsim-font-size-small);
+  color: var(--_fg);
+  font-family: var(--_font-mono);
+  font-size: var(--_font-size-small);
   text-align: right;
 }
 
 .knob-select {
   width: 100%;
   padding: 3px 6px;
-  border: 1px solid var(--sbmlsim-line);
+  border: 1px solid var(--_line);
   border-radius: 6px;
-  background: var(--sbmlsim-bg-card);
-  color: var(--sbmlsim-fg);
+  background: var(--_bg-card);
+  color: var(--_fg);
   font-family: inherit;
-  font-size: var(--sbmlsim-font-size);
+  font-size: var(--_font-size);
 }
 
 .options {
@@ -1048,29 +1234,29 @@ defineExpose({ activate, freeze, reset })
   display: inline-flex;
   gap: 5px;
   align-items: center;
-  color: var(--sbmlsim-fg-soft);
-  font-size: var(--sbmlsim-font-size-small);
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
 }
 
 .toggle input {
   margin: 0;
-  accent-color: var(--sbmlsim-accent);
+  accent-color: var(--_accent);
 }
 
 .reset {
   padding: 3px 10px;
-  border: 1px solid var(--sbmlsim-line);
+  border: 1px solid var(--_line);
   border-radius: 6px;
-  background: var(--sbmlsim-bg-card);
-  color: var(--sbmlsim-fg);
+  background: var(--_bg-card);
+  color: var(--_fg);
   font-family: inherit;
-  font-size: var(--sbmlsim-font-size-small);
+  font-size: var(--_font-size-small);
   cursor: pointer;
 }
 
 .reset:hover:not(:disabled) {
-  border-color: var(--sbmlsim-accent);
-  color: var(--sbmlsim-accent);
+  border-color: var(--_accent);
+  color: var(--_accent);
 }
 
 .figure {
@@ -1081,7 +1267,30 @@ defineExpose({ activate, freeze, reset })
   min-width: 0;
 }
 
+/*
+ * The figure writes `var(--sbmlsim-fg, ...)` and `var(--sbmlsim-ramp-1, ...)`
+ * itself, because its tokens are the ones of a report and a page which copies
+ * the SVG out of here keeps them. This is the one place inside the shadow root
+ * where a public name is declared, and it reads the private token of each, so
+ * a value a page set above the element reaches the figure as well.
+ */
 .figure-svg {
+  --sbmlsim-figure-bg: var(--_figure-bg);
+  --sbmlsim-fg: var(--_fg);
+  --sbmlsim-fg-soft: var(--_fg-soft);
+  --sbmlsim-font: var(--_font);
+  --sbmlsim-font-size: var(--_font-size);
+  --sbmlsim-font-size-small: var(--_font-size-small);
+  --sbmlsim-axis-width: var(--_axis-width);
+  --sbmlsim-curve-width: var(--_curve-width);
+  --sbmlsim-data-width: var(--_data-width);
+  --sbmlsim-ramp-1: var(--_ramp-1);
+  --sbmlsim-ramp-2: var(--_ramp-2);
+  --sbmlsim-ramp-3: var(--_ramp-3);
+  --sbmlsim-ramp-4: var(--_ramp-4);
+  --sbmlsim-ramp-5: var(--_ramp-5);
+  --sbmlsim-ramp-6: var(--_ramp-6);
+
   width: 100%;
 }
 
@@ -1093,21 +1302,21 @@ defineExpose({ activate, freeze, reset })
 
 .pending {
   margin: 0;
-  color: var(--sbmlsim-fg-soft);
-  font-size: var(--sbmlsim-font-size-small);
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
 }
 
 .error {
   margin: 0;
-  color: var(--sbmlsim-outlier);
-  font-size: var(--sbmlsim-font-size);
+  color: var(--_outlier);
+  font-size: var(--_font-size);
 }
 
 .provenance {
   margin: 0;
-  color: var(--sbmlsim-fg-soft);
-  font-family: var(--sbmlsim-font-mono);
-  font-size: var(--sbmlsim-font-size-small);
+  color: var(--_fg-soft);
+  font-family: var(--_font-mono);
+  font-size: var(--_font-size-small);
 }
 
 .frozen .controls {
@@ -1115,7 +1324,7 @@ defineExpose({ activate, freeze, reset })
 }
 
 :focus-visible {
-  outline: 2px solid var(--sbmlsim-accent);
+  outline: 2px solid var(--_accent);
   outline-offset: 2px;
 }
 </style>
