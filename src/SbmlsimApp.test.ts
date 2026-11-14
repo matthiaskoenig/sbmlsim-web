@@ -44,8 +44,8 @@ function app(more: Partial<AppDeclaration> = {}): Given {
     title: 'Model A',
     subtitle: 'what model A is',
     pages: [
-      { id: 'pageA', title: 'Page A', panels: ['panelA'] },
-      { id: 'pageB', title: 'Page B', panels: ['panelB', 'panelC'] },
+      { id: 'pageA', title: 'Page A', panels: ['panelA'], scenarios: [] },
+      { id: 'pageB', title: 'Page B', panels: ['panelB', 'panelC'], scenarios: [] },
     ],
     variants: [
       { id: 'variantA', label: 'Variant A' },
@@ -68,6 +68,9 @@ function panelDeclaration(id: string): PanelDeclaration {
       subtitle: subtitlesOf[id] ?? '',
       x_label: 'time [h]',
       y_label: '',
+      y_min: null,
+      y_max: null,
+      x_max: null,
     },
     axes: [
       {
@@ -85,8 +88,8 @@ function panelDeclaration(id: string): PanelDeclaration {
     ],
     curves: [{ id: 'curveA', label: 'curve A', unit: 'uM', scale: 'linear' }],
     data: [],
-    simulation: { variant: null, end: 120, points: 2, x_unit: 'h', preinit: {} },
-    limits: { end: 10000, points: 2000, knobs: 4, grid: 64, curves: 16 },
+    simulation: { variant: null, end: 120, points: 2, x_unit: 'h', preinit: {}, derived: {} },
+    limits: { end: 10000, points: 2000, knobs: 8, grid: 64, curves: 16 },
   }
 }
 
@@ -400,7 +403,7 @@ describe('the shell of an app', () => {
     document.body.innerHTML = ''
     declared = app({
       variants: [],
-      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'] }],
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'], scenarios: [] }],
     })
     const none = await shell()
     expect(none.shadowRoot.querySelector('.variant')).toBeNull()
@@ -492,7 +495,7 @@ describe('the shell of an app', () => {
   })
 
   it('reserves no head for a panel which declares neither a title nor a subtitle', async () => {
-    declared = app({ pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'] }] })
+    declared = app({ pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'], scenarios: [] }] })
     const element = await shell()
     expect(element.shadowRoot.querySelector('.reserve-head')).not.toBeNull()
     // the stub derives the heads from the declarations; an empty head is none
@@ -701,7 +704,9 @@ describe('the knobs the panels of a page share', () => {
 
   it('leaves a panel which declares no shared knob alone when one moves', async () => {
     declared = app({
-      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'] }],
+      pages: [
+        { id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'], scenarios: [] },
+      ],
     })
     knobsOf = {
       panelB: [rangeKnob('knobB'), choiceKnob('knobS')],
@@ -724,7 +729,9 @@ describe('the knobs the panels of a page share', () => {
 
   it('lists the shared knobs in the order the first panel which declares one lists them', async () => {
     declared = app({
-      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'] }],
+      pages: [
+        { id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'], scenarios: [] },
+      ],
     })
     knobsOf = {
       panelB: [choiceKnob('knobT'), choiceKnob('knobOwn')],
@@ -770,7 +777,9 @@ describe('the knobs the panels of a page share', () => {
 
   it('draws every panel at the state of the shared controls whatever knob it grids over', async () => {
     declared = app({
-      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'] }],
+      pages: [
+        { id: 'pageA', title: 'Page A', panels: ['panelB', 'panelC', 'panelD'], scenarios: [] },
+      ],
     })
     // panelB and panelD grid over their range knob, panelC over the choice
     knobsOf = {

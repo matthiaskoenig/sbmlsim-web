@@ -123,14 +123,22 @@ export interface PanelChoice {
   value: number
 }
 
-/** A knob of a panel: an entity of the model a reader sets, and an axis of a grid. */
+/**
+ * A knob of a panel: a value a reader sets, and an axis of a grid.
+ *
+ * A knob sets an entity of the model, or none: a knob without a target is read
+ * by the formulas of the derived values of its simulation
+ * (`PanelSimulation.derived`), e.g. a creatinine clearance which derives the
+ * renal function the model has. A renderer draws and sends both alike, by the
+ * id of the knob, and reads no target.
+ */
 export interface PanelAxis {
   /** The id of the knob, the key of its value in a request and of its axis in a grid. */
   id: string
   /** The knob as it is shown. */
   label: string
-  /** The entity of the model the knob sets. */
-  target: string
+  /** The entity of the model the knob sets, `null` for a knob the derived values read. */
+  target: string | null
   /** The unit of its values, `null` for the unit of its target in the model. */
   unit: string | null
   /** `range` for a knob of bounds, `choice` for one of choices. */
@@ -141,7 +149,11 @@ export interface PanelAxis {
   max: number | null
   /** The points a grid over a range knob runs by default. */
   steps: number
-  /** The choices of a choice knob in their order, empty for a range knob. */
+  /**
+   * The choices of a choice knob in their order, and the named stops of a
+   * range knob, e.g. the stages of a renal impairment over a clearance, each a
+   * value inside its bounds; empty for a range knob without stops.
+   */
   choices: PanelChoice[]
   /** The value the knob starts at. */
   default: number
@@ -207,6 +219,12 @@ export interface PanelSimulation {
   x_unit: string | null
   /** The values of the pre-initialization which are no knob, by the entity they set. */
   preinit: Record<string, number>
+  /**
+   * The values the endpoint derives from the knobs, a formula of the knobs by
+   * the entity it sets, empty for a panel which derives none; a renderer never
+   * evaluates them, it sends the knobs and the endpoint does.
+   */
+  derived: Record<string, string>
 }
 
 /** The bounds of a declaration and of a request alike, which the endpoint states. */
@@ -215,7 +233,7 @@ export interface PanelLimits {
   end: number
   /** The most output steps of that simulation. */
   points: number
-  /** The most knobs of a panel, which are the axes one request may grid over. */
+  /** The most knobs of a panel, which are the axes one request may grid over (8). */
   knobs: number
   /** The most points of one axis, and of the product of the axes of one request. */
   grid: number
@@ -223,7 +241,7 @@ export interface PanelLimits {
   curves: number
 }
 
-/** The texts of a panel. */
+/** The texts of a panel and the limits of its axes. */
 export interface PanelTexts {
   /** The id of the panel, the one a request names. */
   id: string
@@ -240,6 +258,22 @@ export interface PanelTexts {
    * they share in either case, so the unit is no part of it.
    */
   y_label: string
+  /**
+   * The lower end of the value axis, in the unit of the curves, `null` for an
+   * axis which frames what the panel draws there.
+   *
+   * A declared end is the end of the axis exactly, whatever a curve reaches,
+   * so two states of the knobs are drawn against one axis and can be
+   * compared; a curve beyond it is cut at the plot.
+   */
+  y_min: number | null
+  /** The upper end of the value axis, as `y_min`, `null` for one which frames what is drawn. */
+  y_max: number | null
+  /**
+   * The end of the time axis, in the unit it is delivered in (`x_unit`),
+   * `null` for the end of the simulation; nothing beyond it is drawn.
+   */
+  x_max: number | null
 }
 
 /** The declaration of a panel, the `panel/1` payload a renderer draws from. */
@@ -375,6 +409,20 @@ export interface PanelDataResponse {
   series: PanelDataSeries[]
 }
 
+/** A named state of the knobs of a page, e.g. an example patient, which a reader picks. */
+export interface Scenario {
+  /** The id of the scenario, distinct within its page. */
+  id: string
+  /** The scenario as it is shown. */
+  label: string
+  /**
+   * The value of every knob it sets, by the id of the knob, in the unit of the
+   * knob; a knob it does not name keeps the value it has. Every knob it names
+   * is a knob the panels of its page share (`AppDeclaration.shared`).
+   */
+  values: Record<string, number>
+}
+
 /** One page of the app of a model. */
 export interface AppPage {
   /** The id of the page, the one a link of the app names. */
@@ -383,6 +431,8 @@ export interface AppPage {
   title: string
   /** The ids of its panels in the order they are shown. */
   panels: string[]
+  /** The scenarios a reader picks the knobs of the page from, empty for a page without. */
+  scenarios: Scenario[]
 }
 
 /** One variant of the model of an app, which a reader switches to. */

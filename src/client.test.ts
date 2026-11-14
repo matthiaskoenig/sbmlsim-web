@@ -22,12 +22,21 @@ function json(body: unknown, status = 200): Response {
 function declaration(contract = 'panel/1'): PanelDeclaration {
   return {
     contract,
-    panel: { id: 'panelA', title: 'Panel A', subtitle: '', x_label: 'time', y_label: '' },
+    panel: {
+      id: 'panelA',
+      title: 'Panel A',
+      subtitle: '',
+      x_label: 'time',
+      y_label: '',
+      y_min: null,
+      y_max: null,
+      x_max: null,
+    },
     axes: [],
     curves: [],
     data: [],
-    simulation: { variant: null, end: 10, points: 2, x_unit: null, preinit: {} },
-    limits: { end: 10000, points: 2000, knobs: 4, grid: 64, curves: 16 },
+    simulation: { variant: null, end: 10, points: 2, x_unit: null, preinit: {}, derived: {} },
+    limits: { end: 10000, points: 2000, knobs: 8, grid: 64, curves: 16 },
   }
 }
 
@@ -128,7 +137,7 @@ describe('the client of an endpoint', () => {
       contract: 'app/1',
       title: 'Model A',
       subtitle: '',
-      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'] }],
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'], scenarios: [] }],
       variants: [],
       citation: '',
       doi: '',
@@ -160,7 +169,10 @@ describe('the client of an endpoint', () => {
     for (const broken of [
       { ...app, shared: undefined },
       { ...app, shared: [] },
-      { ...app, shared: { pageA: [{ knob: { ...knob, default: '1' }, panels: [] }] } },
+      {
+        ...app,
+        shared: { pageA: [{ knob: { ...knob, default: '1' }, panels: [] }] },
+      },
       { ...app, shared: { pageA: [{ knob, panels: [{ id: 'panelA' }] }] } },
       // nor the heads, without which every card moves when its panel draws its head
       { ...app, heads: undefined },
@@ -170,6 +182,135 @@ describe('the client of an endpoint', () => {
       body = broken
       expect(await kindOf(client.app('modelA'))).toBe('body')
     }
+  })
+
+  it('reads the stops, the targetless knobs, the limits and the derived values of a declaration', async () => {
+    const stops = [
+      { label: 'normal', value: 110 },
+      { label: 'severe impairment', value: 20 },
+    ]
+    const knobs = Array.from({ length: 8 }, (_, index) => ({
+      id: `knob${String(index)}`,
+      label: `knob ${String(index)}`,
+      // a knob the derived values read sets no entity of the model
+      target: index === 0 ? null : `target${String(index)}`,
+      unit: 'ml/min',
+      kind: 'range',
+      min: 10,
+      max: 150,
+      steps: 8,
+      choices: index === 0 ? stops : [],
+      default: 110,
+    }))
+    const declared = {
+      ...declaration(),
+      panel: { ...declaration().panel, y_min: 0, y_max: 2, x_max: 24 },
+      axes: knobs,
+      simulation: { ...declaration().simulation, derived: { targetZ: 'min(knob0 / 110, 1)' } },
+    }
+    serve(() => Promise.resolve(json(declared)))
+    const answer = await new PanelClient(ENDPOINT, DEFAULT_TIMEOUT).panel('modelA', 'panelA')
+    expect(answer.axes).toHaveLength(8)
+    expect(answer.axes[0]?.target).toBeNull()
+    expect(answer.axes[0]?.choices).toEqual(stops)
+    expect([answer.panel.y_min, answer.panel.y_max, answer.panel.x_max]).toEqual([0, 2, 24])
+    expect(answer.simulation.derived).toEqual({ targetZ: 'min(knob0 / 110, 1)' })
+  })
+
+  it('reads a declaration of the version without the fields it grew as it did', async () => {
+    // an endpoint which speaks `panel/1` without the limits of the axes and the
+    // derived values is still one of the version: they are none
+    const old = declaration() as unknown as Record<string, Record<string, unknown>>
+    const panel = { ...old.panel }
+    delete panel.y_min
+    delete panel.y_max
+    delete panel.x_max
+    const simulation = { ...old.simulation }
+    delete simulation.derived
+    serve(() => Promise.resolve(json({ ...old, panel, simulation })))
+    const answer = await new PanelClient(ENDPOINT, DEFAULT_TIMEOUT).panel('modelA', 'panelA')
+    expect([answer.panel.y_min, answer.panel.y_max, answer.panel.x_max]).toEqual([null, null, null])
+    expect(answer.simulation.derived).toEqual({})
+  })
+
+  it('refuses a declaration whose limits or derived values are of another type', async () => {
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    for (const broken of [
+      { ...declaration(), panel: { ...declaration().panel, y_max: '2' } },
+      { ...declaration(), panel: { ...declaration().panel, x_max: Number.NaN } },
+      { ...declaration(), simulation: { ...declaration().simulation, derived: { a: 1 } } },
+    ]) {
+      serve(() => Promise.resolve(json(broken)))
+      expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('body')
+    }
+  })
+
+  it('reads the scenarios of a page, and a page of the version without them as one without', async () => {
+    const app = {
+      contract: 'app/1',
+      title: 'Model A',
+      subtitle: '',
+      pages: [
+        {
+          id: 'pageA',
+          title: 'Page A',
+          panels: ['panelA'],
+          scenarios: [
+            { id: 'healthy', label: 'healthy, 25 mg', values: { knobA: 110, knobB: 25 } },
+          ],
+        },
+        { id: 'pageB', title: 'Page B', panels: ['panelA'] },
+      ],
+      variants: [],
+      citation: '',
+      doi: '',
+      licenses: [],
+      shared: {},
+      heads: {},
+    }
+    let body: unknown = app
+    serve(() => Promise.resolve(json(body)))
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    const read = await client.app('modelA')
+    expect(read.pages[0]?.scenarios[0]?.values).toEqual({ knobA: 110, knobB: 25 })
+    expect(read.pages[1]?.scenarios).toEqual([])
+    for (const scenarios of [
+      {},
+      [{ id: 'a', label: 'a', values: { knobA: '1' } }],
+      [{ id: 'a' }],
+    ]) {
+      body = { ...app, pages: [{ ...app.pages[0], scenarios }] }
+      expect(await kindOf(client.app('modelA'))).toBe('body')
+    }
+  })
+
+  it('reads the app, a declaration and the study data in the variant it is asked for', async () => {
+    const seen: string[] = []
+    serve((url) => {
+      seen.push(url)
+      if (url.includes('/data')) {
+        return Promise.resolve(json({ contract: 'paneldata/1', series: [] }))
+      }
+      return Promise.resolve(json(declaration()))
+    })
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    await client.panel('modelA', 'panelA', undefined, 'low reference')
+    await client.data('modelA', 'panelA', undefined, 'low reference')
+    await client.panel('modelA', 'panelA')
+    await client.data('modelA', 'panelA', undefined, '')
+    expect(seen).toEqual([
+      `${ENDPOINT}/api/models/modelA/panels/panelA?variant=low%20reference`,
+      `${ENDPOINT}/api/models/modelA/panels/panelA/data?variant=low%20reference`,
+      `${ENDPOINT}/api/models/modelA/panels/panelA`,
+      `${ENDPOINT}/api/models/modelA/panels/panelA/data`,
+    ])
+    seen.length = 0
+    await kindOf(client.app('modelA', undefined, 'female'))
+    await kindOf(client.app('modelA'))
+    expect(seen).toEqual([
+      `${ENDPOINT}/api/models/modelA/app?variant=female`,
+      `${ENDPOINT}/api/models/modelA/app`,
+    ])
   })
 
   it('reads a stored answer off a url of its own', async () => {

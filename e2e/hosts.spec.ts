@@ -268,7 +268,8 @@ test.describe('the app shell', () => {
   }) => {
     const app = await openApp(page)
     await expect(app.locator('h1')).toHaveText('Hydrochlorothiazide')
-    await expect(app.locator('.nav .tab')).toHaveText(['Renal impairment', 'Dose'])
+    // the three pages of the demo: the renal function, the dose and a patient
+    await expect(app.locator('.nav .tab')).toHaveText(['Renal impairment', 'Dose', 'Patient'])
     await expect(app.locator('.nav .tab[aria-current=page]')).toHaveText('Renal impairment')
     await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
     // the declaration of the HCTZ app has one variant, so there is no switcher

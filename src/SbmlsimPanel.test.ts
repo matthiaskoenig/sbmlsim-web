@@ -71,6 +71,9 @@ function declaration(): PanelDeclaration {
       subtitle: 'the question the panel answers',
       x_label: 'time [h]',
       y_label: '',
+      y_min: null,
+      y_max: null,
+      x_max: null,
     },
     axes: [
       {
@@ -95,8 +98,8 @@ function declaration(): PanelDeclaration {
       { id: 'curveB', label: 'curve B', unit: 'umol', scale: 'linear' },
     ],
     data: [],
-    simulation: { variant: null, end: 120, points: 2, x_unit: 'h', preinit: {} },
-    limits: { end: 10000, points: 2000, knobs: 4, grid: 64, curves: 16 },
+    simulation: { variant: null, end: 120, points: 2, x_unit: 'h', preinit: {}, derived: {} },
+    limits: { end: 10000, points: 2000, knobs: 8, grid: 64, curves: 16 },
   }
 }
 

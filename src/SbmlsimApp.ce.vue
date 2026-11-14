@@ -685,14 +685,26 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-/* the bold of the current page is reserved by every tab, so the tabs do not move
- * when the page changes */
+/* the bold of the current page and the regular weight of the others are
+ * reserved by every tab, so the tabs do not move when the page changes: the
+ * width of a tab is the wider of its title in either weight, whichever it is
+ * drawn in, and a font which draws a short title a fraction of a pixel wider in
+ * its regular weight than in bold moves the tabs after it by that fraction
+ * otherwise */
+.tab::before,
 .tab::after {
   display: block;
   height: 0;
   overflow: hidden;
   visibility: hidden;
   content: attr(data-label);
+}
+
+.tab::before {
+  font-weight: 400;
+}
+
+.tab::after {
   font-weight: 600;
 }
 

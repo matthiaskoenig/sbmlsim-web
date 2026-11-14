@@ -25,6 +25,9 @@ const declaration: PanelDeclaration = {
     subtitle: 'the question the panel answers',
     x_label: 'time [hr]',
     y_label: '',
+    y_min: null,
+    y_max: null,
+    x_max: null,
   },
   axes: [
     {
@@ -80,8 +83,9 @@ const declaration: PanelDeclaration = {
     points: 2,
     x_unit: 'hr',
     preinit: { paramA: 75.0 },
+    derived: {},
   },
-  limits: { end: 10000.0, points: 2000, knobs: 4, grid: 64, curves: 16 },
+  limits: { end: 10000.0, points: 2000, knobs: 8, grid: 64, curves: 16 },
 }
 
 const request: SimulateRequest = { values: { knobA: 25.0 }, grid: { knobB: 3 } }
@@ -137,7 +141,7 @@ const app: AppDeclaration = {
   contract: 'app/1',
   title: 'Model A',
   subtitle: 'what the model is',
-  pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'] }],
+  pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'], scenarios: [] }],
   variants: [],
   citation: 'Author et al. (2026)',
   doi: '10.0000/zenodo.0000000',
@@ -187,7 +191,7 @@ describe('the contracts', () => {
       checkContract(data, CONTRACTS.data)
       checkContract(app, CONTRACTS.app)
     }).not.toThrow()
-    expect(declaration.limits.knobs).toBe(4)
+    expect(declaration.limits.knobs).toBe(8)
     expect(answer.dims[0]?.values).toEqual([0.2, 0.6, 1.0])
     expect(request.grid).toEqual({ knobB: 3 })
     expect(app.pages[0]?.panels).toEqual([declaration.panel.id, 'panelB'])

@@ -96,6 +96,17 @@ function join(endpoint: string, path: string): string {
 }
 
 /**
+ * Get the query of a route which is read in a variant of the model.
+ *
+ * @param variant the id of the variant, empty for the default variant
+ * @returns `?variant=<id>` with the id encoded, empty for the default variant,
+ *   so a route of the default variant is the route it always was
+ */
+function variantQuery(variant: string): string {
+  return variant === '' ? '' : `?variant=${encodeURIComponent(variant)}`
+}
+
+/**
  * Get whether a value is a plain object, which every payload of a route is.
  *
  * @param value the parsed body
@@ -116,6 +127,41 @@ function allIdentified(items: unknown[]): boolean {
 }
 
 /**
+ * Get whether a value of a payload is a number which may be absent.
+ *
+ * @param value the value
+ * @returns whether it is a finite number, `null` or absent
+ */
+function isLimit(value: unknown): boolean {
+  return (
+    value === undefined || value === null || (typeof value === 'number' && Number.isFinite(value))
+  )
+}
+
+/**
+ * Get whether a value is a record of text by text.
+ *
+ * @param value the value
+ * @returns whether it is an object whose every value is text
+ */
+function isTexts(value: unknown): value is Record<string, string> {
+  return isObject(value) && Object.values(value).every((one) => typeof one === 'string')
+}
+
+/**
+ * Get whether a value is a record of numbers by text.
+ *
+ * @param value the value
+ * @returns whether it is an object whose every value is a finite number
+ */
+function isNumbers(value: unknown): value is Record<string, number> {
+  return (
+    isObject(value) &&
+    Object.values(value).every((one) => typeof one === 'number' && Number.isFinite(one))
+  )
+}
+
+/**
  * Check that a body carries the fields of a declaration before it is read.
  *
  * The check is the shape and not the values: a payload may grow a field within
@@ -125,8 +171,14 @@ function allIdentified(items: unknown[]): boolean {
  * controls, its curves and its series: a body which is checked here is a body
  * every reader of it can read without a guard of its own.
  *
+ * A field the contract grew within its version may be absent, since an
+ * endpoint which speaks the version without it is still one of the version: the
+ * limits of the axes are then `null` and the derived values none, which is what
+ * a declaration which states neither means. A field which is present and of
+ * another type is no declaration.
+ *
  * @param body the parsed body, of the contract `panel/1`
- * @returns the declaration
+ * @returns the declaration, with the fields which may be absent filled in
  * @throws PanelRequestError of the kind `body` for a body which is no
  *   declaration
  */
@@ -141,15 +193,35 @@ function asDeclaration(body: unknown): PanelDeclaration {
     !allIdentified(body.curves) ||
     !allIdentified(body.data) ||
     !isObject(body.simulation) ||
-    !isObject(body.limits)
+    !isObject(body.limits) ||
+    !isLimit(body.panel.y_min) ||
+    !isLimit(body.panel.y_max) ||
+    !isLimit(body.panel.x_max) ||
+    !(body.simulation.derived === undefined || isTexts(body.simulation.derived))
   ) {
     throw new PanelRequestError('body')
   }
-  return body as unknown as PanelDeclaration
+  const panel = body.panel
+  const simulation = body.simulation
+  return {
+    ...body,
+    panel: {
+      ...panel,
+      y_min: panel.y_min ?? null,
+      y_max: panel.y_max ?? null,
+      x_max: panel.x_max ?? null,
+    },
+    simulation: { ...simulation, derived: simulation.derived ?? {} },
+  } as unknown as PanelDeclaration
 }
 
 /**
  * Get whether a value is a knob a control can be built of.
+ *
+ * A knob may carry no target, which is a knob the derived values of the
+ * simulation read (`PanelAxis.target`); nothing here reads it beyond its type.
+ * The choices are what a select is built of, the choices of a choice knob and
+ * the named stops of a range knob alike, so each is checked.
  *
  * @param value the item
  * @returns whether it carries the fields a control reads
@@ -160,7 +232,15 @@ function isKnob(value: unknown): boolean {
     typeof value.id === 'string' &&
     typeof value.label === 'string' &&
     typeof value.kind === 'string' &&
+    (value.target === undefined || value.target === null || typeof value.target === 'string') &&
     Array.isArray(value.choices) &&
+    value.choices.every(
+      (one) =>
+        isObject(one) &&
+        typeof one.label === 'string' &&
+        typeof one.value === 'number' &&
+        Number.isFinite(one.value),
+    ) &&
     typeof value.default === 'number'
   )
 }
@@ -216,6 +296,28 @@ function isHeads(value: unknown): boolean {
 }
 
 /**
+ * Get whether the scenarios of a page can be read.
+ *
+ * @param value the `scenarios` of a page, absent for a page of an endpoint
+ *   which states none
+ * @returns whether it is absent or a list of scenarios, each with its id, its
+ *   label and the values it sets
+ */
+function isScenarios(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.every(
+        (one) =>
+          isObject(one) &&
+          typeof one.id === 'string' &&
+          typeof one.label === 'string' &&
+          isNumbers(one.values),
+      ))
+  )
+}
+
+/**
  * Check that a body carries the fields of an app before it is read.
  *
  * The items of the pages, of the variants, of the shared knobs and of the
@@ -224,10 +326,11 @@ function isHeads(value: unknown): boolean {
  * shared knobs is no app: the shell would show every panel with controls of
  * its own, which is a page of two states when its panels share a knob. A body
  * without the heads is none either, since every card would move when the head
- * of its panel arrives.
+ * of its panel arrives. The scenarios of a page may be absent, as of an
+ * endpoint which speaks the version without them, and are none then.
  *
  * @param body the parsed body, of the contract `app/1`
- * @returns the app
+ * @returns the app, every page with its scenarios
  * @throws PanelRequestError of the kind `body` for a body which is no app
  */
 function asApp(body: unknown): AppDeclaration {
@@ -245,7 +348,8 @@ function asApp(body: unknown): AppDeclaration {
     !body.pages.every(
       (page) =>
         typeof (page as Record<string, unknown>).title === 'string' &&
-        Array.isArray((page as Record<string, unknown>).panels),
+        Array.isArray((page as Record<string, unknown>).panels) &&
+        isScenarios((page as Record<string, unknown>).scenarios),
     ) ||
     !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string') ||
     !isShared(body.shared) ||
@@ -253,7 +357,11 @@ function asApp(body: unknown): AppDeclaration {
   ) {
     throw new PanelRequestError('body')
   }
-  return body as unknown as AppDeclaration
+  const pages = (body.pages as Record<string, unknown>[]).map((page) => ({
+    ...page,
+    scenarios: page.scenarios ?? [],
+  }))
+  return { ...body, pages } as unknown as AppDeclaration
 }
 
 /**
@@ -346,15 +454,21 @@ export class PanelClient {
   /**
    * Get the app of a model, the route `app`.
    *
+   * The declarations of the panels may differ by the variant of the model, and
+   * so may what the app derives from them, the knobs its pages share and the
+   * heads of their panels: the app is read in the variant a reader chose.
+   *
    * @param model the id of the model, which the endpoint serves
    * @param signal a signal which stops the request
+   * @param variant the variant the app is read in, the default variant of the
+   *   model for an empty one
    * @returns the pages, the variants and the provenance texts of the app
    * @throws PanelRequestError for every failure; a model which declares no app
-   *   is an `http` failure
+   *   and a variant the app does not name are `http` failures
    */
-  async app(model: string, signal?: AbortSignal): Promise<AppDeclaration> {
+  async app(model: string, signal?: AbortSignal, variant = ''): Promise<AppDeclaration> {
     const body = await this.read(
-      `/api/models/${encodeURIComponent(model)}/app`,
+      `/api/models/${encodeURIComponent(model)}/app${variantQuery(variant)}`,
       CONTRACTS.app,
       signal,
     )
@@ -367,11 +481,22 @@ export class PanelClient {
    * @param model the id of the model, which the endpoint serves
    * @param panel the id of the panel of that model
    * @param signal a signal which stops the request, e.g. of a superseded move
+   * @param variant the variant whose declaration is read, the default variant
+   *   of the model for an empty one: a declaration may differ by the variant
    * @returns the declaration of the panel
    * @throws PanelRequestError for every failure
    */
-  async panel(model: string, panel: string, signal?: AbortSignal): Promise<PanelDeclaration> {
-    const body = await this.read(this.panelPath(model, panel), CONTRACTS.panel, signal)
+  async panel(
+    model: string,
+    panel: string,
+    signal?: AbortSignal,
+    variant = '',
+  ): Promise<PanelDeclaration> {
+    const body = await this.read(
+      `${this.panelPath(model, panel)}${variantQuery(variant)}`,
+      CONTRACTS.panel,
+      signal,
+    )
     return asDeclaration(body)
   }
 
@@ -381,12 +506,23 @@ export class PanelClient {
    * @param model the id of the model
    * @param panel the id of the panel
    * @param signal a signal which stops the request
+   * @param variant the variant whose declaration names the series, the default
+   *   variant of the model for an empty one
    * @returns the series the panel declares, in its order; empty for a panel
    *   which declares none
    * @throws PanelRequestError for every failure
    */
-  async data(model: string, panel: string, signal?: AbortSignal): Promise<PanelDataSeries[]> {
-    const body = await this.read(`${this.panelPath(model, panel)}/data`, CONTRACTS.data, signal)
+  async data(
+    model: string,
+    panel: string,
+    signal?: AbortSignal,
+    variant = '',
+  ): Promise<PanelDataSeries[]> {
+    const body = await this.read(
+      `${this.panelPath(model, panel)}/data${variantQuery(variant)}`,
+      CONTRACTS.data,
+      signal,
+    )
     return asSeries(body)
   }
 

@@ -8,7 +8,7 @@
  * here, so a reader cannot tell from a control which element drew it.
  */
 
-import type { PanelAxis, PanelDeclaration } from './contract'
+import type { PanelAxis, PanelChoice, PanelDeclaration } from './contract'
 
 /** The significant digits the value of a knob is shown with. */
 export const KNOB_DIGITS = 4
@@ -72,7 +72,22 @@ export function knobsOf(declared: PanelDeclaration | null): PanelAxis[] {
     (one): one is PanelAxis =>
       carries(one, ['id', 'label', 'kind']) &&
       Array.isArray((one as PanelAxis).choices) &&
+      (one as PanelAxis).choices.every(isChoice) &&
       typeof (one as PanelAxis).default === 'number',
+  )
+}
+
+/**
+ * Get whether an item of the choices of a knob can be drawn as an option.
+ *
+ * @param value the item, a choice of a choice knob or a named stop of a range knob
+ * @returns whether it carries a label and a finite value
+ */
+function isChoice(value: unknown): boolean {
+  return (
+    carries(value, ['label']) &&
+    typeof (value as PanelChoice).value === 'number' &&
+    Number.isFinite((value as PanelChoice).value)
   )
 }
 
