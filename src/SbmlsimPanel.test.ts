@@ -2779,3 +2779,47 @@ describe('the declared ends of the axes', () => {
     expect(Math.max(...ticks)).toBeGreaterThanOrEqual(1.4)
   })
 })
+
+describe('the knobs of a panel', () => {
+  /** A declaration of eight knobs, the most the endpoint states, the first of which sets no entity. */
+  function eight(): PanelDeclaration {
+    const declared = declaration()
+    const choice = declared.axes[0]
+    if (choice === undefined) {
+      throw new Error('the declaration has no choice knob')
+    }
+    return {
+      ...declared,
+      axes: [
+        // a knob the derived values of the simulation read, which sets no entity
+        { ...knob(), target: null },
+        ...Array.from({ length: 7 }, (_, index) => ({
+          ...choice,
+          id: `knob${String(index)}`,
+          label: `knob ${String(index)}`,
+          target: `target${String(index)}`,
+        })),
+      ],
+    }
+  }
+
+  it('draws and sends the eight knobs the endpoint takes, one without a target among them', async () => {
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(eight())
+    const element = await started()
+    expect(shadow(element).querySelectorAll('.knob')).toHaveLength(8)
+    expect(simulations()[0]).toEqual({
+      values: Object.fromEntries(
+        Array.from({ length: 7 }, (_, index) => [`knob${String(index)}`, 25]),
+      ),
+      grid: { knobB: 3 },
+    })
+    // the knob without a target is moved and read as any other
+    move(control(element, 'knobB'), '0.2', 'change')
+    move(control(element, 'knob6'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    // the release of the choice knob is one run over it, at the value of the other
+    expect(simulations().at(-1)?.values).toMatchObject({ knobB: 0.2 })
+    expect(simulations().at(-1)?.grid).toEqual({ knob6: 2 })
+  })
+})
