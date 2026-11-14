@@ -273,11 +273,19 @@ describe('the client of an endpoint', () => {
     const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
     const read = await client.app('modelA')
     expect(read.pages[0]?.scenarios[0]?.values).toEqual({ knobA: 110, knobB: 25 })
+    // an app of the version without the variant it answers names none
+    expect(read.variant).toBe('')
+    body = { ...app, variant: 'female' }
+    expect((await client.app('modelA')).variant).toBe('female')
+    body = { ...app, variant: 1 }
+    expect(await kindOf(client.app('modelA'))).toBe('body')
     expect(read.pages[1]?.scenarios).toEqual([])
     for (const scenarios of [
       {},
       [{ id: 'a', label: 'a', values: { knobA: '1' } }],
       [{ id: 'a' }],
+      // the empty id is the value of the entry of no scenario
+      [{ id: '', label: 'a', values: { knobA: 1 } }],
     ]) {
       body = { ...app, pages: [{ ...app.pages[0], scenarios }] }
       expect(await kindOf(client.app('modelA'))).toBe('body')

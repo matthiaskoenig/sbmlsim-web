@@ -7,12 +7,6 @@
  * wide it is belongs to the element which draws it.
  */
 .knob {
-  /* the height of a select and of the row of a slider alike, so the labels of
-   * a slider and a select beside it are at one height and so are the two
-   * controls: a slider is lower than a select, and the row of a slider is as
-   * tall as a select by this */
-  --_knob-control: calc(var(--_font-size) + 12px);
-
   display: flex;
   flex: 1 1 160px;
   flex-direction: column;
@@ -30,7 +24,7 @@
 .knob-select {
   box-sizing: border-box;
   width: 100%;
-  height: var(--_knob-control);
+  height: var(--_control-height);
   padding: 3px 6px;
   border: 1px solid var(--_line);
   border-radius: 6px;

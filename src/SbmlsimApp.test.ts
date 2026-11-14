@@ -35,7 +35,7 @@ interface Call {
 }
 
 /** The app as a test gives it, without what the service derives from the panels. */
-type Given = Omit<AppDeclaration, 'shared' | 'heads'>
+type Given = Omit<AppDeclaration, 'shared' | 'heads' | 'variant'>
 
 /** The app every test starts from: two pages, two variants and the texts of the footer. */
 function app(more: Partial<AppDeclaration> = {}): Given {
@@ -310,7 +310,14 @@ beforeEach(() => {
       const answer =
         given === null
           ? ({ ok: false, status: 422 } as unknown as Response)
-          : json({ ...given, shared: sharedOf(given, variant), heads: headsOf(given) })
+          : json({
+              ...given,
+              shared: sharedOf(given, variant),
+              heads: headsOf(given),
+              // the variant the app answers: the one asked for, else the
+              // default variant, the first of the stub
+              variant: variant ?? given.variants[0]?.id ?? 'variantA',
+            })
       const gate = variant === null ? null : appGate
       return gate === null ? Promise.resolve(answer) : gate.then(() => answer)
     }
@@ -538,6 +545,7 @@ describe('the shell of an app', () => {
       ...declared,
       shared: {},
       heads: { pageA: [{ id: 'panelA', title: '', subtitle: '' }] },
+      variant: 'variantA',
     }
     vi.stubGlobal('fetch', (url: string) =>
       url.endsWith('/app')
@@ -1078,6 +1086,27 @@ describe('the scenarios of a page', () => {
     expect(select(element).value).toBe('one')
   })
 
+  it('picks a scenario of any id, the id custom among them', async () => {
+    withScenarios()
+    const given = declared ?? app()
+    declared = {
+      ...given,
+      pages: given.pages.map((page) =>
+        page.id === 'pageB'
+          ? { ...page, scenarios: [{ id: 'custom', label: 'Custom', values: { knobR: 0.5 } }] }
+          : page,
+      ),
+    }
+    const element = await shell({ page: 'pageB' })
+    select(element).value = 'custom'
+    select(element).dispatchEvent(new Event('change'))
+    await settled()
+    expect(part(element, 'sbmlsim-panel[panel="panelB"]').getAttribute('values')).toBe(
+      '{"knobR":0.5,"knobS":25}',
+    )
+    expect(select(element).value).toBe('custom')
+  })
+
   it('shows an entry which cannot be picked where the knobs are at no scenario, and follows a reset', async () => {
     withScenarios()
     const element = await shell({ page: 'pageB' })
@@ -1085,8 +1114,8 @@ describe('the scenarios of a page', () => {
     choice.value = '12.5'
     choice.dispatchEvent(new Event('change'))
     await settled()
-    expect(select(element).value).toBe('custom')
-    const custom = [...select(element).options].find((one) => one.value === 'custom')
+    expect(select(element).value).toBe('')
+    const custom = [...select(element).options].find((one) => one.value === '')
     expect(custom?.textContent.trim()).toBe('custom')
     expect(custom?.disabled).toBe(true)
     ;(part(element, '.knobs .reset') as HTMLButtonElement).click()
@@ -1129,13 +1158,14 @@ describe('the variant of the app', () => {
     expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob of B [mg]')
     expect((part(element, '#knob-knobA') as HTMLInputElement).max).toBe('2')
     expect(attributeOf(element, 'panelB', 'variant')).toBe('variantB')
-    // and back, and to B again, whose app was read and is drawn without a request
+    // and back, and to B again: the app of each variant was read and is drawn
+    // without a request, the first one too, since it names its variant
     await choose(element, 'variantA')
     expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob A [mg]')
-    expect(appCalls()).toHaveLength(3)
+    expect(appCalls()).toHaveLength(2)
     await choose(element, 'variantB')
     expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob of B [mg]')
-    expect(appCalls()).toHaveLength(3)
+    expect(appCalls()).toHaveLength(2)
   })
 
   it('keeps the value of a shared knob the variant takes, and starts any other at its default', async () => {
@@ -1166,7 +1196,7 @@ describe('the variant of the app', () => {
     expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('0.2')
   })
 
-  it('draws no panel while it reads the app of a variant, and gives every panel the variant with its values at once', async () => {
+  it('holds the panels inert under a caption while it reads the app of a variant, and gives every panel the variant with its values at once', async () => {
     let open: (() => void) | null = null
     appGate = new Promise((resolve) => {
       open = () => {
@@ -1179,9 +1209,18 @@ describe('the variant of the app', () => {
     const grid = part(element, '.grid')
     expect(grid.classList.contains('switching')).toBe(true)
     expect(grid.getAttribute('aria-busy')).toBe('true')
-    // the panels keep the variant they draw, and the controls take no movement
+    // the panels keep the variant they draw, inert and hidden from a reader,
+    // under a caption which names the variant, and the controls and the tabs
+    // take no movement
+    expect(part(element, '.grid .caption').textContent.trim()).toBe('Switching to Variant B …')
+    for (const id of ['panelB', 'panelC']) {
+      const placed = part(element, `sbmlsim-panel[panel="${id}"]`) as HTMLElement
+      expect(placed.inert).toBe(true)
+      expect(placed.getAttribute('aria-hidden')).toBe('true')
+    }
     expect(attributeOf(element, 'panelB', 'variant')).toBe('variantA')
     expect((part(element, '#knob-knobA') as HTMLInputElement).disabled).toBe(true)
+    expect(tabs(element).every((one) => one.disabled)).toBe(true)
     expect(calls.slice(before).filter((one) => pathOf(one).includes('/panels/'))).toEqual([])
     ;(open as unknown as () => void)()
     await new Promise((resolve) => setTimeout(resolve, 400))
@@ -1189,6 +1228,11 @@ describe('the variant of the app', () => {
     expect(grid.classList.contains('switching')).toBe(false)
     expect(attributeOf(element, 'panelB', 'variant')).toBe('variantB')
     expect((part(element, '#knob-knobA') as HTMLInputElement).disabled).toBe(false)
+    expect(tabs(element).some((one) => one.disabled)).toBe(false)
+    expect((part(element, 'sbmlsim-panel[panel="panelB"]') as HTMLElement).inert).toBe(false)
+    // every panel drew its figure of the variant, so the caption is gone
+    expect(part(element, '.grid .caption').textContent.trim()).toBe('')
+    expect(grid.getAttribute('aria-busy')).toBe('false')
     // one declaration and one run per panel, both of the variant
     for (const id of ['panelB', 'panelC']) {
       const asked = calls.slice(before).filter((one) => pathOf(one).includes(`/panels/${id}`))
@@ -1216,5 +1260,80 @@ describe('the variant of the app', () => {
     expect(element.shadowRoot.querySelector('.error')).toBeNull()
     expect(part(element, '.grid').classList.contains('switching')).toBe(false)
     expect(calls.slice(before)).toEqual([])
+  })
+})
+
+describe('the variant an app answers', () => {
+  it('keeps the first app it read and asks for no app of the variant it is of', async () => {
+    const element = await shell({ page: 'pageB' })
+    const select = part(element, '.variant-select') as HTMLSelectElement
+    select.value = 'variantB'
+    select.dispatchEvent(new Event('change'))
+    await settled()
+    select.value = 'variantA'
+    select.dispatchEvent(new Event('change'))
+    await settled()
+    // the app read without a variant said it is of variant A
+    expect(appCalls().map((one) => one.url.split('?')[1])).toEqual([undefined, 'variant=variantB'])
+  })
+
+  it('refuses an app of another variant than the one it asked for', async () => {
+    variantApps = { variantB: { ...app(), title: 'Model A of B' } }
+    const element = await shell({ page: 'pageB' })
+    // the stub answers every app of a variant as of the variant asked for, so
+    // the answer is changed to say another one
+    const fetched = globalThis.fetch
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const answer = await fetched(url, init)
+      if (!url.includes('/app?variant=')) {
+        return answer
+      }
+      const body = (await answer.json()) as Record<string, unknown>
+      return json({ ...body, variant: 'variantA' })
+    })
+    const select = part(element, '.variant-select') as HTMLSelectElement
+    select.value = 'variantB'
+    select.dispatchEvent(new Event('change'))
+    await settled()
+    expect(part(element, '.error[role="alert"]').textContent.trim()).toBe(
+      `${FAILURE_MESSAGES.body} The panels of the variant shown cannot be drawn.`,
+    )
+    expect(part(element, 'h1').textContent.trim()).toBe('Model A')
+    expect(part(element, 'sbmlsim-panel[panel="panelB"]').getAttribute('variant')).toBe('variantA')
+  })
+
+  it('refuses an app of several variants which does not say which it is of', async () => {
+    const fetched = globalThis.fetch
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const answer = await fetched(url, init)
+      if (!url.endsWith('/app')) {
+        return answer
+      }
+      const body = (await answer.json()) as Record<string, unknown>
+      delete body.variant
+      return json(body)
+    })
+    const element = await shell()
+    expect(part(element, '[role="alert"]').textContent.trim()).toBe(FAILURE_MESSAGES.body)
+    // an app of one variant needs no switcher, so it says nothing of its variant
+    document.body.innerHTML = ''
+    declared = app({ variants: [{ id: 'variantA', label: 'Variant A' }] })
+    const one = await shell()
+    expect(one.shadowRoot.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it('leaves out a shared knob whose control cannot be built, as a panel leaves it out', async () => {
+    const broken = { ...choiceKnob('knobS'), choices: [{ label: 'low', value: 'x' }] }
+    knobsOf = {
+      panelB: [rangeKnob('knobA'), broken as unknown as PanelAxis],
+      panelC: [rangeKnob('knobA'), broken as unknown as PanelAxis],
+    }
+    const element = await shell({ page: 'pageB' })
+    expect(element.shadowRoot.querySelector('[role="alert"]')).toBeNull()
+    expect(
+      [...element.shadowRoot.querySelectorAll('.knobs .knob select, .knobs .knob input')].map(
+        (one) => one.id,
+      ),
+    ).toEqual(['knob-knobA'])
   })
 })

@@ -216,12 +216,14 @@ function asDeclaration(body: unknown): PanelDeclaration {
 }
 
 /**
- * Get whether a value is a knob a control can be built of.
+ * Get whether a value is a knob of the shape a shared knob is read with.
  *
  * A knob may carry no target, which is a knob the derived values of the
  * simulation read (`PanelAxis.target`); nothing here reads it beyond its type.
- * The choices are what a select is built of, the choices of a choice knob and
- * the named stops of a range knob alike, so each is checked.
+ * The items of its choices are not checked here but where a control is built of
+ * them (`knobsOf`, `drawableKnob`), alike for a knob of a panel and a knob of an
+ * app: a choice which cannot be drawn costs that knob in either, and never the
+ * whole declaration or the whole app.
  *
  * @param value the item
  * @returns whether it carries the fields a control reads
@@ -234,13 +236,6 @@ function isKnob(value: unknown): boolean {
     typeof value.kind === 'string' &&
     (value.target === undefined || value.target === null || typeof value.target === 'string') &&
     Array.isArray(value.choices) &&
-    value.choices.every(
-      (one) =>
-        isObject(one) &&
-        typeof one.label === 'string' &&
-        typeof one.value === 'number' &&
-        Number.isFinite(one.value),
-    ) &&
     typeof value.default === 'number'
   )
 }
@@ -300,8 +295,9 @@ function isHeads(value: unknown): boolean {
  *
  * @param value the `scenarios` of a page, absent for a page of an endpoint
  *   which states none
- * @returns whether it is absent or a list of scenarios, each with its id, its
- *   label and the values it sets
+ * @returns whether it is absent or a list of scenarios, each with its id, which
+ *   is not empty (an SId never is, and the select of the scenarios takes the
+ *   empty value for the state of no scenario), its label and the values it sets
  */
 function isScenarios(value: unknown): boolean {
   return (
@@ -311,6 +307,7 @@ function isScenarios(value: unknown): boolean {
         (one) =>
           isObject(one) &&
           typeof one.id === 'string' &&
+          one.id !== '' &&
           typeof one.label === 'string' &&
           isNumbers(one.values),
       ))
@@ -327,7 +324,8 @@ function isScenarios(value: unknown): boolean {
  * its own, which is a page of two states when its panels share a knob. A body
  * without the heads is none either, since every card would move when the head
  * of its panel arrives. The scenarios of a page may be absent, as of an
- * endpoint which speaks the version without them, and are none then.
+ * endpoint which speaks the version without them, and are none then, and so
+ * may the variant the app answers, which is empty then.
  *
  * @param body the parsed body, of the contract `app/1`
  * @returns the app, every page with its scenarios
@@ -353,7 +351,8 @@ function asApp(body: unknown): AppDeclaration {
     ) ||
     !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string') ||
     !isShared(body.shared) ||
-    !isHeads(body.heads)
+    !isHeads(body.heads) ||
+    !(body.variant === undefined || typeof body.variant === 'string')
   ) {
     throw new PanelRequestError('body')
   }
@@ -361,7 +360,7 @@ function asApp(body: unknown): AppDeclaration {
     ...page,
     scenarios: page.scenarios ?? [],
   }))
-  return { ...body, pages } as unknown as AppDeclaration
+  return { ...body, pages, variant: body.variant ?? '' } as unknown as AppDeclaration
 }
 
 /**

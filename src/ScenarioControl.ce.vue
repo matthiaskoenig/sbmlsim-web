@@ -15,8 +15,13 @@ import type { PropType } from 'vue'
 
 import type { Scenario } from './contract'
 
-/** The value of the entry which says the knobs are at no scenario. */
-const CUSTOM = 'custom'
+/**
+ * The value of the entry which says the knobs are at no scenario: the empty
+ * text, which no id of a scenario is (an SId is not empty, and the client
+ * refuses an app whose scenario has an empty id), so a scenario of any id,
+ * `custom` among them, can be picked.
+ */
+const CUSTOM = ''
 
 const props = defineProps({
   /** The label of the control, what the scenarios are. */

@@ -157,6 +157,10 @@
   --_font-mono: var(--sbmlsim-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   --_font-size: var(--sbmlsim-font-size, 12px);
   --_font-size-small: var(--sbmlsim-font-size-small, 11px);
+  /* the height of a select, of the row of a slider and of the line a Reset of a
+   * row of controls is centred in, so a slider and a select beside it line up
+   * and so does the Reset; it is no token of the design but of the controls */
+  --_control-height: calc(var(--_font-size) + 12px);
 
   --_axis-width: var(--sbmlsim-axis-width, 1px);
   --_curve-width: var(--sbmlsim-curve-width, 1.8px);

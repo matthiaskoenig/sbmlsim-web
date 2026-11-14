@@ -177,6 +177,7 @@ const app: AppDeclaration = {
       { id: 'panelB', title: 'Panel B', subtitle: 'what panel B answers' },
     ],
   },
+  variant: 'default',
 }
 
 describe('the contracts', () => {

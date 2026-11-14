@@ -71,6 +71,17 @@ function controlId(): string {
 /** The named stops of a range knob, none for a choice knob or a range knob without. */
 const stops = computed<PanelChoice[]>(() => stopsOf(props.axis))
 
+/**
+ * What the slider of a knob with stops says to a screen reader: its value and
+ * the stop it is at, e.g. `110, normal`, so a reader of the slider alone hears
+ * the stage as a reader of the select does; nothing extra off a stop or for a
+ * knob without stops, whose value is what it says.
+ */
+const valueText = computed<string | undefined>(() => {
+  const at = choiceAt(stops.value, props.value)
+  return at === null ? undefined : `${shortNumber(props.value, KNOB_DIGITS)}, ${at.label}`
+})
+
 /** The value the select of the stops shows: the stop the knob is at, else `custom`. */
 const stopShown = computed<string>(() => {
   const at = choiceAt(stops.value, props.value)
@@ -154,6 +165,7 @@ function say(kind: 'input' | 'change', event: Event): void {
           :max="props.axis.max ?? 1"
           :step="rangeStep(props.axis)"
           :value="props.value"
+          :aria-valuetext="valueText"
           :aria-describedby="props.describedBy"
           :disabled="props.disabled"
           @input="say('input', $event)"
@@ -192,7 +204,7 @@ function say(kind: 'input' | 'change', event: Event): void {
   display: flex;
   gap: 8px;
   align-items: center;
-  min-height: var(--_knob-control);
+  min-height: var(--_control-height);
 }
 
 .knob-row input {

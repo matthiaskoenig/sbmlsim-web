@@ -492,6 +492,14 @@ export interface AppDeclaration {
    * from the panels, so they are no part of the declaration of the app either.
    */
   heads: Record<string, PanelSummary[]>
+  /**
+   * The id of the variant the app answers: the one it was read in with
+   * `?variant=`, else the default variant of the model, which an app read
+   * without one is of. Its knobs, its scenarios and its heads are of that
+   * variant. Empty for an endpoint of the version without it, which says
+   * nothing of the variant it answers.
+   */
+  variant: string
 }
 
 /** A model the endpoint serves, as it is listed. */

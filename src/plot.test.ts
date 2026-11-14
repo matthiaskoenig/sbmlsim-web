@@ -107,6 +107,36 @@ function texts(svg: string): string[] {
   return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((one) => one[1] ?? '')
 }
 
+/**
+ * Get the pixels a text of a figure spans along x, by the anchor it is drawn at.
+ *
+ * @param attributes the attributes of the `<text>` element
+ * @param label its text
+ * @param measure the measure it was laid out with
+ * @param size its size
+ * @returns where it starts and where it ends
+ */
+function spanOf(
+  attributes: string,
+  label: string,
+  measure: (text: string, size: number) => number,
+  size: number,
+): { from: number; to: number } {
+  const x = Number(/\sx="([^"]*)"/.exec(attributes)?.[1])
+  const width = measure(label, size)
+  const anchor = /text-anchor="([^"]*)"/.exec(attributes)?.[1] ?? 'start'
+  const from = anchor === 'middle' ? x - width / 2 : anchor === 'end' ? x - width : x
+  return { from, to: from + width }
+}
+
+/** The tick labels of an axis group with their attributes. */
+function tickTexts(group: string): { attributes: string; label: string }[] {
+  return [...group.matchAll(/<g class="tick">.*?<text([^>]*)>([^<]*)<\/text>/g)].map((one) => ({
+    attributes: one[1] ?? '',
+    label: one[2] ?? '',
+  }))
+}
+
 /** The characters of `ROBOTO_ADVANCES`, printable ASCII and the ellipsis. */
 const ROBOTO_CHARACTERS = `${Array.from({ length: 95 }, (_, index) => String.fromCharCode(32 + index)).join('')}\u2026`
 
@@ -151,7 +181,7 @@ function chromeLike(text: string, size: number): number {
  * when the renderer changes its geometry on purpose, which the figure of the
  * change then has to show.
  */
-const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="71.64" y="107" text-anchor="middle" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="122.55" y="107" text-anchor="middle" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="173.45" y="107" text-anchor="middle" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="224.36" y="107" text-anchor="middle" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96.09" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70.03" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="43.97" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="17.91" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="116.74" y1="143" x2="134.74" y2="143"/><text x="140.74" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
+const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="69" y="107" text-anchor="start" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="119" y="107" text-anchor="start" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="170" y="107" text-anchor="start" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="221" y="107" text-anchor="start" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="44" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="18" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="116.74" y1="143" x2="134.74" y2="143"/><text x="140.74" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
 
 /** The spec `PINNED` was drawn from. */
 function pinned(): PlotSpec {
@@ -757,6 +787,61 @@ describe('the limits of the value axis', () => {
   })
 })
 
+describe('the tick labels on whole pixels', () => {
+  /** The ticks of an axis group: the pixel of each tick mark and its label. */
+  function ticksOf(group: string): { mark: number; attributes: string; label: string }[] {
+    return [
+      ...group.matchAll(
+        /<g class="tick"><line x1="([^"]*)" y1="([^"]*)"[^>]*\/><text([^>]*)>([^<]*)<\/text>/g,
+      ),
+    ].map((one) => ({
+      mark: Number(group.includes('class="axis x"') ? one[1] : one[2]),
+      attributes: one[3] ?? '',
+      label: one[4] ?? '',
+    }))
+  }
+
+  it('anchors every tick label on a whole pixel, at most half a pixel from where its tick centres it', () => {
+    // a text drawn from a fraction of a pixel takes the colour fringes of
+    // subpixel antialiasing at that fraction, so equal glyphs of two labels
+    // would read in two tints
+    const problems: string[] = []
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (const span of [3, 96, 1440, 143000]) {
+        for (let width = 220; width <= 700; width += 37) {
+          const grid = Array.from({ length: 50 }, (_, index) => (span * index) / 49)
+          const svg = plotSvg({
+            ...spec(1, { x: grid, width, height: 200 }),
+            series: [
+              series(
+                1,
+                grid.map((_, index) => (3 * index) / 49),
+              ),
+            ],
+            measure,
+          })
+          const [, xAxis = '', rest = ''] = svg.split('<g class="axis ')
+          for (const one of ticksOf(`<g class="axis ${xAxis}`)) {
+            const x = Number(/\sx="([^"]*)"/.exec(one.attributes)?.[1])
+            const middle = x + measure(one.label, 11) / 2
+            if (!Number.isInteger(x) || Math.abs(middle - one.mark) > 0.5 + 1e-9) {
+              problems.push(`${measure.name} ${String(span)} ${String(width)} x ${one.label}`)
+            }
+          }
+          for (const one of ticksOf(`<g class="axis ${rest.split('<g class="data"')[0] ?? ''}`)) {
+            const x = Number(/\sx="([^"]*)"/.exec(one.attributes)?.[1])
+            const y = Number(/\sy="([^"]*)"/.exec(one.attributes)?.[1])
+            if (!Number.isInteger(x) || !Number.isInteger(y) || Math.abs(y - one.mark) > 0.5) {
+              problems.push(`${measure.name} ${String(span)} ${String(width)} y ${one.label}`)
+            }
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([])
+  })
+})
+
 describe('the declared ends of the axes', () => {
   /** Get the labels of the ticks of an axis, `x` or `y`, in their order. */
   function ticksOf(svg: string, axis: 'x' | 'y'): string[] {
@@ -1130,14 +1215,10 @@ describe('the room the tick labels keep', () => {
   function xTickSpans(svg: string): { label: string; from: number; to: number }[] {
     const axis = svg.split('<g class="axis ')[1] ?? ''
     const group = axis.split('<g class="data"')[0] ?? ''
-    return [
-      ...group.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => {
-      const at = Number(one[1])
-      const label = one[2] ?? ''
-      const half = tableMeasure(label, SMALL_FONT) / 2
-      return { label, from: at - half, to: at + half }
-    })
+    return tickTexts(group).map((one) => ({
+      label: one.label,
+      ...spanOf(one.attributes, one.label, tableMeasure, SMALL_FONT),
+    }))
   }
 
   it('keeps every tick label of the x axis inside the figure', () => {
@@ -1356,12 +1437,7 @@ describe('the fit of the margins', () => {
   ): { from: number; to: number }[] {
     const axis = svg.split('<g class="axis ')[1] ?? ''
     const group = axis.split('<g class="data"')[0] ?? ''
-    return [
-      ...group.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => {
-      const half = measure(one[2] ?? '', SMALL_FONT) / 2
-      return { from: Number(one[1]) - half, to: Number(one[1]) + half }
-    })
+    return tickTexts(group).map((one) => spanOf(one.attributes, one.label, measure, SMALL_FONT))
   }
 
   /** The pixel the column of a legend beside the plot starts at, the figure without one. */
@@ -1444,9 +1520,7 @@ describe('the room the y tick labels keep', () => {
   /** The pixel every y tick label starts at, its right end less its estimated width. */
   function yTickStarts(svg: string, measure: TextMeasure = tableMeasure): number[] {
     const axis = (svg.split('<g class="axis ')[2] ?? '').split('<g class="data"')[0] ?? ''
-    return [
-      ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => Number(one[1]) - measure(one[2] ?? '', SMALL_FONT))
+    return tickTexts(axis).map((one) => spanOf(one.attributes, one.label, measure, SMALL_FONT).from)
   }
 
   /** The pixel the glyphs of the last line of the y label end at. */
@@ -1542,9 +1616,9 @@ describe('the column beside the plot', () => {
       /<g class="legend"[\s\S]*?<line class="swatch" [^>]*\sx1="([^"]*)"/.exec(svg)?.[1],
     )
     const axis = svg.split('<g class="axis ')[1] ?? ''
-    const ends = [
-      ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => Number(one[1]) + tableMeasure(one[2] ?? '', 11) / 2)
+    const ends = tickTexts(axis).map(
+      (one) => spanOf(one.attributes, one.label, tableMeasure, 11).to,
+    )
     const box = plotGeometry(figure).box
     // the plot was narrowed for its last label, which reaches past its end
     expect(Math.max(...ends)).toBeGreaterThan(box.x1 + 12)
@@ -2005,9 +2079,14 @@ describe('the sizes the text is drawn in', () => {
           for (const one of textsOf(xAxis)) {
             const x = attribute(one.attributes, 'x')
             const label = one.attributes.includes('axis-label')
-            const half = measure(one.text, label ? SIZES.label : SIZES.small) / 2
+            const drawn = spanOf(
+              one.attributes,
+              one.text,
+              measure,
+              label ? SIZES.label : SIZES.small,
+            )
             const edge = label ? 0 : PAD
-            if (x - half < edge - 0.01 || x + half > width - edge + 0.01) {
+            if (drawn.from < edge - 0.01 || drawn.to > width - edge + 0.01) {
               problems.push(`${name}: x axis text ${one.text} at ${String(x)}`)
             }
           }
@@ -2148,12 +2227,7 @@ describe('the ticks of the x axis', () => {
             measure,
           })
           const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
-          const spans = [
-            ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-          ].map((one) => {
-            const half = measure(one[2] ?? '', 11) / 2
-            return { from: Number(one[1]) - half, to: Number(one[1]) + half }
-          })
+          const spans = tickTexts(axis).map((one) => spanOf(one.attributes, one.label, measure, 11))
           count += spans.length < 3 ? 1 : 0
           for (const [index, one] of spans.entries()) {
             const next = spans[index + 1]
@@ -2265,9 +2339,7 @@ describe('the box solved for the ticks it draws', () => {
   /** The pixel the label of the last x tick ends at, by a measure at a size. */
   function lastTickEnd(svg: string, measure: TextMeasure, size: number): number {
     const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
-    const ends = [
-      ...axis.matchAll(/<g class="tick">.*?<text[^>]*\sx="([^"]*)"[^>]*>([^<]*)<\/text>/g),
-    ].map((one) => Number(one[1]) + measure(one[2] ?? '', size) / 2)
+    const ends = tickTexts(axis).map((one) => spanOf(one.attributes, one.label, measure, size).to)
     return Math.max(...ends)
   }
 
@@ -2289,7 +2361,10 @@ describe('the box solved for the ticks it draws', () => {
         const box = plotGeometry(figure).box
         const edge = room(svg, width)
         const slack = Math.min(edge - box.x1, edge - lastTickEnd(svg, measure, LARGE.small))
-        expect({ measure: measure.name, width, slack: slack <= 0.01 }).toEqual({
+        // a tick label starts on a whole pixel, which moves it by half a pixel at
+        // most, and the room is solved with that half pixel, so the end binds to
+        // within a pixel
+        expect({ measure: measure.name, width, slack: slack <= 1.01 }).toEqual({
           measure: measure.name,
           width,
           slack: true,

@@ -480,6 +480,13 @@ const SMALL_FONT = 11
 const LABEL_FONT = 12
 /** What a sum of pixels may be off by and still count as the same room. */
 const ROUNDING = 1e-9
+/**
+ * How far a tick label may lie from where its tick centres it, in pixels:
+ * every tick label starts on a whole pixel (`labelStart`), so it moves by at
+ * most half a pixel, and the room of the labels is solved with that half
+ * pixel more, so a snapped label still keeps inside the figure.
+ */
+const SNAP = 0.5
 /** What a label which does not fit its room ends with. */
 const ELLIPSIS = '\u2026'
 
@@ -1727,18 +1734,21 @@ function axisGroup(
             x2: coord(box.x0),
             y2: coord(at),
           })
+      // every tick label is anchored on a whole pixel (`labelStart`): an x label
+      // at the start it is centred from, a y label at its end and its middle
+      const label = formatNumber(value, decimals, exponential)
       const written = horizontal
-        ? text(formatNumber(value, decimals, exponential), {
+        ? text(label, {
             style: `fill:${token('fg-soft')};stroke:none`,
-            x: coord(at),
+            x: coord(labelStart(at, type.measure(label, type.small))),
             y: coord(box.y1 + TICK + LABEL_GAP),
-            'text-anchor': 'middle',
+            'text-anchor': 'start',
             'dominant-baseline': 'hanging',
           })
-        : text(formatNumber(value, decimals, exponential), {
+        : text(label, {
             style: `fill:${token('fg-soft')};stroke:none`,
-            x: coord(box.x0 - TICK - LABEL_GAP),
-            y: coord(at),
+            x: coord(Math.round(box.x0 - TICK - LABEL_GAP)),
+            y: coord(Math.round(at)),
             'text-anchor': 'end',
             'dominant-baseline': 'central',
           })
@@ -2236,6 +2246,25 @@ function xTicksOf(xs: Limits, from: number, to: number, type: Lettering): XTicks
 }
 
 /**
+ * Get the pixel a tick label of the x axis starts at.
+ *
+ * A label is centred on its tick and starts on a whole pixel: a text whose
+ * glyphs start at a fraction of a pixel is drawn with the colour fringes of
+ * subpixel antialiasing at that fraction, so equal glyphs of two labels, the
+ * "1" of "100" against the "8" of "80", would read in two tints. The start is
+ * rounded, so a label moves by at most `SNAP`, which the room of the labels
+ * holds (`tickReach`), and the gap between two labels is measured between the
+ * snapped ones (`tickLabelsClear`).
+ *
+ * @param at the pixel of its tick
+ * @param width the width of the label
+ * @returns the whole pixel it starts at
+ */
+function labelStart(at: number, width: number): number {
+  return Math.round(at - width / 2)
+}
+
+/**
  * Get whether the labels of neighbouring ticks of an x axis keep their gap.
  *
  * @param axis the axis
@@ -2249,9 +2278,9 @@ function tickLabelsClear(axis: Axis, type: Lettering): boolean {
   const spans = axis.ticks
     .filter((value) => axis.drawable(value))
     .map((value) => {
-      const at = axis.position(value)
-      const half = type.measure(formatNumber(value, decimals, exponential), type.small) / 2
-      return { from: at - half, to: at + half }
+      const width = type.measure(formatNumber(value, decimals, exponential), type.small)
+      const from = labelStart(axis.position(value), width)
+      return { from, to: from + width }
     })
   return spans.every((span, index) => {
     const next = spans[index + 1]
@@ -2297,7 +2326,8 @@ function tickReach(
     if (!axis.drawable(value)) {
       continue
     }
-    const half = type.measure(formatNumber(value, decimals, exponential), type.small) / 2
+    // half the label and the half pixel a label snapped to a whole pixel moves by
+    const half = type.measure(formatNumber(value, decimals, exponential), type.small) / 2 + SNAP
     // the share of `axisOf`, so the solved end puts the tick where it is drawn
     const share = span > 0 ? (value - axis.limits.low) / span : 0.5
     if (share > 0) {

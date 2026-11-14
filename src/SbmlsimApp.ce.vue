@@ -106,12 +106,17 @@
  *
  * The declarations of the panels may differ by the variant, and so may what
  * the app derives from them: the shell reads the app again in the variant a
- * reader switches to (`switchTo`), draws no panel while it does, and then draws
- * the controls, the scenarios and the heads of that variant and gives every
- * panel the variant and the values of the shared knobs at once, a value kept
- * where the knob of that variant takes it (`adopt`). The first variant is the
- * one the app is read in without a variant, which the service answers with the
- * default variant of the model.
+ * reader switches to (`switchTo`). While it does, the panels keep the figures
+ * of the variant before, dimmed, inert and hidden from a screen reader, under a
+ * caption which names the variant they are switched to; then it draws the
+ * controls, the scenarios and the heads of that variant and gives every panel
+ * the variant and the values of the shared knobs at once, a value kept where
+ * the knob of that variant takes it (`adopt`), and each panel holds its figure
+ * of the variant before, dimmed, until it draws one of the new variant
+ * (`awaiting`). The app names the variant it answers (`variant`): the first one
+ * the shell reads is the variant the switcher starts at, every app is kept by
+ * its variant, and an app of another variant than the one asked for is a body
+ * which is no app.
  *
  * ## The scenarios of a page
  *
@@ -141,6 +146,7 @@
 
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -171,7 +177,7 @@ import type {
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
-import { keepControlKeys, ownValue, sameValue, validValue } from './knob'
+import { drawableKnob, keepControlKeys, ownValue, sameValue, validValue } from './knob'
 import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -215,6 +221,33 @@ const props = defineProps({
 
 const host = useHost()
 const grid = useTemplateRef<HTMLElement>('grid')
+const knobRow = useTemplateRef<HTMLElement>('knobRow')
+
+/**
+ * The width of the first shared control of the page, which the select of its
+ * scenarios takes, `null` until it was measured: the select is in a row of its
+ * own, the controls shrink below their widest when a row holds more of them,
+ * and the select of a page and the control under it are drawn alike.
+ */
+const firstWidth = ref<number | null>(null)
+/** The observer of the width of the first shared control, `null` where there is none. */
+let widthObserver: ResizeObserver | null = null
+
+/** Observe the width of the first shared control of the page, the one under the select of the scenarios. */
+function observeFirst(): void {
+  widthObserver?.disconnect()
+  widthObserver = null
+  const first = knobRow.value?.querySelector<HTMLElement>(':scope > .knob')
+  if (first === null || first === undefined || typeof ResizeObserver === 'undefined') {
+    firstWidth.value = null
+    return
+  }
+  widthObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.borderBoxSize[0]?.inlineSize ?? first.getBoundingClientRect().width
+    firstWidth.value = Number.isFinite(width) && width > 0 ? width : null
+  })
+  widthObserver.observe(first)
+}
 
 /** The app, `null` until it arrived and where it could not be read. */
 const app = shallowRef<AppDeclaration | null>(null)
@@ -232,6 +265,13 @@ const shownVariant = ref('')
 const switching = ref(false)
 /** What went wrong reading the app of the chosen variant, `null` while nothing did. */
 const switchFailure = ref<FailureKind | null>(null)
+/**
+ * The panels of the page which have not drawn the variant the app was switched
+ * to yet, by their id: each draws the figure of the variant before, dimmed,
+ * until it draws its first of the new one or fails, and the caption of the
+ * switch stays over the grid until none is left.
+ */
+const awaiting = ref<ReadonlySet<string>>(new Set())
 /** The apps of the variants which were read, by the id of the variant, for a reader who switches back. */
 const read = new Map<string, AppDeclaration>()
 /** The provenance of the latest answer of each panel of the page, by the id of the panel. */
@@ -276,7 +316,20 @@ const variantOfPanels = computed<string>(() =>
  */
 const sharedKnobs = computed<SharedKnob[]>(() => {
   const page = current.value
-  return page === null ? [] : (app.value?.shared[page.id] ?? [])
+  // a knob whose control cannot be built is left out, as a panel leaves it out
+  // of its own controls (`drawableKnob`), and the rest of the page is drawn
+  return page === null
+    ? []
+    : (app.value?.shared[page.id] ?? []).filter((one) => drawableKnob(one.knob))
+})
+
+/** The label of the variant the app is switched to, empty while no switch is under way. */
+const switchCaption = computed<string>(() => {
+  if (switchFailure.value !== null || (!switching.value && awaiting.value.size === 0)) {
+    return ''
+  }
+  const label = variants.value.find((one) => one.id === chosen.value)?.label ?? chosen.value
+  return `Switching to ${label} …`
 })
 
 /** The scenarios of the page which is shown, none for a page without. */
@@ -461,6 +514,7 @@ async function load(): Promise<void> {
   read.clear()
   switching.value = false
   switchFailure.value = null
+  awaiting.value = new Set()
   const controller = new AbortController()
   flight = controller
   app.value = null
@@ -476,9 +530,18 @@ async function load(): Promise<void> {
       announce('body')
       return
     }
+    if (declared.variants.length > 1 && declared.variant === '') {
+      // a switcher of the variants needs to know which of them the app is of,
+      // which an app of the version without `variant` does not say
+      throw new PanelRequestError('body')
+    }
     app.value = declared
-    chosen.value = declared.variants[0]?.id ?? ''
-    shownVariant.value = chosen.value
+    shownVariant.value = declared.variant
+    read.set(declared.variant, declared)
+    // the switcher shows the variant the app is of; an app whose default
+    // variant is none it lists is switched to the first one it lists
+    const listed = declared.variants.some((one) => one.id === declared.variant)
+    chosen.value = listed ? declared.variant : (declared.variants[0]?.id ?? '')
   } catch (error) {
     if (controller.signal.aborted && flight !== controller) {
       return
@@ -525,6 +588,7 @@ function adopt(declared: AppDeclaration, variant: string): void {
   shownVariant.value = variant
   switching.value = false
   switchFailure.value = null
+  awaiting.value = new Set(page?.panels ?? [])
 }
 
 /**
@@ -532,13 +596,14 @@ function adopt(declared: AppDeclaration, variant: string): void {
  *
  * The declarations of the panels may differ by the variant, and so may the
  * knobs a page shares, its scenarios and the heads of its cards: the app is
- * read again in that variant (`?variant=`), and while it is, its panels are not
- * drawn and its controls take no movement, so no figure is drawn of the
- * variant before under the switcher of the one after, nor of the declaration
- * of one variant and the controls of another. A failure leaves it so, with a
- * line which says what failed: the figures of the variant before are no
- * figures of the variant the switcher shows. A reader who switches back to the
- * variant which is drawn gets it back as it was, without a request.
+ * read again in that variant (`?variant=`). While it is, its panels keep the
+ * figures of the variant before, dimmed, inert and hidden from a screen reader
+ * under the caption of the switch, and its controls and tabs take no movement,
+ * so no figure of the variant before is presented as one of the variant the
+ * switcher shows, and none is drawn of the declaration of one variant and the
+ * controls of another. A failure clears them at once, with a line which says
+ * what failed. A reader who switches back to a variant whose app was read gets
+ * it back without a request.
  *
  * @param variant the id of the variant
  */
@@ -550,6 +615,9 @@ async function switchTo(variant: string): Promise<void> {
     switching.value = false
     return
   }
+  // the panels which still draw the variant before a switch before this one
+  // are no longer awaited: the caption names the variant of this switch
+  awaiting.value = new Set()
   switching.value = true
   const known = read.get(variant)
   if (known !== undefined) {
@@ -567,8 +635,10 @@ async function switchTo(variant: string): Promise<void> {
     if (switchFlight !== controller) {
       return
     }
-    if (declared.pages.length === 0) {
-      // an app without a page has nothing to show, which is a body which is no app
+    if (declared.pages.length === 0 || declared.variant !== variant) {
+      // an app without a page has nothing to show, and an app of another
+      // variant than the one asked for would draw its controls under the
+      // switcher of this one: both are bodies which are no app of the switch
       throw new PanelRequestError('body')
     }
     read.set(variant, declared)
@@ -615,7 +685,27 @@ function collect(event: Event): void {
   const provenance = (event as CustomEvent<{ provenance?: Provenance }>).detail.provenance
   if (provenance !== undefined) {
     answers.value = { ...answers.value, [provenance.panel]: provenance }
+    settle(event)
   }
+}
+
+/**
+ * Take a panel off the panels a switch of the variant awaits.
+ *
+ * A panel which drew a figure of the variant it was given, or failed to, has
+ * done with the switch: its figure of the variant before is gone either way.
+ *
+ * @param event the `sbmlsim-result` or the `sbmlsim-error` of a panel, whose
+ *   target is the panel the shell placed
+ */
+function settle(event: Event): void {
+  const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
+  if (id === null || !awaiting.value.has(id)) {
+    return
+  }
+  const left = new Set(awaiting.value)
+  left.delete(id)
+  awaiting.value = left
 }
 
 /**
@@ -644,6 +734,7 @@ watch(
   () => {
     freezeShown()
     answers.value = {}
+    awaiting.value = new Set()
     resetShared()
   },
   { flush: 'pre' },
@@ -670,9 +761,18 @@ onMounted(() => {
   void load()
 })
 
+watch(
+  () => [knobRow.value, sharedKnobs.value, scenarios.value.length],
+  () => {
+    void nextTick(observeFirst)
+  },
+  { flush: 'post' },
+)
+
 onBeforeUnmount(() => {
   flight?.abort()
   switchFlight?.abort()
+  widthObserver?.disconnect()
 })
 </script>
 
@@ -694,6 +794,7 @@ onBeforeUnmount(() => {
             class="tab"
             :data-label="one.title"
             :aria-current="one.id === current.id ? 'page' : undefined"
+            :disabled="switching"
             @click="show(one.id)"
           >
             {{ one.title }}
@@ -708,6 +809,7 @@ onBeforeUnmount(() => {
       </div>
       <div
         v-if="sharedKnobs.length > 0"
+        ref="knobRow"
         class="knobs"
         role="group"
         aria-label="Simulation settings of the page"
@@ -715,7 +817,11 @@ onBeforeUnmount(() => {
       >
         <!-- the examples of the page set the controls below, so they are above them,
              in a row of their own -->
-        <div v-if="scenarios.length > 0" class="scenarios">
+        <div
+          v-if="scenarios.length > 0"
+          class="scenarios"
+          :style="firstWidth === null ? undefined : { '--_scenario-width': `${firstWidth}px` }"
+        >
           <ScenarioControl
             :label="SCENARIO_LABEL"
             :scenarios="scenarios"
@@ -734,7 +840,10 @@ onBeforeUnmount(() => {
           @input="moveShared(one.knob, $event)"
           @change="moveShared(one.knob, $event)"
         />
-        <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
+        <!-- level with the first line of controls, the selects, and never below a slider -->
+        <div class="knobs-reset">
+          <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
+        </div>
         <!-- hidden, so a screen reader hears the text once, as the description of its
              control, and not again after the controls; aria-describedby reads it -->
         <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
@@ -751,11 +860,15 @@ onBeforeUnmount(() => {
         ref="grid"
         :key="current.id"
         class="grid"
-        :class="{ switching: switching }"
-        :aria-busy="switching ? 'true' : 'false'"
+        :class="{ switching: switching, failed: switchFailure !== null }"
+        :aria-busy="switchCaption !== '' ? 'true' : 'false'"
         :aria-label="current.title"
         @sbmlsim-result="collect"
+        @sbmlsim-error="settle"
       >
+        <!-- in the gap above the grid, so it moves nothing; it names the variant the
+             dimmed figures are being switched to, so none of them is taken for it -->
+        <p class="caption" role="status">{{ switchCaption }}</p>
         <div v-for="one in current.panels" :key="one" class="cell">
           <component
             :is="panelTag"
@@ -768,6 +881,8 @@ onBeforeUnmount(() => {
             :heading-level="panelLevel"
             :variant="variantOfPanels"
             :values.attr="valuesOf(one)"
+            :inert="switching"
+            :aria-hidden.attr="switching ? 'true' : undefined"
           ></component>
           <div class="reserve" aria-hidden="true">
             <div
@@ -968,14 +1083,27 @@ onBeforeUnmount(() => {
   max-width: 20rem;
 }
 
-/* the select of the scenarios takes a row of its own, above the knobs it sets */
+/* the select of the scenarios takes a row of its own, above the knobs it sets,
+ * as wide as the first of them under it (`firstWidth`) */
 .scenarios {
   display: flex;
   flex: 1 1 100%;
 }
 
-.knobs .reset {
-  align-self: flex-end;
+.scenarios .knob {
+  flex: 0 1 var(--_scenario-width, 20rem);
+}
+
+/* the Reset is level with the first line of controls of the row, a select or
+ * the select of the stops of a knob: it starts one label line and the gap of a
+ * control below the top of the row and is centred in the height of a select,
+ * so it sits beside the selects and never below a slider */
+.knobs-reset {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: var(--_control-height);
+  margin-top: calc(var(--_font-size-small) * 1.45 + 4px);
 }
 
 /*
@@ -1073,12 +1201,45 @@ onBeforeUnmount(() => {
   row-gap: 8px;
 }
 
-/* the panels of a variant whose app is being read, or could not be, keep their
- * room and are not drawn, so no figure of the variant before is shown under the
- * switcher of the one after and nothing of the page moves; the copy of the head
- * keeps the head row */
-.grid.switching > .cell > :not(.reserve) {
+/*
+ * A switch of the variant: while the app of the variant is read, the panels
+ * keep the figures of the variant before, dimmed, inert and hidden from a
+ * screen reader, under the caption which names the variant they are being
+ * switched to, so none of them is taken for a figure of it and the reader
+ * keeps the reference a switch is made to compare against; each panel then
+ * holds its figure dimmed itself until it draws one of the new variant. An app
+ * of a variant which cannot be read leaves no figure of the variant before:
+ * the panels keep their room and are not drawn. Nothing of the page moves in
+ * either.
+ */
+.grid {
+  position: relative;
+}
+
+.grid.switching > .cell > *::part(figure),
+.grid.switching > .cell > *::part(foot) {
+  opacity: 0.35;
+}
+
+.grid.failed > .cell > :not(.reserve) {
   visibility: hidden;
+}
+
+/* the caption of a switch sits in the gap between the grid and what is above it */
+.caption {
+  position: absolute;
+  top: -16px;
+  right: 0;
+  left: 0;
+  height: 16px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
+  line-height: 16px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* read by a screen reader and drawn nowhere: the live region of a page switch */

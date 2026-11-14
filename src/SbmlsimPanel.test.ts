@@ -314,7 +314,12 @@ function textOf(element: PanelElement, selector: string): string {
 
 /** Get the figure of the panel as it is drawn now, empty while there is none. */
 function figure(element: PanelElement): string {
-  return shadow(element).querySelector('.figure-svg')?.innerHTML ?? ''
+  return shadow(element).querySelector('.plot .figure-svg')?.innerHTML ?? ''
+}
+
+/** Get the figure of the variant before a switch the panel holds, empty while it holds none. */
+function heldFigure(element: PanelElement): Element | null {
+  return shadow(element).querySelector('.held')
 }
 
 /** Get a control of a knob by its id. */
@@ -1954,18 +1959,27 @@ describe('the variant of the model', () => {
     }
     const element = await started({ variant: 'variantA' })
     expect(textOf(element, '.title')).toBe('Panel A')
+    const before = figure(element)
     element.setAttribute('variant', 'variantB')
     await settled()
-    // the figure, the title and the controls of variant A are gone while the
-    // declaration of variant B is read, and no figure of either is drawn
+    // the title and the controls of variant A are gone while the declaration
+    // of variant B is read, and no figure of either is drawn as current: the
+    // figure of variant A is held, dimmed, inert and hidden from a reader
     expect(figure(element)).toBe('')
     expect(textOf(element, '.title')).toBe('')
     expect(shadow(element).querySelectorAll('.knob')).toHaveLength(0)
+    const held = heldFigure(element)
+    expect(held?.innerHTML).toBe(before)
+    expect(held?.hasAttribute('inert')).toBe(true)
+    expect(held?.getAttribute('aria-hidden')).toBe('true')
+    expect(textOf(element, '.pending')).toBe('')
     expect(release).not.toBeNull()
     ;(release as unknown as () => void)()
     await settled()
     expect(textOf(element, '.title')).toBe('Panel A of B')
     expect(figure(element)).toContain('curve A of B')
+    // the figure of the new variant takes the place of the one it held
+    expect(heldFigure(element)).toBeNull()
   })
 
   it('keeps the value of a knob of its own which the variant declares as well', async () => {
@@ -2078,9 +2092,11 @@ describe('the variant of the model', () => {
     element.setAttribute('variant', 'variantB')
     await vi.advanceTimersByTimeAsync(500)
     await nextTick()
-    // the answer of variant A is gone with its declaration, and the line says
-    // that the figure of the settings shown cannot be drawn
+    // the answer of variant A is gone with its declaration, the figure it held
+    // is dropped by the failure, and the line says that the figure of the
+    // settings shown cannot be drawn
     expect(figure(element)).toBe('')
+    expect(heldFigure(element)).toBeNull()
     expect(textOf(element, '.error')).toContain('cannot be drawn')
     expect(textOf(element, '.provenance')).toBe('')
     // back on variant A, it is read and run again
@@ -2683,12 +2699,15 @@ describe('the named stops of a range knob', () => {
     move(control(element, 'knobB'), '0.4', 'input')
     await nextTick()
     expect(stops(element).value).toBe('custom')
+    expect(control(element, 'knobB').getAttribute('aria-valuetext')).toBeNull()
     const custom = [...stops(element).options].find((one) => one.value === 'custom')
     expect(custom?.textContent.trim()).toBe('custom')
     expect(custom?.disabled).toBe(true)
     move(control(element, 'knobB'), '0.2', 'input')
     await nextTick()
     expect(stops(element).value).toBe('0.2')
+    // the slider says the stop it is at to a screen reader, and nothing more off one
+    expect(control(element, 'knobB').getAttribute('aria-valuetext')).toBe('0.2, low')
     // the entry is there only while the value is no stop
     expect([...stops(element).options].map((one) => one.value)).toEqual(['1', '0.6', '0.2'])
   })

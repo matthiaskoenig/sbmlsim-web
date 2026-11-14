@@ -272,16 +272,21 @@ test.describe('the app shell', () => {
    * are the ones without a variant, so the shell and the panels read them in
    * the variant as they read a variant which differs.
    */
-  async function twoVariants(page: Page): Promise<void> {
+  async function twoVariants(page: Page): Promise<{ asked: () => string[] }> {
+    const asked: string[] = []
     await page.route(
       (url) => url.pathname === '/api/models/hctz/app',
       async (route) => {
+        const url = new URL(route.request().url())
+        asked.push(`app ${url.searchParams.get('variant') ?? ''}`)
         const response = await route.fetch({ url: route.request().url().replace(/\?.*$/, '') })
         const body = (await response.json()) as Record<string, unknown>
         body.variants = [
           { id: 'default', label: 'Default' },
           { id: 'impaired', label: 'Impaired' },
         ]
+        // the app names the variant it answers, the one it was asked for
+        body.variant = url.searchParams.get('variant') ?? 'default'
         await route.fulfill({ response, json: body })
       },
     )
@@ -289,9 +294,14 @@ test.describe('the app shell', () => {
       (url) =>
         url.pathname.startsWith('/api/models/hctz/panels/') && url.searchParams.has('variant'),
       async (route) => {
+        const url = new URL(route.request().url())
+        asked.push(
+          `${url.pathname.split('/').at(-1) ?? ''} ${url.searchParams.get('variant') ?? ''}`,
+        )
         await route.continue({ url: route.request().url().replace(/\?.*$/, '') })
       },
     )
+    return { asked: () => asked }
   }
 
   test('draws the navigation, the panels of a page and the footer from the declaration', async ({
@@ -432,6 +442,75 @@ test.describe('the app shell', () => {
     expect(stacked).toHaveLength(2)
     expect(stacked[1]).toEqual(stacked[0])
   })
+
+  for (const width of [390, 768, 1280]) {
+    test(`puts a Reset level with the selects of its row and the select of the examples as wide as the control under it at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      /** The vertical centre of the Reset, or the options, and the boxes of the selects of a row. */
+      const row = (
+        root: Locator,
+        reset: string,
+      ): Promise<{ reset: number; selects: { left: number; right: number; centre: number }[] }> =>
+        root.evaluate((element, selector) => {
+          const scope = element.shadowRoot ?? element
+          const centre = (box: DOMRect): number => (box.top + box.bottom) / 2
+          const button = scope.querySelector(selector)
+          return {
+            reset: button === null ? Number.NaN : centre(button.getBoundingClientRect()),
+            selects: [...scope.querySelectorAll('select')].map((one) => {
+              const box = one.getBoundingClientRect()
+              return { left: box.left, right: box.right, centre: centre(box) }
+            }),
+          }
+        }, reset)
+      // the patient page: the examples, the clearance with its stops and its
+      // slider, the dose, and the Reset of the row
+      await page.goto('/demo/app.html')
+      await page.evaluate(() => {
+        const one = document.querySelector('sbmlsim-app')
+        one?.setAttribute('page', 'patient')
+      })
+      const app = page.locator('sbmlsim-app')
+      await expect(app.locator('#scenario')).toBeVisible()
+      await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
+      const shell = await row(app, '.knobs .reset')
+      const [example, stops, dose] = shell.selects
+      // the Reset is centred on the line of the selects of its row, the dose's
+      expect(Math.abs(shell.reset - (dose?.centre ?? Number.NaN))).toBeLessThan(0.5)
+      // and the select of the examples is as wide as the control under it
+      expect(Math.abs((example?.right ?? 0) - (stops?.right ?? 1))).toBeLessThan(0.5)
+      expect(Math.abs((example?.left ?? 0) - (stops?.left ?? 1))).toBeLessThan(0.5)
+      // a panel alone draws its options level with its selects as well
+      await page.goto('/demo/plain.html')
+      await page.evaluate(() => {
+        document.querySelector('sbmlsim-panel')?.remove()
+        const one = document.createElement('sbmlsim-panel')
+        for (const [name, value] of Object.entries({
+          endpoint: '',
+          model: 'hctz',
+          panel: 'patient_plasma',
+          layout: 'stacked',
+          auto: '',
+        })) {
+          one.setAttribute(name, value)
+        }
+        document.body.append(one)
+      })
+      const alone = page.locator('sbmlsim-panel')
+      await expect(alone.locator('svg path').first()).toBeVisible()
+      const own = await row(alone, '.options')
+      const ownDose = own.selects.at(-1)
+      const sameRow = Math.abs(own.reset - (ownDose?.centre ?? Number.NaN)) < 0.5
+      const onItsOwn = own.reset > (ownDose?.centre ?? 0) + 20
+      // beside the selects, or on a line of its own where the row wraps, never at a slider
+      expect(sameRow || onItsOwn).toBe(true)
+      if (width >= 768) {
+        expect(sameRow).toBe(true)
+      }
+    })
+  }
 
   for (const width of [390, 1024, 1280]) {
     test(`fits a card to its panel and a shared control to the page at ${String(width)} px`, async ({
@@ -714,13 +793,18 @@ test.describe('the app shell', () => {
   })
 
   test('draws no figure of the variant before when the run of a switch fails', async ({ page }) => {
-    await twoVariants(page)
+    const reads = await twoVariants(page)
     // the service knows one variant: the plasma panel cannot run the other,
-    // the urine panel is answered without it
+    // which fails once the test lets it, the urine panel is answered without it
+    let fail: (() => void) | null = null
+    const failing = new Promise<void>((resolve) => {
+      fail = resolve
+    })
     await page.route('**/simulate', async (route) => {
       const request = route.request()
       const sent = request.postDataJSON() as Record<string, unknown>
       if (request.url().includes('renal_plasma') && sent.variant === 'impaired') {
+        await failing
         await route.abort()
         return
       }
@@ -730,7 +814,14 @@ test.describe('the app shell', () => {
     const panels = app.locator('sbmlsim-panel')
     await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
     await app.locator('.variant-select').selectOption('impaired')
+    // while its run is pending the panel holds the figure of the variant
+    // before, dimmed and inert, and draws none as a figure of the variant shown
+    await expect(panels.nth(0).locator('.held svg path').first()).toBeAttached()
+    await expect(panels.nth(0).locator('.plot')).toHaveCount(0)
+    expect(reads.asked()).toContain('renal_plasma impaired')
+    ;(fail as unknown as () => void)()
     await expect(panels.nth(0).locator('.error')).toContainText('cannot be drawn')
+    // the failure drops it at once
     await expect(panels.nth(0).locator('svg path')).toHaveCount(0)
     await expect(panels.nth(0).locator('.provenance')).toHaveCount(0)
     await expect(panels.nth(1).locator('svg path').first()).toBeVisible()
@@ -1107,8 +1198,9 @@ test.describe('the page of a patient', () => {
     expect(simulations.count()).toBe(4)
     // a knob moved away from the scenario leaves it, which is no pick
     await app.locator('#knob-crcl-stops').selectOption({ label: 'mild impairment' })
-    await expect(scenario).toHaveValue('custom')
-    await expect(scenario.locator('option[value=custom]')).toBeDisabled()
+    await expect(scenario).toHaveValue('')
+    await expect(scenario.locator('option[value=""]')).toHaveText('custom')
+    await expect(scenario.locator('option[value=""]')).toBeDisabled()
     // and Reset brings the defaults back, which the select follows
     await app.locator('.knobs button.reset').click()
     await expect(scenario).toHaveValue('healthy')
@@ -1167,6 +1259,78 @@ test.describe('the page of a patient', () => {
     await app.locator('#scenario').selectOption({ label: 'healthy, 25 mg' })
     await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(heavy[0])
     expect(await axesOf(app)).toEqual(axes)
+  })
+
+  test('holds the figures of the variant before, dimmed under a caption, until the new ones are drawn', async ({
+    page,
+  }) => {
+    // the app of the variant and the runs of it are held back until the test
+    // lets them go, so the switch is seen half way
+    const gates: Record<string, () => void> = {}
+    const gate = (name: string): Promise<void> =>
+      new Promise((resolve) => {
+        gates[name] = resolve
+      })
+    const appRead = gate('app')
+    const runs = gate('runs')
+    await page.route(
+      (url) => url.pathname.endsWith('/app') && url.searchParams.get('variant') === 'low_reference',
+      async (route) => {
+        await appRead
+        await route.continue()
+      },
+    )
+    await page.route('**/simulate', async (route) => {
+      const sent = route.request().postDataJSON() as Record<string, unknown>
+      if (sent.variant === 'low_reference') {
+        await runs
+      }
+      await route.continue()
+    })
+    const app = await openPage(page, 'hctz_variants', 'patient')
+    const cells = (): Promise<string> =>
+      app
+        .locator('.cell')
+        .evaluateAll((all) =>
+          all.map((one) => JSON.stringify(one.getBoundingClientRect().toJSON())).join('|'),
+        )
+    const before = await cells()
+    const first = await curvesOf(app)
+    const caption = app.locator('.grid .caption')
+    await expect(caption).toHaveText('')
+    await app.locator('.variant-select').selectOption({ label: 'reference 90 ml/min' })
+    // the app of the variant is read: the figures before stay, dimmed, inert
+    // and hidden from a reader, under the caption which names the variant
+    await expect(caption).toHaveText('Switching to reference 90 ml/min …')
+    for (const one of await app.locator('sbmlsim-panel').all()) {
+      await expect(one).toHaveAttribute('inert', '')
+      await expect(one).toHaveAttribute('aria-hidden', 'true')
+    }
+    expect(await curvesOf(app)).toEqual(first)
+    expect(await cells()).toBe(before)
+    gates.app?.()
+    // the panels read their declarations of the variant and hold the figures
+    // before until their runs answer
+    await expect(app.locator('sbmlsim-panel .title').first()).toHaveText(
+      'Plasma concentration of a patient (reference 90 ml/min)',
+    )
+    for (const one of await app.locator('sbmlsim-panel').all()) {
+      await expect(one.locator('.held svg path').first()).toBeAttached()
+      await expect(one.locator('.plot')).toHaveCount(0)
+      await expect(one).not.toHaveAttribute('inert')
+    }
+    await expect(caption).toHaveText('Switching to reference 90 ml/min …')
+    expect(await cells()).toBe(before)
+    gates.runs?.()
+    await expect(app.locator('sbmlsim-panel .held')).toHaveCount(0)
+    await expect(
+      app.locator('sbmlsim-panel').nth(0).locator('.plot svg path').first(),
+    ).toBeVisible()
+    await expect(
+      app.locator('sbmlsim-panel').nth(1).locator('.plot svg path').first(),
+    ).toBeVisible()
+    await expect(caption).toHaveText('')
+    expect(await cells()).toBe(before)
   })
 
   test('switches the declaration on screen with the variant', async ({ page }) => {

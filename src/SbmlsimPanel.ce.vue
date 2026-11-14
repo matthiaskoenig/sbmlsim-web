@@ -598,11 +598,6 @@ const knobValues = shallowRef<Record<string, number>>({})
  */
 const drawnValues = shallowRef<Record<string, number> | null>({})
 /**
- * The variant the drawn answer was run on, as the attribute `variant` named it
- * then: empty for the one the panel declares, which a stored answer is of too.
- */
-const drawnVariant = ref('')
-/**
  * The id of the knob the latest run grids over, `null` for a run of one point.
  *
  * It is set when a run is scheduled or issued and not when its answer arrives:
@@ -622,6 +617,18 @@ const gridded = ref<string | null>(null)
  * endpoint failed.
  */
 const dropped = ref(false)
+/**
+ * The figure of the variant before a switch, which the panel holds until it
+ * draws one of the new variant, empty while it holds none.
+ *
+ * A reader switches the variant to compare two figures, so the one before
+ * stays where it was, dimmed, inert and hidden from a screen reader, and is
+ * never presented as a figure of the variant after (the shell names the
+ * variant it is switched to above it). It is dropped when the first figure of
+ * the new variant is drawn and at once when that fails (`fail`), so no figure
+ * of a state no control shows is ever drawn as current.
+ */
+const held = shallowRef('')
 /**
  * The study data of the panel, `null` until it arrived.
  *
@@ -1364,18 +1371,18 @@ const drawFailed = computed<boolean>(() => grid.value !== null && svg.value === 
  * Whether the answer which is drawn is of another state than the one the
  * knobs and the attributes show, after a run which failed.
  *
- * While runs answer, the figure runs behind a moved knob or a switched variant
- * by a debounce and a round trip at most. A run which failed leaves the answer
- * before it, which may be of another variant than the attribute `variant`
- * names, or of another value of a knob it does not grid over: a knob of the
- * host, which the host keeps moving, or a control which was released into the
+ * While runs answer, the figure runs behind a moved knob by a debounce and a
+ * round trip at most. A run which failed leaves the answer before it, which may
+ * be of another value of a knob it does not grid over: a knob of the host,
+ * which the host keeps moving, or a control which was released into the
  * failure. Such a figure would show a state no control shows, so it is not
  * drawn, and the error line says that the panel cannot show the state it is
  * set to. The next run which answers draws it again; the knob the drawn answer
  * grids over is read out of the grid and never makes a figure stale. The
- * endpoint, the model and the panel, the other inputs of a run, start the
- * panel again when they change (`restart`), so no answer of another one is
- * drawn either.
+ * endpoint, the model, the panel and the variant, the other inputs of a run,
+ * start the panel again when they change (`restart`), so no answer of another
+ * one is held as current: a switch of the variant whose first run fails has
+ * dropped its figure (`dropped`) and says the same.
  */
 const stale = computed<boolean>(() => {
   const answer = grid.value
@@ -1384,9 +1391,6 @@ const stale = computed<boolean>(() => {
   }
   if (failure.value === null || answer === null) {
     return false
-  }
-  if (drawnVariant.value !== props.variant) {
-    return true
   }
   const swept = new Set(answer.dims.map((dim) => dim.id))
   return axes.value.some(
@@ -1758,7 +1762,7 @@ function drawStored(answer: SimulateResponse): void {
   }
   grid.value = answer
   drawnValues.value = null
-  drawnVariant.value = ''
+  held.value = ''
   fromStore.value = true
 }
 
@@ -1773,6 +1777,7 @@ function fail(error: unknown): void {
     return
   }
   failure.value = kind
+  held.value = ''
   const keep = stored.value
   if (keep !== null) {
     drawStored(keep)
@@ -1834,7 +1839,6 @@ async function simulate(gridId: string | null): Promise<void> {
   // whatever the controls hold by then, and the answer is drawn at the state
   // it was run at however the controls moved while it was in flight
   const sent = { ...knobValues.value }
-  const sentVariant = props.variant
   const body = bodyFor(gridId)
   try {
     const answer = await attempt(() =>
@@ -1845,10 +1849,10 @@ async function simulate(gridId: string | null): Promise<void> {
     }
     grid.value = answer
     drawnValues.value = sent
-    drawnVariant.value = sentVariant
     fromStore.value = false
     failure.value = null
     dropped.value = false
+    held.value = ''
     host?.dispatchEvent(
       new CustomEvent('sbmlsim-result', {
         detail: { provenance: answer.provenance, spec_hash: answer.spec_hash },
@@ -2268,6 +2272,8 @@ function restart(variant = false): void {
     return
   }
   const kept = variant ? { ...knobValues.value } : {}
+  const shown = svg.value !== '' && !stale.value && !fromStore.value ? svg.value : held.value
+  held.value = variant ? shown : ''
   dropped.value = variant && (dropped.value || (grid.value !== null && !fromStore.value))
   stopWork()
   sequence += 1
@@ -2279,7 +2285,6 @@ function restart(variant = false): void {
   study.value = null
   knobValues.value = {}
   drawnValues.value = {}
-  drawnVariant.value = ''
   fromStore.value = false
   failure.value = null
   gridded.value = null
@@ -2449,6 +2454,7 @@ defineExpose({ activate, freeze, reset })
         </div>
       </div>
       <div
+        part="figure"
         class="figure"
         :style="{ minHeight: `${figureHeight}px` }"
         :aria-busy="pending ? 'true' : 'false'"
@@ -2504,10 +2510,21 @@ defineExpose({ activate, freeze, reset })
             </div>
           </div>
         </div>
+        <!-- the figure of the variant before a switch, held until the new one is drawn;
+             the renderer built the string and escaped every text of it -->
+        <!-- eslint-disable vue/no-v-html -->
+        <div
+          v-else-if="held !== ''"
+          class="figure-svg held"
+          inert
+          aria-hidden="true"
+          v-html="held"
+        ></div>
+        <!-- eslint-enable vue/no-v-html -->
         <p v-else-if="errorMessage === ''" class="pending">Loading the panel</p>
       </div>
     </div>
-    <div v-if="errorMessage !== '' || footer !== ''" class="foot">
+    <div v-if="errorMessage !== '' || footer !== ''" part="foot" class="foot">
       <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
       <p v-if="footer !== ''" class="provenance">{{ footer }}</p>
     </div>
@@ -2634,8 +2651,7 @@ defineExpose({ activate, freeze, reset })
 
 /* the controls of a row start at one height, so their labels and their first
  * controls line up, and a knob of named stops, which draws its slider under
- * the select of its stops, reaches below the others; the options sit at the
- * foot of the row */
+ * the select of its stops, reaches below the others */
 .layout-stacked .controls,
 .layout-toolbar .controls {
   flex-flow: row wrap;
@@ -2643,9 +2659,15 @@ defineExpose({ activate, freeze, reset })
   width: 100%;
 }
 
-.layout-stacked .options,
-.layout-toolbar .options {
-  align-self: flex-end;
+/* the options beside knobs are level with the first line of controls, a
+ * select or the select of the stops of a knob, as the Reset of the shell is:
+ * one label line and the gap of a control below the top of the row, centred
+ * in the height of a select, and never below a slider */
+.layout-stacked .knob ~ .options,
+.layout-toolbar .knob ~ .options {
+  align-self: flex-start;
+  height: var(--_control-height);
+  margin-top: calc(var(--_font-size-small) * 1.45 + 4px);
 }
 
 .layout-stacked .figure {
@@ -2670,6 +2692,13 @@ defineExpose({ activate, freeze, reset })
 .toggle input {
   margin: 0;
   accent-color: var(--_accent);
+}
+
+/* the figure of the variant before a switch, which is no figure of the state
+ * the controls show: dimmed and taking no pointer */
+.held {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .figure {

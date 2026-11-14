@@ -68,12 +68,26 @@ export function carries(value: unknown, strings: string[]): boolean {
  */
 export function knobsOf(declared: PanelDeclaration | null): PanelAxis[] {
   const given: unknown[] = declared?.axes ?? []
-  return given.filter(
-    (one): one is PanelAxis =>
-      carries(one, ['id', 'label', 'kind']) &&
-      Array.isArray((one as PanelAxis).choices) &&
-      (one as PanelAxis).choices.every(isChoice) &&
-      typeof (one as PanelAxis).default === 'number',
+  return given.filter(drawableKnob)
+}
+
+/**
+ * Get whether a knob can be drawn as a control.
+ *
+ * It is the one rule of a knob of a panel (`knobsOf`) and of a knob the panels
+ * of a page share, so a knob whose control cannot be built is left out in
+ * either, and the rest of its panel or of its page is drawn.
+ *
+ * @param one the knob, as a payload carries it
+ * @returns whether it carries an id, a label, a kind, choices which can each be
+ *   drawn as an option, and a default
+ */
+export function drawableKnob(one: unknown): one is PanelAxis {
+  return (
+    carries(one, ['id', 'label', 'kind']) &&
+    Array.isArray((one as PanelAxis).choices) &&
+    (one as PanelAxis).choices.every(isChoice) &&
+    typeof (one as PanelAxis).default === 'number'
   )
 }
 
