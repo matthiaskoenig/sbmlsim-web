@@ -1212,7 +1212,18 @@ describe('the variant of the app', () => {
     // the panels keep the variant they draw, inert and hidden from a reader,
     // under a caption which names the variant, and the controls and the tabs
     // take no movement
-    expect(part(element, '.grid .caption').textContent.trim()).toBe('Switching to Variant B …')
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('Switching to Variant B …')
+    // the caption keeps the room of the longest caption of every variant, laid out and not drawn
+    expect(
+      [...element.shadowRoot.querySelectorAll('.variant .switching-copy')].map((one) =>
+        one.textContent.trim(),
+      ),
+    ).toEqual(['Switching to Variant A …', 'Switching to Variant B …'])
+    // the provenance line of the answers of the variant before stays, dimmed and hidden from a reader
+    const line = part(element, '.simulated')
+    expect(line.textContent).toContain(`model ${'c'.repeat(8)}`)
+    expect(line.classList.contains('held')).toBe(true)
+    expect(line.getAttribute('aria-hidden')).toBe('true')
     for (const id of ['panelB', 'panelC']) {
       const placed = part(element, `sbmlsim-panel[panel="${id}"]`) as HTMLElement
       expect(placed.inert).toBe(true)
@@ -1230,8 +1241,12 @@ describe('the variant of the app', () => {
     expect((part(element, '#knob-knobA') as HTMLInputElement).disabled).toBe(false)
     expect(tabs(element).some((one) => one.disabled)).toBe(false)
     expect((part(element, 'sbmlsim-panel[panel="panelB"]') as HTMLElement).inert).toBe(false)
-    // every panel drew its figure of the variant, so the caption is gone
-    expect(part(element, '.grid .caption').textContent.trim()).toBe('')
+    // every panel drew its figure of the variant, so the caption is gone, and
+    // the provenance line names the answers of the variant, no longer dimmed
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('')
+    expect(part(element, '.simulated').classList.contains('held')).toBe(false)
+    expect(part(element, '.simulated').textContent).toContain(`model ${'b'.repeat(8)}`)
+    expect(part(element, '.simulated').textContent).not.toContain(`model ${'c'.repeat(8)}`)
     expect(grid.getAttribute('aria-busy')).toBe('false')
     // one declaration and one run per panel, both of the variant
     for (const id of ['panelB', 'panelC']) {
@@ -1244,6 +1259,50 @@ describe('the variant of the app', () => {
     }
   })
 
+  it('keeps the provenance line of the variant before, dimmed, while the runs of the new one are pending', async () => {
+    const element = await shell({ page: 'pageB' })
+    // the runs of the variant switched to do not answer while the test looks
+    hang = []
+    await choose(element, 'variantB')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(attributeOf(element, 'panelB', 'variant')).toBe('variantB')
+    const line = part(element, '.simulated')
+    expect(line.textContent).toContain(`model ${'c'.repeat(8)}`)
+    expect(line.classList.contains('held')).toBe(true)
+  })
+
+  it('drops the answer of a panel whose run of the variant fails from the provenance line', async () => {
+    const element = await shell({ page: 'pageB' })
+    const fetched = globalThis.fetch
+    // the runs of variant B answer for panel C and fail for panel B, whose
+    // answers name their model by the panel, so the line tells them apart
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const body =
+        typeof init?.body === 'string' ? (JSON.parse(init.body) as SimulateRequest) : null
+      if (url.endsWith('/simulate') && body?.variant === 'variantB') {
+        if (url.includes('/panels/panelB/')) {
+          return Promise.reject(new TypeError('Failed to fetch'))
+        }
+        const answer = run(body)
+        return json({
+          ...answer,
+          provenance: { ...answer.provenance, panel: 'panelC', model_sha256: 'd'.repeat(64) },
+        })
+      }
+      return fetched(url, init)
+    })
+    await choose(element, 'variantB')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    // the switch is done: panel C answered, panel B failed and holds no answer
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('')
+    const line = part(element, '.simulated')
+    expect(line.classList.contains('held')).toBe(false)
+    expect(line.textContent).toContain(`model ${'d'.repeat(8)}`)
+    expect(line.textContent).not.toContain(`model ${'c'.repeat(8)}`)
+  })
+
   it('draws no panel of the variant before when the app of a variant cannot be read', async () => {
     variantApps = { variantB: null }
     const element = await shell({ page: 'pageB' })
@@ -1254,6 +1313,8 @@ describe('the variant of the app', () => {
     )
     expect(part(element, '.grid').classList.contains('switching')).toBe(true)
     expect(attributeOf(element, 'panelB', 'variant')).toBe('variantA')
+    // the figures of the variant before are cleared, and so is their provenance
+    expect(element.shadowRoot.querySelector('.simulated')).toBeNull()
     // back on the variant which is drawn, it is drawn again as it was
     const before = calls.length
     await choose(element, 'variantA')

@@ -495,6 +495,31 @@ const props = defineProps({
 const host = useHost()
 const root = useTemplateRef<HTMLElement>('root')
 const plotted = useTemplateRef<HTMLElement>('plotted')
+const options = useTemplateRef<HTMLElement>('options')
+/**
+ * Whether the options of a row of controls wrapped onto a line of their own.
+ *
+ * Beside knobs the options sit on the line of the selects, one label line
+ * below the top of the row; on a line of their own there is no label above
+ * them to be level with, so they carry no such margin. Which line they are on
+ * is a matter of the widths the browser lays out, so it is read off the
+ * layout (`placeOptions`), before the frame is painted.
+ */
+const optionsAlone = ref(false)
+
+/** Read whether the options of the controls wrapped onto a line of their own. */
+function placeOptions(): void {
+  const box = options.value
+  const first = box?.parentElement?.querySelector<HTMLElement>(':scope > .knob')
+  if (box === null || first === null || first === undefined) {
+    optionsAlone.value = false
+    return
+  }
+  // the top of the line the options are on, without the margin they carry beside knobs
+  const margin = Number.parseFloat(globalThis.getComputedStyle(box).marginTop) || 0
+  const top = box.getBoundingClientRect().top - margin
+  optionsAlone.value = top > first.getBoundingClientRect().top + 1
+}
 
 /**
  * How wide a text of the figure is drawn, `null` where the page cannot measure.
@@ -2403,6 +2428,14 @@ watch(
   },
 )
 
+watch(
+  () => [measured.value, shownAxes.value, drawnLayout.value, options.value],
+  () => {
+    void nextTick(placeOptions)
+  },
+  { flush: 'post' },
+)
+
 onMounted(() => {
   if (props.auto) {
     void activate()
@@ -2445,7 +2478,7 @@ defineExpose({ activate, freeze, reset })
           @input="onInput(axis, $event)"
           @change="onChange(axis, $event)"
         />
-        <div class="options">
+        <div ref="options" class="options" :class="{ alone: optionsAlone }">
           <label class="toggle">
             <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
             <span>logarithmic y</span>
@@ -2668,6 +2701,12 @@ defineExpose({ activate, freeze, reset })
   align-self: flex-start;
   height: var(--_control-height);
   margin-top: calc(var(--_font-size-small) * 1.45 + 4px);
+}
+
+/* options which wrapped onto a line of their own have no label to be level with */
+.layout-stacked .knob ~ .options.alone,
+.layout-toolbar .knob ~ .options.alone {
+  margin-top: 0;
 }
 
 .layout-stacked .figure {

@@ -108,7 +108,7 @@
  * the app derives from them: the shell reads the app again in the variant a
  * reader switches to (`switchTo`). While it does, the panels keep the figures
  * of the variant before, dimmed, inert and hidden from a screen reader, under a
- * caption which names the variant they are switched to; then it draws the
+ * caption beside the switcher which names the variant they are switched to; then it draws the
  * controls, the scenarios and the heads of that variant and gives every panel
  * the variant and the values of the shared knobs at once, a value kept where
  * the knob of that variant takes it (`adopt`), and each panel holds its figure
@@ -329,8 +329,25 @@ const switchCaption = computed<string>(() => {
     return ''
   }
   const label = variants.value.find((one) => one.id === chosen.value)?.label ?? chosen.value
-  return `Switching to ${label} …`
+  return captionOf(label)
 })
+
+/**
+ * Get the caption of a switch to a variant.
+ *
+ * @param label the label of the variant
+ * @returns the caption which names it
+ */
+function captionOf(label: string): string {
+  return `Switching to ${label} …`
+}
+
+/**
+ * Whether the provenance line names answers of the variant before a switch: it
+ * stays, dimmed like the figures, until the answers of the new variant replace
+ * it, and the answer of a panel whose switch failed is dropped as its figure is.
+ */
+const simulatedHeld = computed<boolean>(() => switching.value || awaiting.value.size > 0)
 
 /** The scenarios of the page which is shown, none for a page without. */
 const scenarios = computed<Scenario[]>(() => current.value?.scenarios ?? [])
@@ -650,6 +667,8 @@ async function switchTo(variant: string): Promise<void> {
     const kind = failureKind(error)
     if (kind !== 'aborted') {
       switchFailure.value = kind
+      // the figures of the variant before are cleared, and so are their answers
+      answers.value = {}
       announce(kind)
     }
   } finally {
@@ -684,9 +703,28 @@ function freezeShown(): void {
 function collect(event: Event): void {
   const provenance = (event as CustomEvent<{ provenance?: Provenance }>).detail.provenance
   if (provenance !== undefined) {
-    answers.value = { ...answers.value, [provenance.panel]: provenance }
+    // keyed by the panel the shell placed, which a failure of it is dropped by
+    const placed = event.target instanceof Element ? event.target.getAttribute('panel') : null
+    answers.value = { ...answers.value, [placed ?? provenance.panel]: provenance }
     settle(event)
   }
+}
+
+/**
+ * Take a panel whose switch of the variant failed off the switch, and drop the
+ * answer of the variant before it held from the provenance line, as the panel
+ * dropped its figure.
+ *
+ * @param event the `sbmlsim-error` of a panel
+ */
+function dropFailed(event: Event): void {
+  const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
+  if (id !== null && awaiting.value.has(id)) {
+    answers.value = Object.fromEntries(
+      Object.entries(answers.value).filter(([panel]) => panel !== id),
+    )
+  }
+  settle(event)
 }
 
 /**
@@ -739,10 +777,6 @@ watch(
   },
   { flush: 'pre' },
 )
-
-watch(variantOfPanels, () => {
-  answers.value = {}
-})
 
 watch(chosen, (variant) => {
   void switchTo(variant)
@@ -800,12 +834,23 @@ onBeforeUnmount(() => {
             {{ one.title }}
           </button>
         </nav>
-        <label v-if="variants.length > 0" class="variant">
-          <span class="variant-label">Variant</span>
-          <select v-model="chosen" class="variant-select">
-            <option v-for="one in variants" :key="one.id" :value="one.id">{{ one.label }}</option>
-          </select>
-        </label>
+        <div v-if="variants.length > 0" class="variant">
+          <label class="variant-pick">
+            <span class="variant-label">Variant</span>
+            <select v-model="chosen" class="variant-select">
+              <option v-for="one in variants" :key="one.id" :value="one.id">{{ one.label }}</option>
+            </select>
+          </label>
+          <!-- the caption of a switch, beside the switcher: it keeps the room of the
+               longest caption any variant has at all times, each laid out in one cell
+               and never drawn, so it moves nothing when it appears -->
+          <span class="switch-caption">
+            <span v-for="one in variants" :key="one.id" class="switching-copy" aria-hidden="true">
+              {{ captionOf(one.label) }}
+            </span>
+            <span class="caption" role="status">{{ switchCaption }}</span>
+          </span>
+        </div>
       </div>
       <div
         v-if="sharedKnobs.length > 0"
@@ -864,11 +909,8 @@ onBeforeUnmount(() => {
         :aria-busy="switchCaption !== '' ? 'true' : 'false'"
         :aria-label="current.title"
         @sbmlsim-result="collect"
-        @sbmlsim-error="settle"
+        @sbmlsim-error="dropFailed"
       >
-        <!-- in the gap above the grid, so it moves nothing; it names the variant the
-             dimmed figures are being switched to, so none of them is taken for it -->
-        <p class="caption" role="status">{{ switchCaption }}</p>
         <div v-for="one in current.panels" :key="one" class="cell">
           <component
             :is="panelTag"
@@ -910,7 +952,14 @@ onBeforeUnmount(() => {
           </template>
           <span v-if="app.licenses.length > 0">{{ app.licenses.join(', ') }}</span>
         </p>
-        <p v-if="simulated !== ''" class="simulated">{{ simulated }}</p>
+        <p
+          v-if="simulated !== ''"
+          class="simulated"
+          :class="{ held: simulatedHeld }"
+          :aria-hidden="simulatedHeld ? 'true' : undefined"
+        >
+          {{ simulated }}
+        </p>
       </footer>
     </template>
   </div>
@@ -1047,11 +1096,36 @@ onBeforeUnmount(() => {
 
 .variant {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 12px;
+  max-width: 100%;
   padding-bottom: 6px;
   color: var(--_fg-soft);
   font-size: var(--_font-size);
+}
+
+.variant-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* the caption of a switch and a copy of it for every variant, in one cell: the
+ * copies are laid out and never drawn, so the cell is as wide as the longest
+ * caption from the first frame and the caption appears without moving anything */
+.switch-caption {
+  display: inline-grid;
+  max-width: 100%;
+  font-size: var(--_font-size-small);
+}
+
+.switch-caption > * {
+  grid-area: 1 / 1;
+}
+
+.switching-copy {
+  visibility: hidden;
 }
 
 .variant-select {
@@ -1204,18 +1278,15 @@ onBeforeUnmount(() => {
 /*
  * A switch of the variant: while the app of the variant is read, the panels
  * keep the figures of the variant before, dimmed, inert and hidden from a
- * screen reader, under the caption which names the variant they are being
- * switched to, so none of them is taken for a figure of it and the reader
+ * screen reader, with the caption beside the switcher which names the variant
+ * they are being switched to, so none of them is taken for a figure of it and
+ * the reader
  * keeps the reference a switch is made to compare against; each panel then
  * holds its figure dimmed itself until it draws one of the new variant. An app
  * of a variant which cannot be read leaves no figure of the variant before:
  * the panels keep their room and are not drawn. Nothing of the page moves in
  * either.
  */
-.grid {
-  position: relative;
-}
-
 .grid.switching > .cell > *::part(figure),
 .grid.switching > .cell > *::part(foot) {
   opacity: 0.35;
@@ -1223,23 +1294,6 @@ onBeforeUnmount(() => {
 
 .grid.failed > .cell > :not(.reserve) {
   visibility: hidden;
-}
-
-/* the caption of a switch sits in the gap between the grid and what is above it */
-.caption {
-  position: absolute;
-  top: -16px;
-  right: 0;
-  left: 0;
-  height: 16px;
-  margin: 0;
-  overflow: hidden;
-  color: var(--_fg-soft);
-  font-size: var(--_font-size-small);
-  line-height: 16px;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* read by a screen reader and drawn nowhere: the live region of a page switch */
@@ -1279,6 +1333,11 @@ onBeforeUnmount(() => {
 .simulated {
   font-family: var(--_font-mono);
   font-size: var(--_font-size-small);
+}
+
+/* the provenance of the figures of the variant before a switch, dimmed as they are */
+.simulated.held {
+  opacity: 0.35;
 }
 
 .footer a {

@@ -503,11 +503,24 @@ test.describe('the app shell', () => {
       const own = await row(alone, '.options')
       const ownDose = own.selects.at(-1)
       const sameRow = Math.abs(own.reset - (ownDose?.centre ?? Number.NaN)) < 0.5
-      const onItsOwn = own.reset > (ownDose?.centre ?? 0) + 20
       // beside the selects, or on a line of its own where the row wraps, never at a slider
-      expect(sameRow || onItsOwn).toBe(true)
       if (width >= 768) {
         expect(sameRow).toBe(true)
+      } else if (!sameRow) {
+        // on a line of its own it carries no label line: it is one gap of the
+        // row below the controls above it
+        const gap = await alone.evaluate((element) => {
+          const root = element.shadowRoot
+          const options = root?.querySelector('.options')?.getBoundingClientRect()
+          const bottoms = [...(root?.querySelectorAll('.controls > .knob') ?? [])].map(
+            (one) => one.getBoundingClientRect().bottom,
+          )
+          const rowGap = Number.parseFloat(
+            getComputedStyle(root?.querySelector('.controls') ?? element).rowGap,
+          )
+          return { gap: (options?.top ?? 0) - Math.max(...bottoms), rowGap }
+        })
+        expect(Math.abs(gap.gap - gap.rowGap)).toBeLessThan(0.5)
       }
     })
   }
@@ -1294,10 +1307,23 @@ test.describe('the page of a patient', () => {
         .evaluateAll((all) =>
           all.map((one) => JSON.stringify(one.getBoundingClientRect().toJSON())).join('|'),
         )
-    const before = await cells()
+    // every box of the page above the footer, which a caption must not move
+    const boxes = async (): Promise<string> =>
+      `${await cells()}|${await app.evaluate((element) =>
+        ['.bar', '.knobs', '.grid', '.variant', '.switch-caption']
+          .map((one) =>
+            JSON.stringify(
+              element.shadowRoot?.querySelector(one)?.getBoundingClientRect().toJSON(),
+            ),
+          )
+          .join('|'),
+      )}`
+    const before = await boxes()
     const first = await curvesOf(app)
-    const caption = app.locator('.grid .caption')
+    const caption = app.locator('.variant .caption')
+    const line = app.locator('.footer .simulated')
     await expect(caption).toHaveText('')
+    const provenance = await line.textContent()
     await app.locator('.variant-select').selectOption({ label: 'reference 90 ml/min' })
     // the app of the variant is read: the figures before stay, dimmed, inert
     // and hidden from a reader, under the caption which names the variant
@@ -1307,7 +1333,10 @@ test.describe('the page of a patient', () => {
       await expect(one).toHaveAttribute('aria-hidden', 'true')
     }
     expect(await curvesOf(app)).toEqual(first)
-    expect(await cells()).toBe(before)
+    expect(await boxes()).toBe(before)
+    // the provenance of the figures before stays, dimmed as they are
+    await expect(line).toHaveText(provenance ?? '')
+    await expect(line).toHaveClass(/held/)
     gates.app?.()
     // the panels read their declarations of the variant and hold the figures
     // before until their runs answer
@@ -1320,7 +1349,8 @@ test.describe('the page of a patient', () => {
       await expect(one).not.toHaveAttribute('inert')
     }
     await expect(caption).toHaveText('Switching to reference 90 ml/min …')
-    expect(await cells()).toBe(before)
+    expect(await boxes()).toBe(before)
+    await expect(line).toHaveClass(/held/)
     gates.runs?.()
     await expect(app.locator('sbmlsim-panel .held')).toHaveCount(0)
     await expect(
@@ -1330,7 +1360,8 @@ test.describe('the page of a patient', () => {
       app.locator('sbmlsim-panel').nth(1).locator('.plot svg path').first(),
     ).toBeVisible()
     await expect(caption).toHaveText('')
-    expect(await cells()).toBe(before)
+    expect(await boxes()).toBe(before)
+    await expect(line).not.toHaveClass(/held/)
   })
 
   test('switches the declaration on screen with the variant', async ({ page }) => {
