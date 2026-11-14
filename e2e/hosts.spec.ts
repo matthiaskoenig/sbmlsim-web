@@ -793,24 +793,18 @@ test.describe('the app shell', () => {
     if (Math.max(...lines) - Math.min(...lines) > 1) {
       problems.push(`uneven lines ${lines.join(' + ')}`)
     }
-    // every column of the knobs as wide as the others and at most 20rem, and as
-    // wide as the card gives it: below 20rem the columns fill the card
+    // every column of the knobs as wide as the card gives it up to 20rem: the
+    // columns of the longest line share the card, and the Reset narrows none
     const widths = [
       ...layout.knobs.map((one) => one.width),
       ...(layout.scenario ? [layout.scenario.width] : []),
     ]
-    const natural = layout.tracks[0] ?? Number.NaN
+    const columns = Math.max(...lines)
+    const natural = Math.min(320, (layout.inner - (columns - 1) * layout.gap) / columns)
     for (const width of widths) {
-      if (Math.abs(width - natural) > 0.5 || width > 320.5) {
-        problems.push(`a select of ${String(width)} px in a column of ${String(natural)}`)
+      if (Math.abs(width - natural) > 0.5) {
+        problems.push(`a select of ${String(width)} px, not ${String(natural)}`)
       }
-    }
-    const used =
-      layout.tracks.reduce((sum, one) => sum + one, 0) + (layout.tracks.length - 1) * layout.gap
-    if (natural < 319.5 && Math.abs(used - layout.inner) > 1) {
-      problems.push(
-        `columns of ${String(natural)} px which leave ${String(layout.inner - used)} px`,
-      )
     }
     if (examples && layout.scenario !== null) {
       if (fit >= 2) {
@@ -1509,7 +1503,91 @@ test.describe('the page of a patient', () => {
     const app = page.locator('sbmlsim-app')
     await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
     await expect(app.locator('sbmlsim-panel').nth(0).locator('svg path').first()).toBeVisible()
+    // the study data of the panels and the stored answers arrive on their own:
+    // a test reads the page once nothing is on its way any more
+    await page.waitForLoadState('networkidle')
     return app
+  }
+
+  /** The frame of the figure of a panel: its axes and the labels of its legend, empty while it draws none. */
+  function frameOf(panel: Locator): Promise<{ axes: string; legend: string[] }> {
+    return panel.evaluate((element) => {
+      const svg = element.shadowRoot?.querySelector('.plot svg')
+      return {
+        axes: [...(svg?.querySelectorAll('.axis') ?? [])].map((axis) => axis.outerHTML).join(''),
+        legend: [...(svg?.querySelectorAll('.legend-entry text') ?? [])].map(
+          (text) => text.textContent,
+        ),
+      }
+    })
+  }
+
+  for (const [shown, label] of [
+    ['patient', 'its value axis fixed'],
+    ['renal', 'its value axis holding its data'],
+  ] as const) {
+    test(`keeps the frame of a panel with study data, ${label}, whichever of the run and the data answers first`, async ({
+      page,
+    }) => {
+      // the frame of a load whose data is not held back
+      const settledApp = await openPage(page, 'hctz', shown)
+      const urine = settledApp.locator('sbmlsim-panel').nth(1)
+      const expected = await frameOf(urine)
+      expect(expected.legend.length).toBeGreaterThan(0)
+      // the study data held back until the run of the panel has answered
+      const panel = `${shown}_urine`
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      await page.route(
+        (url) => url.pathname.endsWith(`/panels/${panel}/data`),
+        async (route) => {
+          await gate
+          await route.continue()
+        },
+      )
+      const requested = page.waitForRequest((request) =>
+        request.url().endsWith(`/panels/${panel}/data`),
+      )
+      const ran = page.waitForResponse((response) =>
+        response.url().endsWith(`/panels/${panel}/simulate`),
+      )
+      await page.goto('/demo/app.html')
+      await page.evaluate((id) => {
+        document.querySelector('sbmlsim-app')?.setAttribute('page', id)
+      }, shown)
+      const app = page.locator('sbmlsim-app')
+      await requested
+      await ran
+      const frames = (): Promise<unknown> =>
+        page.evaluate(
+          () =>
+            new Promise((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(resolve))
+            }),
+        )
+      await frames()
+      const held = await frameOf(app.locator('sbmlsim-panel').nth(1))
+      if (shown === 'patient') {
+        // a panel whose axis is fixed draws its curves before its data, with the
+        // legend it declares
+        expect(held).toEqual(expected)
+      } else {
+        // a panel whose value axis holds its data waits for it
+        expect(held.axes).toBe('')
+      }
+      const answered = page.waitForResponse((response) =>
+        response.url().endsWith(`/panels/${panel}/data`),
+      )
+      release()
+      await answered
+      await expect
+        .poll(async () => (await frameOf(app.locator('sbmlsim-panel').nth(1))).axes)
+        .not.toBe('')
+      await frames()
+      expect(await frameOf(app.locator('sbmlsim-panel').nth(1))).toEqual(expected)
+    })
   }
 
   /** The axes of the figures of a page: every axis line and tick, which are where a figure is laid out. */

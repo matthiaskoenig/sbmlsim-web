@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { balancedColumns, cardLevel, cardLevels, LEVELS, levelWidth, rowsOf } from './columns'
+import {
+  balancedColumns,
+  cardLevel,
+  cardLevels,
+  COLUMN_GAP,
+  COLUMN_MAX,
+  LEVELS,
+  levelWidth,
+  RESET_ROOM,
+  rowsOf,
+} from './columns'
 
 describe('the columns of the card of the shared controls', () => {
   it('balances the rows of the knobs over the columns which fit', () => {
@@ -60,10 +70,29 @@ describe('the columns of the card of the shared controls', () => {
     expect(cardLevel(5, 4, false)).toEqual({ columns: 3, reset: false, starts: [3] })
     // in a column of its own where one more fits, the knobs wrapping at theirs
     expect(cardLevel(2, 5, false)).toEqual({ columns: 2, reset: true, starts: [] })
-    expect(cardLevel(4, 3, false)).toEqual({ columns: 2, reset: true, starts: [2] })
-    expect(cardLevel(6, 4, false)).toEqual({ columns: 3, reset: true, starts: [3] })
+    expect(cardLevel(8, 7, false)).toEqual({ columns: 4, reset: true, starts: [4] })
+    // on a line of its own where the narrowest card of the level has no room
+    // for it beside the knobs at 20rem, which it would narrow
+    expect(cardLevel(2, 3, false)).toEqual({ columns: 2, reset: false, starts: [] })
+    expect(cardLevel(6, 4, false)).toEqual({ columns: 3, reset: false, starts: [3] })
+    expect(cardLevel(6, 5, false)).toEqual({ columns: 3, reset: false, starts: [3] })
     // on a line of its own where no column is left
     expect(cardLevel(2, 2, false)).toEqual({ columns: 2, reset: false, starts: [] })
+  })
+
+  it('never gives the Reset a column which would narrow a select', () => {
+    for (let knobs = 1; knobs <= 8; knobs += 1) {
+      for (let fit = 1; fit <= LEVELS; fit += 1) {
+        for (const examples of [false, true]) {
+          const level = cardLevel(knobs, fit, examples)
+          if (level.reset) {
+            expect(levelWidth(fit)).toBeGreaterThanOrEqual(
+              level.columns * (COLUMN_MAX + COLUMN_GAP) + RESET_ROOM,
+            )
+          }
+        }
+      }
+    }
   })
 
   it('lays out a level for every number of columns up to the last', () => {
@@ -72,7 +101,8 @@ describe('the columns of the card of the shared controls', () => {
     expect(cardLevels(2, false).map((one) => [one.columns, one.reset])).toEqual([
       [1, false],
       [2, false],
-      ...Array.from({ length: 6 }, () => [2, true]),
+      [2, false],
+      ...Array.from({ length: 5 }, () => [2, true]),
     ])
   })
 })

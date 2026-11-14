@@ -1184,6 +1184,9 @@ onBeforeUnmount(() => {
  * is, and it never takes width from a control.
  */
 .knobs-grid.control-row {
+  /* the columns keep their width and do not absorb what the card has beyond
+   * them, the column of the Reset neither */
+  justify-content: start;
   grid-template-columns: repeat(var(--_columns-1, 1), minmax(0, 20rem)) var(--_reset-1,);
 }
 

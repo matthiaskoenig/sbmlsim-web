@@ -1125,10 +1125,10 @@ describe('the frame of the value axis', () => {
     // the geometry of a figure is a function of what the panel declares and not
     // of what is drawn right now: a legend which has to hold a long label holds
     // it before the series of that label arrives
-    served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 12.5 } }))
+    const label = 'Beermann 1976, 5 mg oral, healthy volunteers (n = 4)'
+    served.panel = () => Promise.resolve(gridsOverChoices({ at: { knobA: 12.5 }, label }))
     served.simulate = () => Promise.resolve(choiceRun())
-    served.data = () =>
-      Promise.resolve(studyData({ label: 'Beermann 1976, 5 mg oral, healthy volunteers (n = 4)' }))
+    served.data = () => Promise.resolve(studyData({ label }))
     const element = await started()
     expect(figure(element)).not.toContain('class="points"')
     const box = plotBox(element)
@@ -1136,6 +1136,72 @@ describe('the frame of the value axis', () => {
     await nextTick()
     expect(figure(element)).toContain('class="points" data-series="seriesA"')
     expect(plotBox(element)).toEqual(box)
+  })
+
+  /**
+   * A declaration of one curve with study data under it, its value axis fixed
+   * at both ends or not, and study data which the test releases.
+   */
+  function heldData(fixed: boolean): { declared: PanelDeclaration; release: () => void } {
+    const base = withData()
+    const declared: PanelDeclaration = {
+      ...base,
+      panel: { ...base.panel, ...(fixed ? { y_min: 0, y_max: 50 } : {}) },
+      curves: base.curves.slice(0, 1),
+    }
+    let release: () => void = () => undefined
+    served.panel = () => Promise.resolve(declared)
+    served.data = () =>
+      new Promise((resolve) => {
+        release = () => {
+          resolve(studyData({ y: [1, 2, 300] }))
+        }
+      })
+    return {
+      declared,
+      release: () => {
+        release()
+      },
+    }
+  }
+
+  it('reserves the legend of its declared study data from its first figure, before the data arrives', async () => {
+    // the legend a panel may draw is the one it declares: a panel of one curve
+    // with study data keeps the entry of its curve and the room of its series
+    // whether the run or the data answers first, so its box does not move
+    const held = heldData(true)
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    void element.activate()
+    await settled()
+    await settled()
+    expect(figure(element)).toContain('data-series="curveA"')
+    expect(figure(element)).toContain('class="legend')
+    expect(figure(element)).not.toContain('class="points"')
+    const box = plotBox(element)
+    held.release()
+    await settled()
+    await settled()
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    expect(plotBox(element)).toEqual(box)
+  })
+
+  it('draws its first figure once the study data which holds its value axis has arrived', async () => {
+    // the value axis of a panel which fixes no ends holds its study data, so
+    // its first figure waits for the data and is laid out once over both
+    const held = heldData(false)
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    void element.activate()
+    await settled()
+    await settled()
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).toBe('')
+    held.release()
+    await settled()
+    await settled()
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    expect(
+      (figure(element).split('<g class="axis y"')[1] ?? '').split('<g class="data"')[0],
+    ).toContain('>300<')
   })
 
   it('clips a series to the x of an answer which has one, and to nothing without', async () => {
@@ -2115,10 +2181,13 @@ describe('the variant of the model', () => {
           : { ...declared, panel: { ...declared.panel, title: 'Panel A of B' } }
       return Promise.resolve(answer)
     }
+    // the series of variant A is of values far above the curves, which would
+    // stretch the value axis; the one of variant B is among them. A series is
+    // drawn with the label of its declaration, so its values tell them apart
     served.data = (variant) =>
       new Promise((resolve) => {
         late.push(() => {
-          resolve(studyData({ label: `Series of ${variant ?? ''}` }))
+          resolve(studyData({ y: variant === 'variantA' ? [100, 200, 300] : [1, 2, 3] }))
         })
       })
     // the start waits for the study data, which arrives late, so it is not awaited
@@ -2138,8 +2207,10 @@ describe('the variant of the model', () => {
     late[0]?.()
     await settled()
     expect(textOf(element, '.title')).toBe('Panel A of B')
-    expect(figure(element)).toContain('Series of variantB')
-    expect(figure(element)).not.toContain('Series of variantA')
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+    const axis = (figure(element).split('<g class="axis y"')[1] ?? '').split('<g class="data"')[0]
+    expect(axis).toContain('>20<')
+    expect(axis).not.toContain('>300<')
   })
 
   it('drops a declaration of the variant before which arrives after the one of the variant after', async () => {

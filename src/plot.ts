@@ -161,7 +161,10 @@ export interface PlotSpec {
    *
    * It is what a caller passes whose entries come and go while the figure stays
    * the same figure: the series of a panel are drawn under conditions of its
-   * knobs, and each state of the knobs draws one list of them. The legend
+   * knobs, and each state of the knobs draws one list of them. The lists are
+   * the ones the caller declares it may draw and not the series it happens to
+   * have received, so a figure is laid out alike before and after its data
+   * arrives (the panel derives them from its declaration). The legend
    * takes the width of its column over the widest label of any of these lists
    * and the rows of a legend below the plot over the list which needs the most
    * rows, and nothing is drawn for a label which has no series. A list is a

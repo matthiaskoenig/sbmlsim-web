@@ -22,6 +22,14 @@
 export const COLUMN_MIN = 200
 /** The gap between two columns of the card, the `column-gap` of a row of controls. */
 export const COLUMN_GAP = 16
+/** The widest column of the card, its `20rem` at the 16px of the root of a page. */
+export const COLUMN_MAX = 320
+/**
+ * The room the Reset takes in a column of its own: the button, about 50px in
+ * the type of the panel, and the slack of a larger type. It is the room a level
+ * keeps beside full columns of knobs before it gives the Reset a column there.
+ */
+export const RESET_ROOM = 80
 /** The numbers of columns which can fit that the card lays out a level for; the last level holds for every wider card. */
 export const LEVELS = 8
 
@@ -88,10 +96,11 @@ export function levelWidth(fit: number): number {
  * with the Reset beside them, in the second column of the knobs or, above a
  * single column of them, in a column of its own where two fit, and a page
  * without examples has its Reset follow the last knob: in the free column of a
- * last row which is shorter than the first, and else in a column of its own
- * where one more fits. A column of the Reset is as wide as the Reset, so it
- * takes no width from a knob beyond its own. Where no column is left for it, it
- * takes a line of its own.
+ * last row which is shorter than the first, and else in a column of its own. A
+ * column of its own is as wide as the Reset and given only where the narrowest
+ * card of the level holds it beside the columns of the knobs at their widest
+ * (`COLUMN_MAX`, `RESET_ROOM`), so the Reset never narrows a select. Where no
+ * column is left for it, it takes a line of its own.
  *
  * @param knobs the number of knobs
  * @param fit the number of columns of `COLUMN_MIN` which fit the card
@@ -108,12 +117,16 @@ export function cardLevel(knobs: number, fit: number, examples: boolean): CardLe
     at += row
     starts.push(at)
   }
+  // the Reset has a column of its own only where the narrowest card of the
+  // level holds it beside the columns of the knobs at their widest, so it never
+  // narrows a select; elsewhere it takes a line of its own
+  const room = levelWidth(fit) >= balanced * (COLUMN_MAX + COLUMN_GAP) + RESET_ROOM
   if (examples) {
     // beside the examples in the second column of the knobs, or in one of its own
-    return { columns: balanced, reset: fit >= 2 && balanced < 2, starts }
+    return { columns: balanced, reset: balanced < 2 && room, starts }
   }
   const shorter = (rows.at(-1) ?? balanced) < balanced
-  return { columns: balanced, reset: !shorter && fit > balanced, starts }
+  return { columns: balanced, reset: !shorter && room, starts }
 }
 
 /**

@@ -674,6 +674,13 @@ let sequence = 0
  * start before is of another variant, model or panel and is dropped.
  */
 let generation = 0
+/**
+ * What a run of the declaration which is read waits for before its answer is
+ * drawn: its study data where that data holds the value axis (`framedBy`),
+ * settled at once otherwise. Every run waits for it, the first one of `load`
+ * and one a knob or a host starts before the data is in alike.
+ */
+let framing: Promise<void> = Promise.resolve()
 /** The request in flight, aborted when it is superseded or when the panel is frozen. */
 let flight: AbortController | null = null
 /** The scheduled simulation, cleared when it is superseded. */
@@ -1100,7 +1107,9 @@ const resolvedData = computed<ResolvedData>(() => {
       dropped.push({ id: one.id, curve, reason: 'x-unit', delivered: one.x_unit ?? null, wanted })
       continue
     }
-    const points: Points = { id: one.id, label: one.label, curve, x: one.x, y: one.y }
+    // the label the declaration gives it, which its legend was laid out with
+    const label = declared.get(one.id)?.label ?? one.label
+    const points: Points = { id: one.id, label, curve, x: one.x, y: one.y }
     const rank = ranks.get(one.id)
     if (rank !== undefined) {
       points.rank = rank
@@ -1140,13 +1149,19 @@ const drawnData = computed<Points[]>(() => {
  * plot box of a panel is the same box whichever state it is at, and it is the
  * box of the largest legend one state draws and not of every series at once:
  * four arms of one study, of which a state draws one, keep the room of one.
- * It reads the declaration and the answer and no knob, so it runs once per
- * answer.
+ *
+ * The legends are the ones the declaration says the panel may draw: the labels
+ * and the states of its declared series, none while the data is switched off,
+ * and never the series the endpoint answered. The declaration is read before
+ * the first figure, so the legend a panel reserves is there from its first
+ * frame whether the study data arrives before the run or after it, and a
+ * series the panel then cannot draw, e.g. one of another unit, keeps the room
+ * it was declared with. The answer of the data decides which points are drawn
+ * and nothing of the frame. It reads no knob, so it runs once per declaration.
  */
 const declaredLegends = computed<string[][]>(() => {
-  const resolved = resolvedData.value.resolved
-  const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
-  const conditions = resolved.map((one) => Object.entries(declared.get(one.id)?.at ?? {}))
+  const resolved = props.data === 'off' ? [] : dataOf(declaration.value)
+  const conditions = resolved.map((one) => Object.entries(one.at ?? {}))
   const named = new Map<string, number[]>()
   for (const [id, value] of conditions.flat()) {
     const values = named.get(id) ?? []
@@ -1919,6 +1934,13 @@ async function simulate(gridId: string | null): Promise<void> {
     if (own !== sequence) {
       return
     }
+    // a declaration whose value axis holds its study data draws its first
+    // figure once the data has arrived or failed to (`framing`), whichever run
+    // answers first, so the axis is laid out once over both
+    await framing
+    if (own !== sequence) {
+      return
+    }
     grid.value = answer
     drawnValues.value = sent
     fromStore.value = false
@@ -1998,6 +2020,35 @@ async function loadData(declared: PanelDeclaration): Promise<void> {
 }
 
 /**
+ * Get whether the study data a declaration states can move the value axis of its figure.
+ *
+ * The value axis holds the study data the panel may draw (`frame`) unless the
+ * declaration fixes both of its ends, on a logarithmic axis two positive ones.
+ * The first figure of a declaration whose axis the data can move waits for the
+ * data (`framing`), so the figure is laid out once and does not jump when the
+ * data arrives after the run; a panel whose axis is fixed, or which reads no
+ * data, draws its curves as soon as they run.
+ *
+ * @param declared the declaration of the panel
+ * @returns whether its first figure waits for its study data
+ */
+function framedBy(declared: PanelDeclaration): boolean {
+  if (props.data === 'off' || dataOf(declared).length === 0) {
+    return false
+  }
+  const texts = declared.panel
+  const low = texts.y_min
+  const high = texts.y_max
+  const fixed =
+    typeof low === 'number' &&
+    Number.isFinite(low) &&
+    typeof high === 'number' &&
+    Number.isFinite(high) &&
+    (!initialLog(declared) || low > 0)
+  return !fixed
+}
+
+/**
  * Read the declaration of the panel and run its first simulation.
  *
  * @returns when the first figure was drawn or the failure was resolved
@@ -2025,7 +2076,9 @@ async function load(kept: Record<string, number> = {}): Promise<void> {
       return value !== undefined && validValue(one, value) ? snapValue(one, value) : one.default
     })
     logY.value = initialLog(declared)
-    await Promise.all([simulate(firstGridded(declared)), loadData(declared)])
+    const data = loadData(declared)
+    framing = framedBy(declared) ? data : Promise.resolve()
+    await Promise.all([simulate(firstGridded(declared)), data])
   } catch (error) {
     fail(error)
   }
