@@ -342,7 +342,7 @@
       "id": "renal_urine",
       "title": "Urinary excretion over the renal function",
       "subtitle": "the cumulative amount of hydrochlorothiazide in the urine",
-      "x_label": "time (min)",
+      "x_label": "time",
       "y_label": "amount excreted",
       "y_min": null,
       "y_max": null,
@@ -483,7 +483,7 @@
   },
   "run": {
     "contract": "panel/1",
-    "spec_hash": "7e1dc27700534f5eb8b1b76f2d1aed12aff272fa91f3907283a6ce0e69fc5463",
+    "spec_hash": "7ae6d8b7969ca0bd66ad61d7108dc4c47f74220222fe6584c387152a4ed5a17d",
     "x": [
       0,
       28.8,
