@@ -174,6 +174,7 @@ import type {
   SharedKnob,
 } from './contract'
 import KnobControl from './KnobControl.ce.vue'
+import { cardLevels } from './columns'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
 import { drawableKnob, keepControlKeys, ownValue, sameValue, snapValue, validValue } from './knob'
@@ -331,6 +332,39 @@ const simulatedShown = computed<string>(() => (switchFailure.value === null ? si
 
 /** The scenarios of the page which is shown, none for a page without. */
 const scenarios = computed<Scenario[]>(() => current.value?.scenarios ?? [])
+
+/**
+ * The layout of the card of the shared knobs at every number of columns which
+ * fit it (`columns.ts`): the columns of its grid as the custom properties
+ * `--_columns-<fit>`, which the container query of the width of the card reads,
+ * and the classes `start-<fit>` of the knobs which start a line at that width.
+ */
+const levels = computed(() => cardLevels(sharedKnobs.value.length, scenarios.value.length > 0))
+
+/**
+ * The columns of the grid of the card at every level, as custom properties: the
+ * columns of the knobs and, where the Reset has one of its own, `auto`.
+ */
+const levelStyle = computed<Record<string, string>>(() =>
+  Object.fromEntries(
+    levels.value.flatMap((level, index): [string, string][] => [
+      [`--_columns-${String(index + 1)}`, String(level.columns)],
+      ...(level.reset ? [[`--_reset-${String(index + 1)}`, 'auto'] as [string, string]] : []),
+    ]),
+  ),
+)
+
+/**
+ * Get the classes of a shared knob which starts a line at some widths of the card.
+ *
+ * @param position the position of the knob among the shared knobs
+ * @returns a class `start-<fit>` for every level at which it starts a line
+ */
+function startsOf(position: number): string[] {
+  return levels.value.flatMap((level, index) =>
+    level.starts.includes(position) ? [`start-${String(index + 1)}`] : [],
+  )
+}
 
 /**
  * The scenario the shared knobs of the page are at: the first whose every value
@@ -838,42 +872,46 @@ onBeforeUnmount(() => {
       </div>
       <div
         v-if="sharedKnobs.length > 0"
-        class="knobs control-row"
+        class="knobs"
         role="group"
         aria-label="Simulation settings of the page"
         @keydown="keepControlKeys($event)"
       >
-        <!-- the examples of the page set the controls below, so they are above them,
-             in a row of their own -->
-        <ScenarioControl
-          v-if="scenarios.length > 0"
-          :label="SCENARIO_LABEL"
-          :scenarios="scenarios"
-          :shown="scenarioShown"
-          :disabled="switching"
-          @pick="pickScenario($event)"
-        />
-        <KnobControl
-          v-for="one of sharedKnobs"
-          :key="one.knob.id"
-          :axis="one.knob"
-          :value="ownValue(shared, one.knob.id) ?? one.knob.default"
-          :described-by="drivesId(one.knob)"
-          :disabled="switching"
-          @input="moveShared(one.knob, $event)"
-          @change="moveShared(one.knob, $event)"
-        />
-        <!-- level with the first line of controls, the selects, and never below a slider -->
-        <div class="knobs-reset">
-          <div class="control-line">
-            <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
+        <!-- the grid of the controls in the card, whose width picks its level -->
+        <div class="knobs-grid control-row" :style="levelStyle">
+          <!-- the examples of the page set the controls below, so they are above them,
+               in a row of their own -->
+          <ScenarioControl
+            v-if="scenarios.length > 0"
+            :label="SCENARIO_LABEL"
+            :scenarios="scenarios"
+            :shown="scenarioShown"
+            :disabled="switching"
+            @pick="pickScenario($event)"
+          />
+          <KnobControl
+            v-for="(one, position) of sharedKnobs"
+            :key="one.knob.id"
+            :class="startsOf(position)"
+            :axis="one.knob"
+            :value="ownValue(shared, one.knob.id) ?? one.knob.default"
+            :described-by="drivesId(one.knob)"
+            :disabled="switching"
+            @input="moveShared(one.knob, $event)"
+            @change="moveShared(one.knob, $event)"
+          />
+          <!-- level with the first line of controls, the selects, and never below a slider -->
+          <div class="knobs-reset">
+            <div class="control-line">
+              <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
+            </div>
           </div>
+          <!-- hidden, so a screen reader hears the text once, as the description of its
+               control, and not again after the controls; aria-describedby reads it -->
+          <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
+            {{ drivesText(one) }}
+          </p>
         </div>
-        <!-- hidden, so a screen reader hears the text once, as the description of its
-             control, and not again after the controls; aria-describedby reads it -->
-        <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
-          {{ drivesText(one) }}
-        </p>
       </div>
       <!-- a region and no main: the page which embeds the shell has its own landmark;
            `values` is written as the attribute a page writes, and left off a panel
@@ -1122,7 +1160,7 @@ onBeforeUnmount(() => {
  * panels are, a row of controls (`control.css`) as the controls of a panel
  * are, so the Reset sits on the line of the selects. The padding under the
  * last line is the card's less the gap of a line, which that line carries. The
- * card is the container its lines are placed by (`.scenario ~ .knobs-reset`) */
+ * card is the container whose width picks the level of its grid */
 .knobs {
   container: knobs / inline-size;
   padding: 12px 16px calc(12px - var(--_line-gap));
@@ -1132,33 +1170,109 @@ onBeforeUnmount(() => {
   box-shadow: var(--_shadow);
 }
 
-/* as many columns as fit at 200px, which holds the label of an example, and
- * which share the width of the card: the columns are counted at their minimum,
- * so the card is filled from its left to its right edge at every width and a
- * control fills a phone. A Reset takes a column of its own, beside the last
- * control of its line or on a line of its own, but never width from a control
- * of its line */
-.knobs.control-row {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+/*
+ * Balanced rows of knobs at their natural width (`columns.ts`): the card holds
+ * `fit` columns of 200px, which hold the label of an example, and the gap of
+ * 16px between them, and its knobs take `ceil(n / ceil(n / fit))` of them, so
+ * the rows are as even as the width allows. Each level of the card below is a
+ * range of its inner width, from `fit * 200 + (fit - 1) * 16` px on, and reads
+ * the columns of that level (`--_columns-<fit>`, which the shell computes from
+ * its knobs) and starts a line at the knobs of that level (`.start-<fit>`). A
+ * column is as wide as the card gives it up to 20rem and no wider, so the card
+ * is not filled beyond that; a control fills a phone. A Reset which has a
+ * column of its own (`--_reset-<fit>`, `auto` or nothing) has one as wide as it
+ * is, and it never takes width from a control.
+ */
+.knobs-grid.control-row {
+  grid-template-columns: repeat(var(--_columns-1, 1), minmax(0, 20rem)) var(--_reset-1,);
+}
+
+@container knobs (416px <= width < 632px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-2), minmax(0, 20rem)) var(--_reset-2,);
+  }
+
+  .knobs-grid > .start-2 {
+    grid-column-start: 1;
+  }
+}
+
+@container knobs (632px <= width < 848px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-3), minmax(0, 20rem)) var(--_reset-3,);
+  }
+
+  .knobs-grid > .start-3 {
+    grid-column-start: 1;
+  }
+}
+
+@container knobs (848px <= width < 1064px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-4), minmax(0, 20rem)) var(--_reset-4,);
+  }
+
+  .knobs-grid > .start-4 {
+    grid-column-start: 1;
+  }
+}
+
+@container knobs (1064px <= width < 1280px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-5), minmax(0, 20rem)) var(--_reset-5,);
+  }
+
+  .knobs-grid > .start-5 {
+    grid-column-start: 1;
+  }
+}
+
+@container knobs (1280px <= width < 1496px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-6), minmax(0, 20rem)) var(--_reset-6,);
+  }
+
+  .knobs-grid > .start-6 {
+    grid-column-start: 1;
+  }
+}
+
+@container knobs (1496px <= width < 1712px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-7), minmax(0, 20rem)) var(--_reset-7,);
+  }
+
+  .knobs-grid > .start-7 {
+    grid-column-start: 1;
+  }
+}
+
+@container knobs (width >= 1712px) {
+  .knobs-grid.control-row {
+    grid-template-columns: repeat(var(--_columns-8), minmax(0, 20rem)) var(--_reset-8,);
+  }
+
+  .knobs-grid > .start-8 {
+    grid-column-start: 1;
+  }
 }
 
 /* the select of the scenarios takes a line of its own, above the knobs it
  * sets, in the first column, so it is as wide as the first of them under it */
-.knobs > .scenario {
+.knobs-grid > .scenario {
   grid-column: 1;
 }
 
-.knobs > .scenario + * {
+.knobs-grid > .scenario + * {
   grid-column-start: 1;
 }
 
-/* where the card holds two columns (2 x 200px and the gap of 16px between
- * them), the Reset takes the second column of the line of the examples, beside
- * their select and level with it, as it follows the last control of a line
- * without examples, on a line which has the room and uses it otherwise for
- * nothing; in one column it follows the knobs on a line of its own */
-@container knobs (min-width: 416px) {
-  .knobs > .scenario ~ .knobs-reset {
+/* where the card holds two columns, the Reset takes the second column of the
+ * line of the examples, beside their select and level with it, on a line which
+ * has the room and uses it otherwise for nothing; in one column it follows the
+ * knobs on a line of its own */
+@container knobs (width >= 416px) {
+  .knobs-grid > .scenario ~ .knobs-reset {
     grid-row: 1 / span 2;
     grid-column: 2;
   }

@@ -566,51 +566,6 @@ test.describe('the app shell', () => {
       page,
     }) => {
       await page.setViewportSize({ width, height: 900 })
-      // the knobs of the patient page and of its plasma panel, cut to one or
-      // grown to four with choice knobs of their own
-      let count = 2
-      const extra = (index: number): Record<string, unknown> => ({
-        id: `extra${String(index)}`,
-        label: `extra knob ${String(index)}`,
-        target: null,
-        unit: null,
-        kind: 'choice',
-        min: null,
-        max: null,
-        steps: 2,
-        choices: [
-          { label: 'one', value: 1 },
-          { label: 'two', value: 2 },
-        ],
-        default: 1,
-      })
-      const knobsOf = (given: Record<string, unknown>[]): Record<string, unknown>[] =>
-        [...given, ...[0, 1].map(extra)].slice(0, count)
-      await page.route(
-        (url) => url.pathname === '/api/models/hctz/panels/patient_plasma',
-        async (route) => {
-          const response = await route.fetch()
-          const body = (await response.json()) as Record<string, unknown>
-          body.axes = knobsOf(body.axes as Record<string, unknown>[])
-          await route.fulfill({ response, json: body })
-        },
-      )
-      await page.route(
-        (url) => url.pathname === '/api/models/hctz/app',
-        async (route) => {
-          const response = await route.fetch()
-          const body = (await response.json()) as {
-            shared: Record<string, { knob: Record<string, unknown>; panels: unknown[] }[]>
-          }
-          const shared = body.shared.patient ?? []
-          const panels = shared[0]?.panels ?? []
-          body.shared.patient = knobsOf(shared.map((one) => one.knob)).map((knob) => ({
-            knob,
-            panels,
-          }))
-          await route.fulfill({ response, json: body })
-        },
-      )
       /**
        * The problems of a row of controls: an item without a label (the
        * options, the Reset) whose line has knobs and which is not centred on
@@ -647,14 +602,19 @@ test.describe('the app shell', () => {
           [row, item],
         )
       const found: string[] = []
-      for (count = 1; count <= 4; count += 1) {
+      // the knobs of the patient page and of its plasma panel, cut to one or
+      // grown to four with choice knobs of their own
+      const knobs = { count: 1 }
+      await patientKnobs(page, knobs)
+      for (let count = 1; count <= 4; count += 1) {
+        knobs.count = count
         await page.goto('/demo/app.html')
         await page.evaluate(() =>
           document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
         )
         const app = page.locator('sbmlsim-app')
         await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(count)
-        for (const one of await problems(app, '.knobs', '.knobs-reset')) {
+        for (const one of await problems(app, '.knobs-grid', '.knobs-reset')) {
           found.push(`shell ${String(count)}: ${one}`)
         }
         // the Reset takes no width from a select of its line: the selects of a
@@ -700,68 +660,221 @@ test.describe('the app shell', () => {
     })
   }
 
-  for (const width of [390, 560, 640, 768, 1280]) {
-    test(`fills the card of the shared controls with as many columns as fit, and puts the Reset beside the examples, at ${String(width)} px`, async ({
+  /**
+   * Give the patient page `knobs.count` shared knobs, read when the page asks:
+   * its two, cut to one or grown with choice knobs of their own, in the app and
+   * in the declaration of its plasma panel, which the service answers as it is.
+   */
+  async function patientKnobs(page: Page, knobs: { count: number }): Promise<void> {
+    const extra = (index: number): Record<string, unknown> => ({
+      id: `extra${String(index)}`,
+      label: `extra knob ${String(index)}`,
+      target: null,
+      unit: null,
+      kind: 'choice',
+      min: null,
+      max: null,
+      steps: 2,
+      choices: [
+        { label: 'one', value: 1 },
+        { label: 'two', value: 2 },
+      ],
+      default: 1,
+    })
+    const knobsOf = (given: Record<string, unknown>[]): Record<string, unknown>[] =>
+      [...given, ...Array.from({ length: knobs.count }, (_, index) => extra(index))].slice(
+        0,
+        knobs.count,
+      )
+    await page.route(
+      (url) => url.pathname === '/api/models/hctz/panels/patient_plasma',
+      async (route) => {
+        const response = await route.fetch()
+        const body = (await response.json()) as Record<string, unknown>
+        body.axes = knobsOf(body.axes as Record<string, unknown>[])
+        await route.fulfill({ response, json: body })
+      },
+    )
+    await page.route(
+      (url) => url.pathname === '/api/models/hctz/app',
+      async (route) => {
+        const response = await route.fetch()
+        const body = (await response.json()) as {
+          shared: Record<string, { knob: Record<string, unknown>; panels: unknown[] }[]>
+        }
+        const shared = body.shared.patient ?? []
+        const panels = shared[0]?.panels ?? []
+        body.shared.patient = knobsOf(shared.map((one) => one.knob)).map((knob) => ({
+          knob,
+          panels,
+        }))
+        await route.fulfill({ response, json: body })
+      },
+    )
+  }
+
+  /** The card of the shared controls as it is laid out: its grid, its knobs, the examples and the Reset. */
+  interface Card {
+    inner: number
+    gap: number
+    tracks: number[]
+    knobs: { top: number; left: number; width: number; centre: number }[]
+    scenario: { left: number; width: number; centre: number } | null
+    reset: { top: number; left: number; centre: number }
+  }
+
+  /** Read the card of the shared controls of an app. */
+  function card(app: Locator): Promise<Card> {
+    return app.evaluate((element) => {
+      const root = element.shadowRoot
+      const grid = root?.querySelector('.knobs-grid')
+      if (grid === null || grid === undefined) {
+        throw new Error('no card')
+      }
+      const style = getComputedStyle(grid)
+      const centre = (box: DOMRect): number => (box.top + box.bottom) / 2
+      const select = (one: Element): DOMRect =>
+        (one.querySelector('select, .knob-row') ?? one).getBoundingClientRect()
+      const scenario = grid.querySelector(':scope > .scenario')
+      const button = grid.querySelector('.knobs-reset button')?.getBoundingClientRect()
+      return {
+        inner: grid.clientWidth,
+        gap: Number.parseFloat(style.columnGap),
+        tracks: style.gridTemplateColumns.split(' ').map(Number.parseFloat),
+        knobs: [...grid.querySelectorAll(':scope > .knob:not(.scenario)')].map((one) => {
+          const box = one.getBoundingClientRect()
+          return {
+            top: box.top,
+            left: box.left,
+            width: select(one).width,
+            centre: centre(select(one)),
+          }
+        }),
+        scenario:
+          scenario === null
+            ? null
+            : {
+                left: select(scenario).left,
+                width: select(scenario).width,
+                centre: centre(select(scenario)),
+              },
+        reset: {
+          top: button?.top ?? Number.NaN,
+          left: button?.left ?? Number.NaN,
+          centre: button === undefined ? Number.NaN : centre(button),
+        },
+      }
+    })
+  }
+
+  /**
+   * The problems of a card against the rule of its columns: balanced rows of
+   * knobs at their natural width, the examples and the Reset on a line above.
+   */
+  function cardProblems(layout: Card, examples: boolean): string[] {
+    const problems: string[] = []
+    const count = layout.knobs.length
+    const fit = Math.max(1, Math.floor((layout.inner + layout.gap) / (200 + layout.gap)))
+    // the lines of the knobs, by their top
+    const lines: number[] = []
+    let top = Number.NaN
+    for (const one of layout.knobs) {
+      if (!(Math.abs(one.top - top) < 0.5)) {
+        lines.push(0)
+        top = one.top
+      }
+      lines[lines.length - 1] = (lines.at(-1) ?? 0) + 1
+    }
+    // as few lines as the columns which fit allow, and as even as they can be
+    const fewest = Math.ceil(count / Math.min(fit, count))
+    if (lines.length !== fewest) {
+      problems.push(`${String(lines.length)} lines of ${lines.join(' + ')}, not ${String(fewest)}`)
+    }
+    if (Math.max(...lines) - Math.min(...lines) > 1) {
+      problems.push(`uneven lines ${lines.join(' + ')}`)
+    }
+    // every column of the knobs as wide as the others and at most 20rem, and as
+    // wide as the card gives it: below 20rem the columns fill the card
+    const widths = [
+      ...layout.knobs.map((one) => one.width),
+      ...(layout.scenario ? [layout.scenario.width] : []),
+    ]
+    const natural = layout.tracks[0] ?? Number.NaN
+    for (const width of widths) {
+      if (Math.abs(width - natural) > 0.5 || width > 320.5) {
+        problems.push(`a select of ${String(width)} px in a column of ${String(natural)}`)
+      }
+    }
+    const used =
+      layout.tracks.reduce((sum, one) => sum + one, 0) + (layout.tracks.length - 1) * layout.gap
+    if (natural < 319.5 && Math.abs(used - layout.inner) > 1) {
+      problems.push(
+        `columns of ${String(natural)} px which leave ${String(layout.inner - used)} px`,
+      )
+    }
+    if (examples && layout.scenario !== null) {
+      if (fit >= 2) {
+        // beside the select of the examples, level with it
+        const off = layout.reset.centre - layout.scenario.centre
+        if (Math.abs(off) > 0.05) {
+          problems.push(`the Reset ${String(off)} px off the examples`)
+        }
+        const column = layout.scenario.left + natural + layout.gap
+        if (Math.abs(layout.reset.left - column) > 0.5) {
+          problems.push(`the Reset at ${String(layout.reset.left)}, not ${String(column)}`)
+        }
+      } else if (!(layout.reset.top > (layout.knobs.at(-1)?.centre ?? Infinity))) {
+        problems.push('the Reset not under the knobs')
+      }
+    } else {
+      // after the last knob, on its line or on one of its own, and never over a knob
+      const last = layout.knobs.at(-1)
+      if (last !== undefined) {
+        const beside = Math.abs(layout.reset.centre - last.centre) <= 0.05
+        const under = layout.reset.top > last.centre
+        if (!beside && !under) {
+          problems.push(
+            `the Reset ${String(layout.reset.centre - last.centre)} px off the last knob`,
+          )
+        }
+        if (beside && layout.reset.left < last.left + last.width + layout.gap - 0.5) {
+          problems.push('the Reset takes width from a knob')
+        }
+      }
+    }
+    return problems
+  }
+
+  for (const width of [390, 640, 768, 1024, 1280]) {
+    test(`balances the rows of the shared knobs at their natural width at ${String(width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 900 })
-      await page.goto('/demo/app.html')
-      await page.evaluate(() =>
-        document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
-      )
-      const app = page.locator('sbmlsim-app')
-      await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(2)
-      const layout = await app.evaluate((element) => {
-        const root = element.shadowRoot
-        const bar = root?.querySelector('.knobs')
-        const style = bar === null || bar === undefined ? null : getComputedStyle(bar)
-        const box = (selector: string): DOMRect | undefined =>
-          root?.querySelector(selector)?.getBoundingClientRect()
-        const left =
-          (bar?.getBoundingClientRect().left ?? 0) +
-          (bar?.clientLeft ?? 0) +
-          Number.parseFloat(style?.paddingLeft ?? '0')
-        return {
-          inner:
-            (bar?.clientWidth ?? 0) -
-            Number.parseFloat(style?.paddingLeft ?? '0') -
-            Number.parseFloat(style?.paddingRight ?? '0'),
-          left,
-          columns: (style?.gridTemplateColumns ?? '').split(' ').map(Number.parseFloat),
-          gap: Number.parseFloat(style?.columnGap ?? '0'),
-          scenario: box('.knobs > .scenario select'),
-          knobs: [...(root?.querySelectorAll('.knobs > .knob:not(.scenario) select') ?? [])].map(
-            (one) => one.getBoundingClientRect(),
-          ),
-          reset: box('.knobs-reset button'),
+      const found: string[] = []
+      // the patient page with its two knobs and grown to 3 to 7, with examples
+      const knobs = { count: 2 }
+      await patientKnobs(page, knobs)
+      for (const count of [2, 3, 4, 5, 6, 7]) {
+        knobs.count = count
+        await page.goto('/demo/app.html')
+        await page.evaluate(() =>
+          document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
+        )
+        const app = page.locator('sbmlsim-app')
+        await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(count)
+        for (const one of cardProblems(await card(app), true)) {
+          found.push(`patient ${String(count)}: ${one}`)
         }
-      })
-      // the columns are counted at their minimum, 200px, and share the card
-      const count = Math.max(1, Math.floor((layout.inner + layout.gap) / (200 + layout.gap)))
-      expect(layout.columns).toHaveLength(count)
-      const track = (layout.inner - (count - 1) * layout.gap) / count
-      for (const column of layout.columns) {
-        expect(column).toBeCloseTo(track, 0)
       }
-      // a control is as wide as its column
-      for (const one of [layout.scenario, ...layout.knobs]) {
-        expect(one?.width ?? 0).toBeCloseTo(track, 0)
+      // the dose page, two knobs and no examples
+      await page.goto('/demo/app.html')
+      await page.evaluate(() => document.querySelector('sbmlsim-app')?.setAttribute('page', 'dose'))
+      const app = page.locator('sbmlsim-app')
+      await expect(app.locator('.knobs .knob')).toHaveCount(2)
+      for (const one of cardProblems(await card(app), false)) {
+        found.push(`dose: ${one}`)
       }
-      const reset = layout.reset
-      const scenario = layout.scenario
-      if (reset === undefined || scenario === undefined) {
-        throw new Error('no Reset or no examples')
-      }
-      const centre = (one: DOMRect): number => (one.top + one.bottom) / 2
-      if (count >= 2) {
-        // beside the select of the examples, at the start of the second column
-        expect(Math.abs(centre(reset) - centre(scenario))).toBeLessThan(1)
-        expect(reset.left).toBeCloseTo(layout.left + track + layout.gap, 0)
-      } else {
-        // on a line of its own, under the knobs
-        const last = layout.knobs.at(-1)
-        expect(reset.top).toBeGreaterThan(last?.bottom ?? Number.POSITIVE_INFINITY)
-      }
+      expect(found).toEqual([])
     })
   }
 
@@ -792,23 +905,21 @@ test.describe('the app shell', () => {
             Number.parseFloat(style.borderBottomWidth)
           return (body?.top ?? 0) - head - 8 + (foot - (body?.bottom ?? 0) - 8) + (inside - end)
         })
-        const bar = root?.querySelector('.knobs')
+        const grid = root?.querySelector('.knobs-grid')
         const knob = root?.querySelector('.knobs .knob')?.getBoundingClientRect().width ?? 0
-        const inner = bar
-          ? bar.clientWidth -
-            Number.parseFloat(getComputedStyle(bar).paddingLeft) -
-            Number.parseFloat(getComputedStyle(bar).paddingRight)
-          : 0
-        return { cells, knob, inner }
+        const track = grid
+          ? Number.parseFloat(getComputedStyle(grid).gridTemplateColumns.split(' ')[0] ?? '')
+          : Number.NaN
+        return { cells, knob, inner: grid?.clientWidth ?? 0, track }
       })
       // a card holds its panel and no empty room under it
       for (const left of sizes.cells) {
         expect(left).toBeCloseTo(0, 0)
       }
-      // a control fills its column, of which the card holds as many as fit at
-      // 200px and which share its width
-      const count = Math.max(1, Math.floor((sizes.inner + 16) / 216))
-      expect(sizes.knob).toBeCloseTo((sizes.inner - (count - 1) * 16) / count, 0)
+      // a control fills its column, which is at most 20rem: a phone, and no
+      // wider on a wide page
+      expect(sizes.knob).toBeCloseTo(sizes.track, 0)
+      expect(sizes.knob).toBeLessThanOrEqual(Math.min(320, sizes.inner) + 0.5)
     })
   }
 
