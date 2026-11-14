@@ -2,7 +2,26 @@
   "name": "sbmlsim-web",
   "version": "0.1.0",
   "description": "Vue components which render the interactive panels of an SBML model served by sbmlsim",
+  "keywords": [
+    "sbml",
+    "sbmlsim",
+    "simulation",
+    "systems-biology",
+    "pharmacokinetics",
+    "web-components",
+    "custom-elements",
+    "vue"
+  ],
+  "homepage": "https://github.com/matthiaskoenig/sbmlsim-web#readme",
+  "bugs": {
+    "url": "https://github.com/matthiaskoenig/sbmlsim-web/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matthiaskoenig/sbmlsim-web.git"
+  },
   "license": "MIT",
+  "author": "Matthias König",
   "type": "module",
   "files": [
     "dist"
@@ -10,42 +29,55 @@
   "main": "./dist/sbmlsim-web.umd.cjs",
   "module": "./dist/sbmlsim-web.js",
   "types": "./dist/types/index.d.ts",
+  "unpkg": "./dist/sbmlsim-web.iife.js",
+  "jsdelivr": "./dist/sbmlsim-web.iife.js",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/sbmlsim-web.js",
       "require": "./dist/sbmlsim-web.umd.cjs"
     },
-    "./theme.css": "./dist/theme.css"
+    "./theme.css": "./dist/theme.css",
+    "./iife": "./dist/sbmlsim-web.iife.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "build": "vite build && vue-tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/theme.css', 'dist/theme.css')\"",
+    "build": "vite build && vue-tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/theme.css', 'dist/theme.css')\" && node scripts/check-package.mjs",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "e2e": "node scripts/e2e.mjs"
   },
-  "dependencies": {
-    "vue": "3.5.45"
-  },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.65.0",
     "@types/node": "26.6.6",
     "@vitejs/plugin-vue": "6.0.11",
-    "eslint": "10.14.0",
+    "eslint": "^10.15.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-vue": "10.12.1",
     "globals": "17.14.0",
     "happy-dom": "21.0.4",
-    "marked": "18.2.0",
     "prettier": "3.10.1",
     "reveal.js": "6.0.2",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.2",
     "vite": "8.3.8",
     "vitest": "5.1.0",
+    "vue": "3.5.45",
     "vue-tsc": "3.3.14"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.8"
+    }
   }
 }

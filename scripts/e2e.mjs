@@ -4,10 +4,12 @@
  * The endpoint is the python package, which lives in another repository: the
  * checkout is `SBMLSIM_REPO` (`../sbmlsim` without), and the pages are served
  * by it (`--static`), so the tests need that checkout, `uv` and Chrome. Where
- * the checkout is not there at its default place - the continuous integration
- * of this repository has no other repository - the run is skipped and says so,
- * as a notice of the run under GitHub Actions; a `SBMLSIM_REPO` which is set
- * and wrong fails, so a typo does not hide the suite.
+ * the checkout is not there at its default place, a run on a machine of a
+ * developer is skipped and says so; under continuous integration (`CI`) that
+ * is a failure, since the job of the end to end tests checks sbmlsim out and a
+ * suite which skips there tests nothing, unless `SBMLSIM_E2E_OPTIONAL=1` says
+ * that a job may run without it. A `SBMLSIM_REPO` which is set and wrong
+ * fails, so a typo does not hide the suite.
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -26,8 +28,9 @@ if (!existsSync(join(repo, 'pyproject.toml'))) {
     process.exit(1)
   }
   const reason = `no sbmlsim checkout at ${repo} (set SBMLSIM_REPO)`
-  if (process.env.GITHUB_ACTIONS === 'true') {
-    console.log(`::notice title=e2e skipped::${reason}`)
+  if (process.env.CI !== undefined && process.env.SBMLSIM_E2E_OPTIONAL !== '1') {
+    console.error(`e2e failed: ${reason}, which continuous integration needs`)
+    process.exit(1)
   }
   console.log(`e2e skipped: ${reason}`)
   process.exit(0)

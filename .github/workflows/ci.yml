@@ -3,6 +3,16 @@ name: ci
 on:
   push:
   pull_request:
+  # the publish workflow runs this one for the commit of a tag before it publishes
+  workflow_call:
+
+env:
+  # The release of sbmlsim the end to end tests run against: its service
+  # (`python -m sbmlsim.serve`) serves the contracts this library speaks and the
+  # example `examples.panels`, which is no part of its package, so the tests
+  # need a checkout of its repository and not an install from PyPI. The pin
+  # moves with every release of sbmlsim the library is tested against.
+  SBMLSIM_REF: '0.24.0'
 
 jobs:
   build:
@@ -17,8 +27,60 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # the build checks the package a publish ships against it (scripts/check-package.mjs)
       - run: npm run build
-      # The end to end tests drive the Chrome of the runner against the python
-      # endpoint, which is another repository: without a checkout of it
-      # (SBMLSIM_REPO or ../sbmlsim) the step reports that it skipped and passes.
-      - run: npm run e2e
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: sbmlsim-web
+      - uses: actions/checkout@v7
+        with:
+          repository: matthiaskoenig/sbmlsim
+          ref: ${{ env.SBMLSIM_REF }}
+          path: sbmlsim
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sbmlsim-web/package-lock.json
+      # uv runs the service from the lock of sbmlsim, with the extra of the
+      # service, and Zensical, which builds the documentation page of the demo
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: '3.14'
+          enable-cache: true
+          cache-dependency-glob: sbmlsim/uv.lock
+      - name: Install the service
+        working-directory: sbmlsim
+        run: |
+          sudo apt-get update && sudo apt-get install -y libhdf5-dev
+          uv sync --locked --extra web
+      - name: Install the library
+        working-directory: sbmlsim-web
+        run: npm ci
+      # the tests drive the Chrome of the runner (`channel: 'chrome'`), which
+      # the image of the runner carries; one without it gets it from playwright
+      - name: Chrome
+        working-directory: sbmlsim-web
+        run: google-chrome --version || npx playwright install --with-deps chrome
+      - name: Build
+        working-directory: sbmlsim-web
+        run: npm run build
+      # a missing checkout is a failure here and no skip (scripts/e2e.mjs); the
+      # suite compares the payloads of the service with the contract fixture
+      # (e2e/contract.spec.ts), so a change of the contract fails it as well
+      - name: End to end tests
+        working-directory: sbmlsim-web
+        env:
+          SBMLSIM_REPO: ${{ github.workspace }}/sbmlsim
+        run: npm run e2e
+      - name: Keep the report of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results
+          path: sbmlsim-web/test-results
+          retention-days: 7

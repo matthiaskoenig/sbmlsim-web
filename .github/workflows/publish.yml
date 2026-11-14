@@ -1,0 +1,46 @@
+name: publish
+
+# A tag `vX.Y.Z` of a commit publishes that commit to npm, after the checks of
+# continuous integration passed for it, the end to end tests included. The
+# package is published with the provenance of npm, which ties it to this
+# workflow and this commit; the token of npm is the secret NPM_TOKEN (with
+# trusted publishing configured on npm for this workflow, the token can go).
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # the provenance of npm is signed with the OIDC token of the workflow
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Check the version of the tag
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "the tag ${GITHUB_REF_NAME} is not the version ${version} of package.json"
+            exit 1
+          fi
+          test -f "release-notes/${version}.md" || { echo "release-notes/${version}.md is missing"; exit 1; }
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
