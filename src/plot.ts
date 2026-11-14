@@ -255,14 +255,17 @@ const EXPONENTIAL_DIGITS = 2
 /** The most digits a tick label grows to, past which a double has none to tell apart. */
 const MOST_DIGITS = 16
 
-/** The anchors of the colour ramp: viridis over its first 85 %, as rgb. */
+/**
+ * The anchors of the colour ramp, as rgb: viridis over its first 55 %, the part
+ * which keeps 3:1 on a light surface, the light ramp of `theme.css`.
+ */
 const RAMP = [
   'rgb(68 1 84)',
-  'rgb(68 58 131)',
-  'rgb(48 106 142)',
-  'rgb(32 146 140)',
-  'rgb(59 187 117)',
-  'rgb(155 217 60)',
+  'rgb(72 40 120)',
+  'rgb(62 73 137)',
+  'rgb(49 103 142)',
+  'rgb(38 130 142)',
+  'rgb(30 156 137)',
 ] as const
 
 /** The fallback of every other token, the value of the sbmlsim report style. */

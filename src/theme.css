@@ -8,6 +8,28 @@
  * another notation: a figure carries its tokens with their values as fallbacks,
  * and a test of the renderer greps the output for a hard coded `#rrggbb`.
  *
+ * ## The scheme is the one of the page
+ *
+ * Every colour is a pair, `light-dark(<light>, <dark>)`, which the browser
+ * resolves against the `color-scheme` the element inherits from the page it
+ * sits in, and not against the system of the reader: a page which declares no
+ * scheme is light, which is what such a page paints, and a page which declares
+ * `color-scheme: dark` (a dark documentation palette, a dark deck) gets the
+ * dark values. A page which follows the system says so itself, with
+ * `color-scheme: light dark` or `<meta name="color-scheme" content="light dark">`,
+ * and then the panel follows it as the page does. A panel and an app paint
+ * their own surface (`--sbmlsim-bg`) of the same scheme, so their text is read
+ * against a surface of its own scheme on any page, also on one whose colours
+ * and declared scheme disagree.
+ *
+ * Every colour meets the contrast WCAG asks of it against every surface of its
+ * scheme (`theme.test.ts`): 4.5:1 for the colours of text (`fg`, `fg-soft`,
+ * `accent`, `error`) and 3:1 for the colours of lines and marks (the ramp,
+ * the kinds of the data), which is why the ramp of the light scheme ends where
+ * viridis drops below 3:1 on white and the one of the dark scheme starts where
+ * it rises above 3:1 on the dark surfaces. `line` is the colour of the
+ * separators and boxes of the design, which carry no information of their own.
+ *
  * ## Every token is overridable from outside, from anywhere above the panel
  *
  * A declaration on `:host` beats what the host inherits from the page, so an
@@ -32,36 +54,39 @@
  * A rule of the page which matches the element itself wins over everything
  * below, because a declaration of the outer tree beats one of the inner tree
  * on the host. `theme="light"` and `theme="dark"` come next: they are an
- * explicit opt-in of the page, so they set the public tokens on the host and
- * win over an ancestor. An ancestor of the element comes next, then
- * `prefers-color-scheme`, then this table.
+ * explicit opt-in of the page, so they set the public tokens and the
+ * `color-scheme` on the host and win over an ancestor. An ancestor of the
+ * element comes next, then the scheme of the page, through this table.
  */
 
 :root {
   /* surfaces and text */
-  --sbmlsim-bg: rgb(255 255 255);
+  --sbmlsim-bg: light-dark(rgb(255 255 255), rgb(20 23 28));
+  --sbmlsim-bg-soft: light-dark(rgb(246 247 249), rgb(26 30 36));
+  --sbmlsim-bg-card: light-dark(rgb(255 255 255), rgb(26 30 36));
   /*
-   * The background of a figure, which is no surface of the design system: a
-   * figure is part of the page it sits in - a slide, a documentation page, a
-   * course - so it paints nothing behind itself unless a host asks for it.
+   * The background of a figure, which is no surface of the design system: the
+   * figure sits on the surface of its panel, which paints `--sbmlsim-bg`, so
+   * it paints nothing behind itself unless a host asks for it.
    */
   --sbmlsim-figure-bg: transparent;
-  --sbmlsim-bg-soft: rgb(246 247 249);
-  --sbmlsim-bg-card: rgb(255 255 255);
-  --sbmlsim-fg: rgb(27 31 36);
-  --sbmlsim-fg-soft: rgb(91 100 114);
-  --sbmlsim-line: rgb(227 230 234);
-  --sbmlsim-accent: rgb(59 91 219);
+  --sbmlsim-fg: light-dark(rgb(27 31 36), rgb(230 233 238));
+  --sbmlsim-fg-soft: light-dark(rgb(91 100 114), rgb(154 164 178));
+  --sbmlsim-line: light-dark(rgb(227 230 234), rgb(42 48 56));
+  --sbmlsim-accent: light-dark(rgb(59 91 219), rgb(116 143 252));
+  --sbmlsim-error: light-dark(rgb(196 61 0), rgb(255 146 43));
 
   /* the kinds of the data of a report */
-  --sbmlsim-training: rgb(47 158 68);
-  --sbmlsim-validation: rgb(28 126 214);
-  --sbmlsim-outlier: rgb(232 89 12);
-  --sbmlsim-excluded: rgb(134 142 150);
+  --sbmlsim-training: light-dark(rgb(47 158 68), rgb(81 207 102));
+  --sbmlsim-validation: light-dark(rgb(28 126 214), rgb(77 171 247));
+  --sbmlsim-outlier: light-dark(rgb(232 89 12), rgb(255 146 43));
+  --sbmlsim-excluded: light-dark(rgb(134 142 150), rgb(173 181 189));
 
   /* boxes */
   --sbmlsim-radius: 10px;
-  --sbmlsim-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  --sbmlsim-shadow:
+    0 1px 2px light-dark(rgb(16 24 40 / 6%), transparent),
+    0 1px 3px light-dark(rgb(16 24 40 / 10%), transparent);
 
   /* type */
   --sbmlsim-font:
@@ -77,48 +102,18 @@
 
   /*
    * The colour ramp of the curves and of the colour bar: the colour map of
-   * sbmlsim (viridis) over its first 85 %, which is the part its lines use
-   * because the light end of the map is hard to see on white. A curve takes
-   * the anchor at its position or the `color-mix` of the two around it, so a
-   * host which moves these six moves the curves, the legend and the colour bar
-   * together.
+   * sbmlsim (viridis), over the part of it which keeps 3:1 against the
+   * surfaces of the scheme: from its dark end to 55 % on a light surface, from
+   * 40 % to its light end on a dark one. A curve takes the anchor at its
+   * position or the `color-mix` of the two around it, so a host which moves
+   * these six moves the curves, the legend and the colour bar together.
    */
-  --sbmlsim-ramp-1: rgb(68 1 84);
-  --sbmlsim-ramp-2: rgb(68 58 131);
-  --sbmlsim-ramp-3: rgb(48 106 142);
-  --sbmlsim-ramp-4: rgb(32 146 140);
-  --sbmlsim-ramp-5: rgb(59 187 117);
-  --sbmlsim-ramp-6: rgb(155 217 60);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --sbmlsim-bg: rgb(20 23 28);
-    --sbmlsim-bg-soft: rgb(26 30 36);
-    --sbmlsim-bg-card: rgb(26 30 36);
-    --sbmlsim-fg: rgb(230 233 238);
-    --sbmlsim-fg-soft: rgb(154 164 178);
-    --sbmlsim-line: rgb(42 48 56);
-    --sbmlsim-accent: rgb(116 143 252);
-
-    --sbmlsim-training: rgb(81 207 102);
-    --sbmlsim-validation: rgb(77 171 247);
-    --sbmlsim-outlier: rgb(255 146 43);
-    --sbmlsim-excluded: rgb(173 181 189);
-
-    --sbmlsim-shadow: none;
-
-    /*
-     * The ramp runs over the light half of the map on a dark background, from
-     * 25 % to its end, where its dark end would disappear into the page.
-     */
-    --sbmlsim-ramp-1: rgb(59 82 139);
-    --sbmlsim-ramp-2: rgb(42 120 142);
-    --sbmlsim-ramp-3: rgb(30 156 137);
-    --sbmlsim-ramp-4: rgb(68 191 112);
-    --sbmlsim-ramp-5: rgb(155 217 60);
-    --sbmlsim-ramp-6: rgb(253 231 37);
-  }
+  --sbmlsim-ramp-1: light-dark(rgb(68 1 84), rgb(42 120 142));
+  --sbmlsim-ramp-2: light-dark(rgb(72 40 120), rgb(31 149 139));
+  --sbmlsim-ramp-3: light-dark(rgb(62 73 137), rgb(44 177 126));
+  --sbmlsim-ramp-4: light-dark(rgb(49 103 142), rgb(99 203 95));
+  --sbmlsim-ramp-5: light-dark(rgb(38 130 142), rgb(176 221 47));
+  --sbmlsim-ramp-6: light-dark(rgb(30 156 137), rgb(253 231 37));
 }
 
 /*
@@ -127,22 +122,27 @@
  * nothing of this file is declared on the host under a public name.
  */
 :host {
-  --_bg: var(--sbmlsim-bg, rgb(255 255 255));
+  --_bg: var(--sbmlsim-bg, light-dark(rgb(255 255 255), rgb(20 23 28)));
+  --_bg-soft: var(--sbmlsim-bg-soft, light-dark(rgb(246 247 249), rgb(26 30 36)));
+  --_bg-card: var(--sbmlsim-bg-card, light-dark(rgb(255 255 255), rgb(26 30 36)));
   --_figure-bg: var(--sbmlsim-figure-bg, transparent);
-  --_bg-soft: var(--sbmlsim-bg-soft, rgb(246 247 249));
-  --_bg-card: var(--sbmlsim-bg-card, rgb(255 255 255));
-  --_fg: var(--sbmlsim-fg, rgb(27 31 36));
-  --_fg-soft: var(--sbmlsim-fg-soft, rgb(91 100 114));
-  --_line: var(--sbmlsim-line, rgb(227 230 234));
-  --_accent: var(--sbmlsim-accent, rgb(59 91 219));
+  --_fg: var(--sbmlsim-fg, light-dark(rgb(27 31 36), rgb(230 233 238)));
+  --_fg-soft: var(--sbmlsim-fg-soft, light-dark(rgb(91 100 114), rgb(154 164 178)));
+  --_line: var(--sbmlsim-line, light-dark(rgb(227 230 234), rgb(42 48 56)));
+  --_accent: var(--sbmlsim-accent, light-dark(rgb(59 91 219), rgb(116 143 252)));
+  --_error: var(--sbmlsim-error, light-dark(rgb(196 61 0), rgb(255 146 43)));
 
-  --_training: var(--sbmlsim-training, rgb(47 158 68));
-  --_validation: var(--sbmlsim-validation, rgb(28 126 214));
-  --_outlier: var(--sbmlsim-outlier, rgb(232 89 12));
-  --_excluded: var(--sbmlsim-excluded, rgb(134 142 150));
+  --_training: var(--sbmlsim-training, light-dark(rgb(47 158 68), rgb(81 207 102)));
+  --_validation: var(--sbmlsim-validation, light-dark(rgb(28 126 214), rgb(77 171 247)));
+  --_outlier: var(--sbmlsim-outlier, light-dark(rgb(232 89 12), rgb(255 146 43)));
+  --_excluded: var(--sbmlsim-excluded, light-dark(rgb(134 142 150), rgb(173 181 189)));
 
   --_radius: var(--sbmlsim-radius, 10px);
-  --_shadow: var(--sbmlsim-shadow, 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%));
+  --_shadow: var(
+    --sbmlsim-shadow,
+    0 1px 2px light-dark(rgb(16 24 40 / 6%), transparent),
+    0 1px 3px light-dark(rgb(16 24 40 / 10%), transparent)
+  );
 
   --_font: var(
     --sbmlsim-font,
@@ -168,53 +168,23 @@
   --_curve-width: var(--sbmlsim-curve-width, 1.8px);
   --_data-width: var(--sbmlsim-data-width, 1px);
 
-  --_ramp-1: var(--sbmlsim-ramp-1, rgb(68 1 84));
-  --_ramp-2: var(--sbmlsim-ramp-2, rgb(68 58 131));
-  --_ramp-3: var(--sbmlsim-ramp-3, rgb(48 106 142));
-  --_ramp-4: var(--sbmlsim-ramp-4, rgb(32 146 140));
-  --_ramp-5: var(--sbmlsim-ramp-5, rgb(59 187 117));
-  --_ramp-6: var(--sbmlsim-ramp-6, rgb(155 217 60));
+  --_ramp-1: var(--sbmlsim-ramp-1, light-dark(rgb(68 1 84), rgb(42 120 142)));
+  --_ramp-2: var(--sbmlsim-ramp-2, light-dark(rgb(72 40 120), rgb(31 149 139)));
+  --_ramp-3: var(--sbmlsim-ramp-3, light-dark(rgb(62 73 137), rgb(44 177 126)));
+  --_ramp-4: var(--sbmlsim-ramp-4, light-dark(rgb(49 103 142), rgb(99 203 95)));
+  --_ramp-5: var(--sbmlsim-ramp-5, light-dark(rgb(38 130 142), rgb(176 221 47)));
+  --_ramp-6: var(--sbmlsim-ramp-6, light-dark(rgb(30 156 137), rgb(253 231 37)));
 }
 
 /*
- * The dark values of the private tokens, which are the fallbacks of the same
- * public ones: a page which sets a token keeps it in both schemes, and a page
- * which sets none gets this table. A host which asks for `theme="light"` is
- * left alone, so a light page under a dark system has a remedy.
- */
-@media (prefers-color-scheme: dark) {
-  :host(:not([theme='light'])) {
-    --_bg: var(--sbmlsim-bg, rgb(20 23 28));
-    --_bg-soft: var(--sbmlsim-bg-soft, rgb(26 30 36));
-    --_bg-card: var(--sbmlsim-bg-card, rgb(26 30 36));
-    --_fg: var(--sbmlsim-fg, rgb(230 233 238));
-    --_fg-soft: var(--sbmlsim-fg-soft, rgb(154 164 178));
-    --_line: var(--sbmlsim-line, rgb(42 48 56));
-    --_accent: var(--sbmlsim-accent, rgb(116 143 252));
-
-    --_training: var(--sbmlsim-training, rgb(81 207 102));
-    --_validation: var(--sbmlsim-validation, rgb(77 171 247));
-    --_outlier: var(--sbmlsim-outlier, rgb(255 146 43));
-    --_excluded: var(--sbmlsim-excluded, rgb(173 181 189));
-
-    --_shadow: var(--sbmlsim-shadow, none);
-
-    --_ramp-1: var(--sbmlsim-ramp-1, rgb(59 82 139));
-    --_ramp-2: var(--sbmlsim-ramp-2, rgb(42 120 142));
-    --_ramp-3: var(--sbmlsim-ramp-3, rgb(30 156 137));
-    --_ramp-4: var(--sbmlsim-ramp-4, rgb(68 191 112));
-    --_ramp-5: var(--sbmlsim-ramp-5, rgb(155 217 60));
-    --_ramp-6: var(--sbmlsim-ramp-6, rgb(253 231 37));
-  }
-}
-
-/*
- * The two schemes a host asks for by name, whatever the system says and
- * whatever an ancestor sets: these are the public tokens on the host, because
- * `theme="light"` and `theme="dark"` are the one explicit opt-in of the page.
- * They are the tables above, which a custom property has no mixin for.
+ * The two schemes a host asks for by name, whatever the page says and whatever
+ * an ancestor sets: these are the public tokens and the scheme on the host,
+ * because `theme="light"` and `theme="dark"` are the one explicit opt-in of the
+ * page. They are the two halves of the table above, which a custom property
+ * has no mixin for.
  */
 :host([theme='light']) {
+  color-scheme: light;
   --sbmlsim-bg: rgb(255 255 255);
   --sbmlsim-bg-soft: rgb(246 247 249);
   --sbmlsim-bg-card: rgb(255 255 255);
@@ -222,6 +192,7 @@
   --sbmlsim-fg-soft: rgb(91 100 114);
   --sbmlsim-line: rgb(227 230 234);
   --sbmlsim-accent: rgb(59 91 219);
+  --sbmlsim-error: rgb(196 61 0);
 
   --sbmlsim-training: rgb(47 158 68);
   --sbmlsim-validation: rgb(28 126 214);
@@ -231,14 +202,15 @@
   --sbmlsim-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
 
   --sbmlsim-ramp-1: rgb(68 1 84);
-  --sbmlsim-ramp-2: rgb(68 58 131);
-  --sbmlsim-ramp-3: rgb(48 106 142);
-  --sbmlsim-ramp-4: rgb(32 146 140);
-  --sbmlsim-ramp-5: rgb(59 187 117);
-  --sbmlsim-ramp-6: rgb(155 217 60);
+  --sbmlsim-ramp-2: rgb(72 40 120);
+  --sbmlsim-ramp-3: rgb(62 73 137);
+  --sbmlsim-ramp-4: rgb(49 103 142);
+  --sbmlsim-ramp-5: rgb(38 130 142);
+  --sbmlsim-ramp-6: rgb(30 156 137);
 }
 
 :host([theme='dark']) {
+  color-scheme: dark;
   --sbmlsim-bg: rgb(20 23 28);
   --sbmlsim-bg-soft: rgb(26 30 36);
   --sbmlsim-bg-card: rgb(26 30 36);
@@ -246,6 +218,7 @@
   --sbmlsim-fg-soft: rgb(154 164 178);
   --sbmlsim-line: rgb(42 48 56);
   --sbmlsim-accent: rgb(116 143 252);
+  --sbmlsim-error: rgb(255 146 43);
 
   --sbmlsim-training: rgb(81 207 102);
   --sbmlsim-validation: rgb(77 171 247);
@@ -254,10 +227,10 @@
 
   --sbmlsim-shadow: none;
 
-  --sbmlsim-ramp-1: rgb(59 82 139);
-  --sbmlsim-ramp-2: rgb(42 120 142);
-  --sbmlsim-ramp-3: rgb(30 156 137);
-  --sbmlsim-ramp-4: rgb(68 191 112);
-  --sbmlsim-ramp-5: rgb(155 217 60);
+  --sbmlsim-ramp-1: rgb(42 120 142);
+  --sbmlsim-ramp-2: rgb(31 149 139);
+  --sbmlsim-ramp-3: rgb(44 177 126);
+  --sbmlsim-ramp-4: rgb(99 203 95);
+  --sbmlsim-ramp-5: rgb(176 221 47);
   --sbmlsim-ramp-6: rgb(253 231 37);
 }

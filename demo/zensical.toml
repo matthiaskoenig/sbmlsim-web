@@ -1,0 +1,24 @@
+# The documentation site of `docs.md`, built by `scripts/stage-demo.mjs` with
+# Zensical into the staged demo, so the end to end tests drive the page Zensical
+# writes: its theme, its two palettes and its handling of a raw HTML block.
+[project]
+site_name = "sbmlsim-web on a docs page"
+docs_dir = "docs"
+site_dir = "site"
+# `docs.md` becomes `docs.html` next to the other pages of the demo
+use_directory_urls = false
+# the script of the elements, once for every page of the site; a site which
+# loads it from a CDN names the url of the release instead (README, Quick start)
+extra_javascript = ["../dist/sbmlsim-web.iife.js"]
+# the surface of the panels, the background of the palette
+extra_css = ["docs.css"]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"

@@ -553,16 +553,16 @@ beforeEach(() => {
     // a route is read in a variant with the query `variant`
     const [path = '', query = ''] = url.split('?')
     const variant = new URLSearchParams(query).get('variant')
-    if (path.endsWith('/simulate')) {
-      return served.simulate(body ?? {}).then(json)
-    }
-    if (path.endsWith('/data')) {
-      return served.data(variant).then(json)
-    }
-    if (path.includes('/panels/')) {
-      return served.panel(variant).then(json)
-    }
-    return served.stored().then(json)
+    // a request which is stopped rejects as the fetch of a browser does, whenever
+    // the route it asked would answer
+    const answer = path.endsWith('/simulate')
+      ? served.simulate(body ?? {})
+      : path.endsWith('/data')
+        ? served.data(variant)
+        : path.includes('/panels/')
+          ? served.panel(variant)
+          : served.stored()
+    return Promise.race([answer.then(json), hangs(init)])
   })
   class Observing {
     readonly callback: ResizeObserverCallback
@@ -841,7 +841,7 @@ describe('the layout and the theme', () => {
     expect(shadow(element).querySelector('.panel')?.className).toContain('layout-toolbar')
   })
 
-  it('follows prefers-color-scheme and lets a host override one token', async () => {
+  it('follows the scheme of the page and lets a host override one token', async () => {
     const element = await started({ theme: 'dark' })
     // the quotes of an attribute selector are optional and a minifier drops
     // them, so the assertions below read the selectors without them
@@ -850,9 +850,15 @@ describe('the layout and the theme', () => {
       .join('\n')
       .replace(/'/g, '')
     expect(styles).toContain(':host')
-    expect(styles).toContain('@media (prefers-color-scheme: dark)')
-    expect(styles).toContain(':host(:not([theme=light]))')
-    expect(styles).toContain(':host([theme=dark])')
+    // the colours resolve against the scheme the host inherits from the page,
+    // and never against the system of the reader, which a page may not follow
+    expect(styles).toContain('light-dark(rgb(27 31 36), rgb(230 233 238))')
+    expect(styles).not.toContain('prefers-color-scheme')
+    expect(styles).not.toMatch(/:host\s*{[^}]*color-scheme/)
+    expect(styles).toMatch(/:host\(\[theme=dark\]\)\s*{[^}]*color-scheme:\s*dark/)
+    expect(styles).toMatch(/:host\(\[theme=light\]\)\s*{[^}]*color-scheme:\s*light/)
+    // the panel paints the surface of its scheme
+    expect(styles).toMatch(/\.panel\s*{[^}]*background:\s*var\(--_bg\)/)
     expect(element.getAttribute('theme')).toBe('dark')
     element.style.setProperty('--sbmlsim-ramp-1', 'rgb(1 2 3)')
     expect(getComputedStyle(element).getPropertyValue('--sbmlsim-ramp-1')).toBe('rgb(1 2 3)')
@@ -865,8 +871,12 @@ describe('the layout and the theme', () => {
     // container, because a declaration beats what an element inherits
     const inside = await started({}, container)
     expect(getComputedStyle(part(inside, '.panel')).color).toBe('rgb(1 2 3)')
+    // the browser resolves the pair of the table against the scheme of the
+    // page, which happy-dom does not, so the token is read before it is resolved
     const outside = await started()
-    expect(getComputedStyle(part(outside, '.panel')).color).toBe('rgb(27 31 36)')
+    expect(getComputedStyle(outside).getPropertyValue('--_fg')).toContain(
+      'light-dark(rgb(27 31 36), rgb(230 233 238))',
+    )
   })
 
   it('keeps a rule of the page which matches the element out of the panel', async () => {
@@ -874,7 +884,8 @@ describe('the layout and the theme', () => {
     // a panel which carried its typography there would hand the page every
     // element in it by inheritance
     document.head.innerHTML = '<style>* { font-family: cursive; color: rgb(255 0 0); }</style>'
-    const element = await started()
+    // a named theme, whose colours happy-dom resolves without a scheme
+    const element = await started({ theme: 'light' })
     expect(getComputedStyle(part(element, '.panel')).color).not.toBe('rgb(255 0 0)')
     expect(getComputedStyle(part(element, '.knob-label')).fontFamily).not.toContain('cursive')
   })
@@ -1453,6 +1464,128 @@ describe('freeze and activate', () => {
     await nextTick()
     expect(control(element, 'knobA').disabled).toBe(false)
     expect(declarations()).toHaveLength(1)
+  })
+
+  /** A route which answers once it is let go, and the function which lets it go. */
+  function held<T>(answer: () => T): { route: () => Promise<T>; release: () => void } {
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    return { route: () => gate.then(answer), release }
+  }
+
+  it('reads the declaration a freeze stopped again when it is activated', async () => {
+    // a deck which passes over the slide of a panel freezes it while its
+    // declaration is read: the stopped read is no failure, and the panel reads
+    // it again and draws its figure when the slide is shown again
+    const first = held(() => declaration())
+    served.panel = first.route
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    const activated = element.activate()
+    await settled()
+    expect(declarations()).toHaveLength(1)
+    element.freeze()
+    await activated
+    await settled()
+    expect(textOf(element, '.pending')).toBe('Loading the panel')
+    expect(textOf(element, '.error')).toBe('')
+    served.panel = () => Promise.resolve(declaration())
+    await element.activate()
+    await settled()
+    first.release()
+    await settled()
+    expect(declarations()).toHaveLength(2)
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).toContain('<svg')
+    expect(control(element, 'knobA').disabled).toBe(false)
+  })
+
+  it('runs the first simulation of a panel frozen before its read began', async () => {
+    // a deck which turns two slides at once activates the panel and freezes it
+    // in the same task, before the panel sent a request
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    const activated = element.activate()
+    element.freeze()
+    await activated
+    await settled()
+    expect(simulations()).toHaveLength(0)
+    expect(figure(element)).toBe('')
+    await element.activate()
+    await settled()
+    expect(declarations()).toHaveLength(1)
+    expect(simulations()).toHaveLength(1)
+    expect(figure(element)).toContain('<svg')
+  })
+
+  it('runs the first simulation a freeze stopped when it is activated', async () => {
+    const first = held(() => run())
+    served.simulate = first.route
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    const activated = element.activate()
+    await settled()
+    expect(simulations()).toHaveLength(1)
+    element.freeze()
+    await activated
+    await settled()
+    expect(figure(element)).toBe('')
+    served.simulate = () => Promise.resolve(run())
+    await element.activate()
+    await settled()
+    first.release()
+    await settled()
+    expect(declarations()).toHaveLength(1)
+    expect(simulations()).toHaveLength(2)
+    expect(simulations()[1]).toEqual(simulations()[0])
+    expect(figure(element)).toContain('<svg')
+    expect(textOf(element, '.error')).toBe('')
+  })
+
+  it('draws the first figure a freeze stopped while it waited for its study data', async () => {
+    // the first figure of a panel whose value axis holds its study data waits
+    // for the data: a freeze then drops the run which answered, and the
+    // panel runs it again and draws it over the data once it is activated
+    served.panel = () => Promise.resolve(withData())
+    const data = held(() => studyData())
+    served.data = data.route
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    const activated = element.activate()
+    await settled()
+    expect(dataCalls()).toHaveLength(1)
+    expect(simulations()).toHaveLength(1)
+    element.freeze()
+    data.release()
+    await activated
+    await settled()
+    expect(figure(element)).toBe('')
+    await element.activate()
+    await settled()
+    expect(dataCalls()).toHaveLength(1)
+    expect(simulations()).toHaveLength(2)
+    expect(figure(element)).toContain('class="points" data-series="seriesA"')
+  })
+
+  it('runs the release a freeze dropped and the values a host set while it was frozen', async () => {
+    vi.useFakeTimers()
+    const element = await started()
+    move(control(element, 'knobA'), '12.5', 'change')
+    element.freeze()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toHaveLength(1)
+    await element.activate()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(simulations()).toHaveLength(2)
+    expect(Object.keys(simulations()[1]?.grid ?? {})).toEqual(['knobA'])
+    // a host which moves a knob of a frozen panel which the drawn grid does not
+    // cover moves the knob, and the run of it waits for the panel to be activated
+    element.freeze()
+    element.setAttribute('values', '{"knobB": 0.6}')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toHaveLength(2)
+    await element.activate()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(simulations()).toHaveLength(3)
+    expect(simulations()[2]).toEqual({ values: { knobA: 12.5 }, grid: { knobB: 3 } })
   })
 })
 

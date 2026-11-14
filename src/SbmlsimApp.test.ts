@@ -574,8 +574,12 @@ describe('the shell of an app', () => {
       .map((one) => one.textContent)
       .join('\n')
     expect(style).toMatch(/:host\s*{[^}]*background:\s*var\(--_bg\)/)
-    expect(style).toMatch(/:host\s*{[^}]*color-scheme:\s*light dark/)
+    // the scheme is the one the page declares, or the one `theme` names
+    expect(style).not.toMatch(/:host\s*{[^}]*color-scheme/)
+    expect(style).not.toContain('prefers-color-scheme')
     expect(style).toMatch(/:host\(\[theme='dark'\]\)\s*{[^}]*color-scheme:\s*dark/)
+    // a panel of the app sits on its card, which is its surface
+    expect(style).toMatch(/\.cell > ::part\(panel\)\s*{[^}]*background:\s*transparent/)
   })
 
   it('has no landmark of its own, a named region for the grid and a live region', async () => {

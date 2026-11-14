@@ -34,6 +34,11 @@ export default defineConfig(({ command }) => ({
       : {},
   build: {
     target: 'es2022',
+    // the browsers which resolve `light-dark()` against the scheme of the page,
+    // which every colour of the design is (`theme.css`): the minifier lowers
+    // it for an older target into variables of its own, which a custom property
+    // carries as text and which then resolve to no colour at all
+    cssTarget: ['chrome123', 'edge123', 'firefox120', 'safari17.5'],
     sourcemap: true,
     lib: {
       entry: 'src/index.ts',

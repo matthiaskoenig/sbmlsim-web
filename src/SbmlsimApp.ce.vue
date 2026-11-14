@@ -18,7 +18,8 @@
  * moves the shell and its panels together. Unlike a panel, which is a figure
  * in the prose of a page, the shell is a page level region with a title, a
  * navigation, a grid and a footer, so it paints its own surface (`--_bg`, which
- * is dark under `theme="dark"` and under a dark `prefers-color-scheme`) and
+ * is dark under `theme="dark"` and on a page which declares a dark
+ * `color-scheme`) and
  * its text is read against that surface and not against whatever page it sits
  * in; the text never inherits the colour of the page.
  *
@@ -1000,15 +1001,6 @@ onBeforeUnmount(() => {
    * under a dark scheme and under `theme="dark"`, so the text on it, which is
    * the colour of the same table, is readable on any page */
   background: var(--_bg);
-  color-scheme: light dark;
-}
-
-:host([theme='light']) {
-  color-scheme: light;
-}
-
-:host([theme='dark']) {
-  color-scheme: dark;
 }
 
 .shell {
@@ -1376,6 +1368,8 @@ onBeforeUnmount(() => {
   grid-row: 1 / -1;
   grid-template-rows: subgrid;
   row-gap: 8px;
+  /* the card is the surface of a panel of the app, which paints its own */
+  background: transparent;
 }
 
 /*
@@ -1449,7 +1443,7 @@ onBeforeUnmount(() => {
 
 .error {
   margin: 0;
-  color: var(--_outlier);
+  color: var(--_error);
 }
 
 .pending {

@@ -179,6 +179,219 @@ test.describe('the slides', () => {
     expect(ratios.select).toBeGreaterThan(4.5)
     expect(ratios.curve).toBeGreaterThan(3)
   })
+
+  /**
+   * Hold the requests of a route until the test lets them go.
+   *
+   * A request the page stopped in the meantime is gone, which is what a freeze
+   * does to it, so letting it go then is no error.
+   */
+  async function hold(page: Page, matches: (url: string) => boolean): Promise<() => void> {
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route(
+      (url) => matches(url.pathname),
+      async (route) => {
+        await gate
+        await route.continue().catch(() => undefined)
+      },
+    )
+    return release
+  }
+
+  /**
+   * The moments a deck passes over the slide of a panel at: as the panel
+   * starts, with two slides turned in one task, and while it reads its
+   * declaration or runs its first simulation, whose request is held until the
+   * deck has left the slide.
+   */
+  const PASSED_OVER: { name: string; route: ((path: string) => boolean) | null }[] = [
+    { name: 'as it started', route: null },
+    {
+      name: 'while it read its declaration',
+      route: (path) => path.endsWith('/panels/dose_plasma'),
+    },
+    { name: 'while it ran its first simulation', route: (path) => path.endsWith('/simulate') },
+  ]
+
+  for (const { name, route } of PASSED_OVER) {
+    test(`draws the panel of a slide the deck passed over ${name}`, async ({ page }) => {
+      // a lecturer who pages forward through a deck shows the slide of the
+      // panel for a moment and leaves it, which freezes the panel; the slide is
+      // drawn when the deck comes back to it
+      const release = route === null ? null : await hold(page, route)
+      await page.goto('/demo/slides.html#/0')
+      await expect.poll(() => slideIndex(page)).toBe(0)
+      // the deck of the page is a binding of its script and no property of the
+      // window, so it is reached by an expression of the page
+      if (route === null) {
+        await page.evaluate('deck.next(); deck.next()')
+      } else {
+        const held = page.waitForRequest((request) => route(new URL(request.url()).pathname))
+        await page.evaluate('deck.next()')
+        await held
+        await page.evaluate('deck.next()')
+      }
+      await expect.poll(() => slideIndex(page)).toBe(2)
+      await page.waitForTimeout(1500)
+      release?.()
+      await page.unrouteAll({ behavior: 'ignoreErrors' })
+      await page.evaluate('deck.prev()')
+      const panel = page.locator('sbmlsim-panel')
+      await expect(panel.locator('svg path.curve').first()).toBeVisible()
+      await expect(panel.locator('.pending')).toHaveCount(0)
+      await expect(panel.locator('.error')).toHaveCount(0)
+      await expect(panel.locator('input[type=range]').first()).toBeEnabled()
+    })
+  }
+})
+
+test.describe('a panel frozen while it reads its study data', () => {
+  test('draws its figure over the data when it is activated again', async ({ page }) => {
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route('**/panels/renal_urine/data**', async (route) => {
+      await gate
+      await route.continue().catch(() => undefined)
+    })
+    const requested = page.waitForRequest((request) => request.url().includes('/data'))
+    await page.goto('/demo/plain.html')
+    await requested
+    const panel = page.locator('sbmlsim-panel')
+    await panel.evaluate((element) => {
+      ;(element as unknown as { freeze: () => void }).freeze()
+    })
+    release()
+    await page.waitForTimeout(500)
+    await panel.evaluate((element) => {
+      void (element as unknown as { activate: () => Promise<void> }).activate()
+    })
+    await expect(panel.locator('svg path.curve').first()).toBeVisible()
+    await expect(panel.locator('.pending')).toHaveCount(0)
+    // the study of the panel was measured after 5 mg, and its points are drawn
+    // under the curve of that dose out of the data the panel read once
+    await panel.getByRole('combobox', { name: 'dose' }).selectOption({ label: '5 mg' })
+    await expect(panel.locator('svg g.points').first()).toBeVisible()
+  })
+})
+
+/**
+ * Measure the contrast of the text of a panel against the page and against
+ * its own surface.
+ *
+ * The page is the first background painted from the body up, else the canvas
+ * of the scheme the page declares; the surface is the first one painted on the
+ * way up from the text through the shadow root. Each text gets the smaller of
+ * the two, so a panel which painted no surface of its own, or one which
+ * painted a surface of the other scheme than its text, fails here.
+ */
+async function readability(panel: Locator): Promise<Record<string, number>> {
+  return panel.evaluate((host) => {
+    const parse = (text: string): number[] => (text.match(/[\d.]+/g) ?? []).map(Number)
+    const lin = (c: number): number => {
+      const s = c / 255
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+    }
+    const luminance = ([r = 0, g = 0, b = 0]: number[]): number =>
+      0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    const ratio = (a: string, b: string): number => {
+      const [x, y] = [luminance(parse(a)), luminance(parse(b))]
+      return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+    }
+    const painted = (paint: string): boolean => parse(paint).length < 4 || parse(paint)[3] !== 0
+    const behind = (start: Element): string | null => {
+      let node: Node | null = start
+      while (node !== null) {
+        if (node instanceof Element) {
+          const paint = getComputedStyle(node).backgroundColor
+          if (painted(paint)) {
+            return paint
+          }
+        }
+        node = node.parentNode instanceof ShadowRoot ? node.parentNode.host : node.parentNode
+      }
+      return null
+    }
+    const scheme = getComputedStyle(document.documentElement).colorScheme
+    const canvas =
+      scheme.includes('dark') &&
+      (!scheme.includes('light') || matchMedia('(prefers-color-scheme: dark)').matches)
+        ? 'rgb(18, 18, 18)'
+        : 'rgb(255, 255, 255)'
+    const page = behind(document.body) ?? canvas
+    const root = host.shadowRoot
+    if (root === null) {
+      throw new Error('the element has no shadow root')
+    }
+    const measured: Record<string, number> = {}
+    const measure = (
+      name: string,
+      found: Element | null,
+      colour: (style: CSSStyleDeclaration) => string,
+    ): void => {
+      if (found === null) {
+        throw new Error(`no ${name}`)
+      }
+      const ink = colour(getComputedStyle(found))
+      measured[name] = Math.min(ratio(ink, page), ratio(ink, behind(found) ?? page))
+    }
+    measure('title', root.querySelector('.title'), (style) => style.color)
+    measure('knob', root.querySelector('.knob-label'), (style) => style.color)
+    for (const [index, label] of [...root.querySelectorAll('svg text.axis-label')].entries()) {
+      measure(`axis label ${String(index)}`, label, (style) => style.fill)
+    }
+    measure('tick', root.querySelector('svg .tick text'), (style) => style.fill)
+    for (const [index, entry] of [...root.querySelectorAll('svg .legend-entry text')].entries()) {
+      measure(`legend ${String(index)}`, entry, (style) => style.fill)
+    }
+    return measured
+  })
+}
+
+test.describe('the scheme of the page', () => {
+  /** The cases: the page, the scheme of the system and the scheme of the page. */
+  const CASES: { page: string; system: 'light' | 'dark'; dark: boolean }[] = [
+    { page: 'plain.html', system: 'dark', dark: false },
+    { page: 'plain.html', system: 'light', dark: false },
+    { page: 'docs.html', system: 'dark', dark: false },
+    { page: 'docs.html', system: 'light', dark: true },
+  ]
+
+  for (const { page: name, system, dark } of CASES) {
+    const palette = dark ? 'its dark palette' : 'a light page'
+    test(`a panel on ${name}, ${palette}, is readable under a ${system} system`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: system })
+      await page.goto(`/demo/${name}`)
+      if (dark) {
+        // the dark palette of the documentation theme, as its toggle sets it
+        await page.evaluate(() => {
+          document.body.setAttribute('data-md-color-scheme', 'slate')
+        })
+      }
+      const panel = page.locator('sbmlsim-panel')
+      await expect(panel.locator('svg .legend-entry text').first()).toBeVisible()
+      const ratios = await readability(panel)
+      expect(Object.keys(ratios).length).toBeGreaterThan(5)
+      for (const [part, value] of Object.entries(ratios)) {
+        expect(value, part).toBeGreaterThanOrEqual(4.5)
+      }
+      // the panel is of the scheme of the page and not of the system, and it
+      // paints the surface of that scheme
+      const scheme = await panel.evaluate((element) => getComputedStyle(element).colorScheme)
+      expect(scheme.includes('dark')).toBe(dark)
+      const surface = await panel.evaluate((element) => {
+        const box = element.shadowRoot?.querySelector('.panel')
+        return box ? getComputedStyle(box).backgroundColor : ''
+      })
+      expect(surface).not.toBe('rgba(0, 0, 0, 0)')
+    })
+  }
 })
 
 test.describe('the slides on a touch screen', () => {

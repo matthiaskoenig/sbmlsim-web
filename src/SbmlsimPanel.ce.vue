@@ -675,6 +675,21 @@ let sequence = 0
  */
 let generation = 0
 /**
+ * The read of a declaration which is the latest, counted up by `load`: a read a
+ * freeze stopped and `activate()` started again may still answer, and its
+ * answer is no declaration to draw twice.
+ */
+let reading = 0
+/**
+ * The run a freeze dropped, which `activate()` owes the panel: the knob it
+ * grids over, `null` for a run of one point, `undefined` while nothing is owed.
+ * A freeze stops the read of the declaration, a run in flight and a scheduled
+ * one, and a host may move its knobs while the panel is frozen; a panel which
+ * did not resume them would stay on "Loading the panel", or draw a state its
+ * controls do not show, for good, as a deck which passes over a slide leaves it.
+ */
+let owed: string | null | undefined = undefined
+/**
  * What a run of the declaration which is read waits for before its answer is
  * drawn: its study data where that data holds the value axis (`framedBy`),
  * settled at once otherwise. Every run waits for it, the first one of `load`
@@ -1911,7 +1926,13 @@ function stopWork(): void {
  */
 async function simulate(gridId: string | null): Promise<void> {
   const talking = client
-  if (talking === null || frozen.value) {
+  if (talking === null) {
+    return
+  }
+  if (frozen.value) {
+    // a run asked for while the panel is frozen - the first one of a
+    // declaration which arrived after a freeze - is the one `activate()` runs
+    owed = gridId
     return
   }
   stopWork()
@@ -2059,13 +2080,14 @@ async function load(kept: Record<string, number> = {}): Promise<void> {
     return
   }
   const own = generation
+  const read = (reading += 1)
   try {
     const controller = new AbortController()
     flight = controller
     const declared = await attempt(() =>
       talking.panel(props.model, props.panel, controller.signal, props.variant),
     )
-    if (own !== generation) {
+    if (own !== generation || read !== reading) {
       return
     }
     flight = null
@@ -2271,8 +2293,12 @@ function takeHostValues(given: Record<string, number>, before: Record<string, nu
   if (changed) {
     knobValues.value = next
   }
-  if (moved !== null && !frozen.value) {
-    schedule(moved)
+  if (moved !== null) {
+    if (frozen.value) {
+      owed = moved
+    } else {
+      schedule(moved)
+    }
   }
 }
 
@@ -2361,17 +2387,25 @@ function onLog(event: Event): void {
 /**
  * Start the panel: read its declaration, its stored answer and its first grid.
  *
- * A second call only lifts a freeze and starts following the width again, so
- * a deck which mounts a slide lazily calls it whenever the slide is shown.
+ * A second call lifts a freeze, starts following the width again and does
+ * what the freeze dropped (`owed`), so a deck which mounts a slide lazily calls
+ * it whenever the slide is shown, and one which passes over a slide while the
+ * panel reads its declaration, its data or its first run finds it drawn when
+ * it comes back.
  *
  * @returns when the first figure was drawn or the failure was resolved; it
  *   never rejects
  */
 async function activate(): Promise<void> {
   frozen.value = false
+  const due = owed
+  owed = undefined
   if (started) {
     await nextTick()
     observe()
+    if (due !== undefined) {
+      await resume(due)
+    }
     return
   }
   started = true
@@ -2379,7 +2413,29 @@ async function activate(): Promise<void> {
   client = new PanelClient(props.endpoint, props.timeout)
   await nextTick()
   observe()
-  await Promise.all([loadStored(), load()])
+  // the knobs of a switch of the variant which a frozen panel took keep the
+  // values they show, as the switch of a live panel keeps them (`restart`)
+  await Promise.all([loadStored(), load({ ...knobValues.value })])
+}
+
+/**
+ * Do again what a freeze dropped (`owed`).
+ *
+ * A declaration which was not read is read, which runs the first simulation of
+ * it; the run of a panel whose declaration is in is run. A stopped request is
+ * no failure, so nothing a freeze did leaves the panel in a state no reader can
+ * get it out of.
+ *
+ * @param gridId the knob the dropped run grids over
+ * @returns when the figure was drawn or the failure was resolved
+ */
+async function resume(gridId: string | null): Promise<void> {
+  const declared = declaration.value
+  if (declared === null) {
+    await load({ ...knobValues.value })
+    return
+  }
+  await simulate(gridId)
 }
 
 /**
@@ -2430,7 +2486,9 @@ function restart(variant = false): void {
   gridded.value = null
   pointer.value = null
   if (frozen.value) {
+    // `activate()` starts the panel from scratch, which owes it nothing else
     started = false
+    owed = undefined
     return
   }
   client = new PanelClient(props.endpoint, props.timeout)
@@ -2443,6 +2501,9 @@ function restart(variant = false): void {
  * What is drawn stays drawn; `activate()` lifts the freeze.
  */
 function freeze(): void {
+  if (started && (flight !== null || timer !== null)) {
+    owed = gridded.value
+  }
   stopWork()
   sequence += 1
   pending.value = false
@@ -2468,8 +2529,12 @@ function reset(): void {
   knobValues.value = withHost(knobsOf(declared), (one) => one.default)
   logY.value = initialLog(declared)
   const first = firstGridded(declared)
-  if (!frozen.value && (failure.value !== null || first !== gridded.value)) {
-    schedule(first)
+  if (failure.value !== null || first !== gridded.value) {
+    if (frozen.value) {
+      owed = first
+    } else {
+      schedule(first)
+    }
   }
 }
 
@@ -2699,22 +2764,16 @@ defineExpose({ activate, freeze, reset })
  * `sbmlsim-panel { }` - beats a declaration of this tree on the host, and
  * everything in the panel would inherit the value of the page.
  *
- * `color-scheme` is what the browser draws the native widgets of the controls
- * with - the arrow of a select, the box of a checkbox, the face of a button -
- * and it follows the `theme` attribute as the tokens do, so a dark panel has
- * no white checkbox in it.
+ * `color-scheme` is what the colours of `theme.css` resolve against and what
+ * the browser draws the native widgets of the controls with - the arrow of a
+ * select, the box of a checkbox, the face of a button. Without `theme` the
+ * host declares none and inherits the one of the page, so the panel is light
+ * on a light page and dark on a page which declares itself dark, whatever the
+ * system of the reader is; `theme="light"` and `theme="dark"` set it on the
+ * host (`theme.css`).
  */
 :host {
   display: block;
-  color-scheme: light dark;
-}
-
-:host([theme='light']) {
-  color-scheme: light;
-}
-
-:host([theme='dark']) {
-  color-scheme: dark;
 }
 
 /*
@@ -2737,6 +2796,9 @@ defineExpose({ activate, freeze, reset })
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* the panel paints the surface of its scheme, so its text, which is of the
+   * same scheme, is never read against a page of the other one */
+  background: var(--_bg);
   color: var(--_fg);
   font-family: var(--_font);
   font-size: var(--_font-size);
@@ -2992,7 +3054,7 @@ defineExpose({ activate, freeze, reset })
 
 .error {
   margin: 0;
-  color: var(--_outlier);
+  color: var(--_error);
   font-size: var(--_font-size);
 }
 

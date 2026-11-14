@@ -94,4 +94,14 @@ describe('the bundle a page loads', () => {
     expect(built('sbmlsim-web.js')).toContain('--sbmlsim-fg')
     expect(built('sbmlsim-web.js')).toContain('--_fg')
   })
+
+  it('keeps every colour a pair the browser resolves against the scheme of the page', () => {
+    // a minifier which lowers `light-dark()` writes it as variables of its own,
+    // which a custom property of the design carries as text, so no colour of
+    // the panel would resolve and its text would take the colour of the page
+    for (const name of ['sbmlsim-web.js', 'sbmlsim-web.umd.cjs', 'sbmlsim-web.iife.js']) {
+      expect(built(name)).toContain('light-dark(')
+      expect(built(name)).not.toContain('lightningcss')
+    }
+  })
 })

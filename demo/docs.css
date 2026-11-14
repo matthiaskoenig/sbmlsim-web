@@ -1,0 +1,8 @@
+/*
+ * A panel paints the surface of its scheme, which the palette of the site
+ * declares; it takes the colour of the page of either palette, so it sits in
+ * the page without a box of its own.
+ */
+sbmlsim-panel {
+  --sbmlsim-bg: var(--md-default-bg-color);
+}
