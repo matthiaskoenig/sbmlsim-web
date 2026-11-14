@@ -143,11 +143,13 @@ import type {
   PanelAxis,
   PanelSummary,
   Provenance,
+  Scenario,
   SharedKnob,
 } from './contract'
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
-import { keepControlKeys, ownValue } from './knob'
+import ScenarioControl from './ScenarioControl.ce.vue'
+import { keepControlKeys, ownValue, sameValue } from './knob'
 import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -165,6 +167,8 @@ const SEPARATOR = ' · '
 const DOI_RESOLVER = 'https://doi.org/'
 /** What a doi may be written with in front of its number. */
 const DOI_PREFIX = /^https?:\/\/(?:dx\.)?doi\.org\//i
+/** The label of the select of the scenarios of a page, which are examples of its knobs. */
+const SCENARIO_LABEL = 'Example'
 
 const props = defineProps({
   /** The endpoint of the service, empty is the origin of the page. */
@@ -230,6 +234,48 @@ const sharedKnobs = computed<SharedKnob[]>(() => {
   const page = current.value
   return page === null ? [] : (app.value?.shared[page.id] ?? [])
 })
+
+/** The scenarios of the page which is shown, none for a page without. */
+const scenarios = computed<Scenario[]>(() => current.value?.scenarios ?? [])
+
+/**
+ * The scenario the shared knobs of the page are at: the first whose every value
+ * is the value its knob has now, `null` for knobs at none of them.
+ */
+const scenarioShown = computed<string | null>(() => {
+  const knobs = new Map(sharedKnobs.value.map((one) => [one.knob.id, one.knob]))
+  const at = scenarios.value.find((one) =>
+    Object.entries(one.values).every(([id, value]) => {
+      const knob = knobs.get(id)
+      return knob !== undefined && sameValue(ownValue(shared.value, id) ?? knob.default, value)
+    }),
+  )
+  return at?.id ?? null
+})
+
+/**
+ * Set the shared knobs of the page to a scenario a reader picked.
+ *
+ * Every knob it names is set at once, in one state of the knobs, so a panel
+ * takes the pick as one change of its attribute `values` and runs at most once
+ * for it, whichever of its knobs moved; a knob it does not name keeps the value
+ * it has. A value of a knob the page does not share is no knob of the page's,
+ * which the service does not let a scenario name, and is left out.
+ *
+ * @param id the id of the scenario
+ */
+function pickScenario(id: string): void {
+  const picked = scenarios.value.find((one) => one.id === id)
+  if (picked === undefined) {
+    return
+  }
+  const knobs = new Set(sharedKnobs.value.map((one) => one.knob.id))
+  // built of entries, so every knob id is a property of its own, `__proto__` among them
+  shared.value = Object.fromEntries([
+    ...Object.entries(shared.value),
+    ...Object.entries(picked.values).filter(([knob]) => knobs.has(knob)),
+  ])
+}
 
 /** Whether every shared knob of the page is at its declared default, which a reset changes nothing of. */
 const sharedAtDefaults = computed<boolean>(() =>
@@ -518,6 +564,16 @@ onBeforeUnmount(() => {
         aria-label="Simulation settings of the page"
         @keydown="keepControlKeys($event)"
       >
+        <!-- the examples of the page set the controls below, so they are above them,
+             in a row of their own -->
+        <div v-if="scenarios.length > 0" class="scenarios">
+          <ScenarioControl
+            :label="SCENARIO_LABEL"
+            :scenarios="scenarios"
+            :shown="scenarioShown"
+            @pick="pickScenario($event)"
+          />
+        </div>
         <KnobControl
           v-for="one of sharedKnobs"
           :key="one.knob.id"
@@ -754,6 +810,12 @@ onBeforeUnmount(() => {
 
 .knobs .knob {
   max-width: 20rem;
+}
+
+/* the select of the scenarios takes a row of its own, above the knobs it sets */
+.scenarios {
+  display: flex;
+  flex: 1 1 100%;
 }
 
 .knobs .reset {

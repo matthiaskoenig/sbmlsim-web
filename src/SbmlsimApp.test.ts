@@ -942,3 +942,121 @@ describe('the knobs the panels of a page share', () => {
     expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
   })
 })
+
+describe('the scenarios of a page', () => {
+  /** The scenarios of page B: two states of its two shared knobs, and one of one knob. */
+  const SCENARIOS = [
+    { id: 'one', label: 'Scenario one', values: { knobR: 0.5, knobS: 12.5 } },
+    { id: 'two', label: 'Scenario two', values: { knobR: 1, knobS: 25 } },
+    { id: 'half', label: 'Half', values: { knobR: 0.5 } },
+  ]
+
+  /** The app whose page B lists the scenarios, and whose panels share both knobs. */
+  function withScenarios(): void {
+    const given = app()
+    declared = {
+      ...given,
+      pages: given.pages.map((page) =>
+        page.id === 'pageB' ? { ...page, scenarios: SCENARIOS } : page,
+      ),
+    }
+    knobsOf = {
+      panelB: [rangeKnob('knobR'), choiceKnob('knobS')],
+      panelC: [rangeKnob('knobR'), choiceKnob('knobS')],
+    }
+  }
+
+  /** Get the select of the scenarios. */
+  function select(element: AppElement): HTMLSelectElement {
+    return part(element, '#scenario') as HTMLSelectElement
+  }
+
+  /** The simulations one panel asked for. */
+  function simulationsOf(id: string): SimulateRequest[] {
+    return calls
+      .filter((one) => one.url.endsWith(`/panels/${id}/simulate`))
+      .map((one) => one.body ?? {})
+  }
+
+  /** Let a release of a knob reach its run, past the debounce of the panel. */
+  async function released(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+  }
+
+  it('draws a select of them above the shared controls, at the one the knobs are at', async () => {
+    withScenarios()
+    const element = await shell({ page: 'pageB' })
+    const labels = [...element.shadowRoot.querySelectorAll('.knobs label')].map((one) =>
+      one.textContent.trim(),
+    )
+    expect(labels).toEqual(['Example', 'knob knobR [mg]', 'knob knobS'])
+    expect(part(element, 'label[for="scenario"]').textContent.trim()).toBe('Example')
+    expect([...select(element).options].map((one) => one.textContent.trim())).toEqual([
+      'Scenario one',
+      'Scenario two',
+      'Half',
+    ])
+    // the defaults are the state of the second scenario
+    expect(select(element).value).toBe('two')
+    // a page without scenarios draws no select of them
+    tabs(element)[0]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('#scenario')).toBeNull()
+  })
+
+  it('sets every knob a scenario names in one state, one run per panel', async () => {
+    withScenarios()
+    const element = await shell({ page: 'pageB' })
+    const select = part(element, '#scenario') as HTMLSelectElement
+    select.value = 'one'
+    select.dispatchEvent(new Event('change'))
+    await released()
+    for (const id of ['panelB', 'panelC']) {
+      expect(part(element, `sbmlsim-panel[panel="${id}"]`).getAttribute('values')).toBe(
+        '{"knobR":0.5,"knobS":12.5}',
+      )
+      // the first run grids over the range knob, which the pick reads out of
+      // it, and the choice knob is one run, whatever else moved with it
+      expect(simulationsOf(id)).toHaveLength(2)
+    }
+    expect((part(element, '#knob-knobR') as HTMLInputElement).value).toBe('0.5')
+    expect((part(element, '#knob-knobS') as HTMLSelectElement).value).toBe('12.5')
+    expect(select.value).toBe('one')
+  })
+
+  it('leaves a knob a scenario does not name where it is', async () => {
+    withScenarios()
+    const element = await shell({ page: 'pageB' })
+    const choice = part(element, '#knob-knobS') as HTMLSelectElement
+    choice.value = '12.5'
+    choice.dispatchEvent(new Event('change'))
+    await settled()
+    select(element).value = 'half'
+    select(element).dispatchEvent(new Event('change'))
+    await settled()
+    expect(part(element, 'sbmlsim-panel[panel="panelB"]').getAttribute('values')).toBe(
+      '{"knobR":0.5,"knobS":12.5}',
+    )
+    // that state is the one of the first scenario as well, which the select
+    // shows, since it lists it first
+    expect(select(element).value).toBe('one')
+  })
+
+  it('shows an entry which cannot be picked where the knobs are at no scenario, and follows a reset', async () => {
+    withScenarios()
+    const element = await shell({ page: 'pageB' })
+    const choice = part(element, '#knob-knobS') as HTMLSelectElement
+    choice.value = '12.5'
+    choice.dispatchEvent(new Event('change'))
+    await settled()
+    expect(select(element).value).toBe('custom')
+    const custom = [...select(element).options].find((one) => one.value === 'custom')
+    expect(custom?.textContent.trim()).toBe('custom')
+    expect(custom?.disabled).toBe(true)
+    ;(part(element, '.knobs .reset') as HTMLButtonElement).click()
+    await settled()
+    expect(select(element).value).toBe('two')
+    expect([...select(element).options].map((one) => one.value)).toEqual(['one', 'two', 'half'])
+  })
+})

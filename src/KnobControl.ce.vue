@@ -180,34 +180,14 @@ function say(kind: 'input' | 'change', event: Event): void {
   </div>
 </template>
 
+<style src="./control.css"></style>
+
 <style>
 /*
- * The control declares its own size and line height, the ones of the panel, so
- * it is drawn alike in a panel and in the shell of an app, whose text is set
- * otherwise. Where it sits and how wide it is belongs to the element which
- * draws it.
+ * The label, the select and the size of the control are the ones of
+ * `control.css`, which the select of the scenarios of a page shares; the row
+ * of a slider and its value are the control of a knob alone.
  */
-.knob {
-  /* the height of a select and of the row of a slider alike, so the labels of
-   * a slider and a select beside it are at one height and so are the two
-   * controls: a slider is lower than a select, and the row of a slider is as
-   * tall as a select by this */
-  --_knob-control: calc(var(--_font-size) + 12px);
-
-  display: flex;
-  flex: 1 1 160px;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  font-size: var(--_font-size);
-  line-height: 1.45;
-}
-
-.knob-label {
-  color: var(--_fg-soft);
-  font-size: var(--_font-size-small);
-}
-
 .knob-row {
   display: flex;
   gap: 8px;
@@ -227,18 +207,5 @@ function say(kind: 'input' | 'change', event: Event): void {
   font-family: var(--_font-mono);
   font-size: var(--_font-size-small);
   text-align: right;
-}
-
-.knob-select {
-  box-sizing: border-box;
-  width: 100%;
-  height: var(--_knob-control);
-  padding: 3px 6px;
-  border: 1px solid var(--_line);
-  border-radius: 6px;
-  background: var(--_bg-card);
-  color: var(--_fg);
-  font-family: inherit;
-  font-size: var(--_font-size);
 }
 </style>

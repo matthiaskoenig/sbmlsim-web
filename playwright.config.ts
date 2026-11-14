@@ -21,7 +21,11 @@ export default defineConfig({
   webServer: {
     command:
       `node scripts/stage-demo.mjs && cd "${REPO}" && uv run python -m sbmlsim.serve ` +
-      `--model hctz=examples.panels.hctz:PROJECT --host 127.0.0.1 --port ${PORT} ` +
+      `--model hctz=examples.panels.hctz:PROJECT ` +
+      // the declaration of the HCTZ panels in two variants, a device of the
+      // demo which serves one SBML file twice
+      `--model hctz_variants=examples.panels.hctz_variants:PROJECT_VARIANTS ` +
+      `--host 127.0.0.1 --port ${PORT} ` +
       `--static "${process.cwd()}/.site"`,
     url: `http://127.0.0.1:${PORT}/healthz`,
     reuseExistingServer: false,

@@ -1012,3 +1012,145 @@ test.describe('the app shell', () => {
     expect(widths.cell).toBeCloseTo(widths.grid, 0)
   })
 })
+
+test.describe('the page of a patient', () => {
+  /** Open the app on a page of a model and wait until both of its plots are drawn. */
+  async function openPage(page: Page, model: string, id: string): Promise<Locator> {
+    // the shell of the demo page is replaced by one of the model and the page,
+    // so nothing of the app of another model is ever drawn on it
+    await page.goto('/demo/app.html')
+    await page.evaluate(
+      ({ name, shown }) => {
+        document.querySelector('sbmlsim-app')?.remove()
+        const one = document.createElement('sbmlsim-app')
+        for (const [attribute, value] of Object.entries({
+          endpoint: '',
+          model: name,
+          page: shown,
+        })) {
+          one.setAttribute(attribute, value)
+        }
+        document.body.append(one)
+      },
+      { name: model, shown: id },
+    )
+    const app = page.locator('sbmlsim-app')
+    await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
+    await expect(app.locator('sbmlsim-panel').nth(0).locator('svg path').first()).toBeVisible()
+    return app
+  }
+
+  /** The axes of the figures of a page: every axis line and tick, which are where a figure is laid out. */
+  function axesOf(app: Locator): Promise<string[]> {
+    return app
+      .locator('sbmlsim-panel')
+      .evaluateAll((all) =>
+        all.map((one) =>
+          [...(one.shadowRoot?.querySelectorAll('svg .axis') ?? [])]
+            .map((axis) => axis.outerHTML)
+            .join(''),
+        ),
+      )
+  }
+
+  /** The curves of every figure of a page. */
+  function curvesOf(app: Locator): Promise<string[]> {
+    return app
+      .locator('sbmlsim-panel')
+      .evaluateAll((all) =>
+        all.map((one) =>
+          [...(one.shadowRoot?.querySelectorAll('svg path.curve') ?? [])]
+            .map((path) => path.getAttribute('d') ?? '')
+            .join('|'),
+        ),
+      )
+  }
+
+  test('picks a scenario, which moves both plots, the select of the stops and the slider', async ({
+    page,
+  }) => {
+    const simulations = countSimulations(page)
+    const app = await openPage(page, 'hctz', 'patient')
+    await expect.poll(simulations.count).toBe(2)
+    const scenario = app.locator('#scenario')
+    // the defaults are the healthy patient of 25 mg
+    await expect(scenario).toHaveValue('healthy')
+    await expect(app.locator('.knobs label').first()).toHaveText('Example')
+    const before = await curvesOf(app)
+    await scenario.selectOption({ label: 'severe impairment, 12.5 mg' })
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(before[0])
+    await expect.poll(async () => (await curvesOf(app))[1]).not.toBe(before[1])
+    await expect(app.locator('#knob-crcl-stops')).toHaveValue('20')
+    await expect(app.locator('#knob-crcl')).toHaveValue('20')
+    await expect(app.locator('#knob-dose')).toHaveValue('12.5')
+    for (const one of await app.locator('sbmlsim-panel').all()) {
+      await expect(one).toHaveAttribute('values', '{"crcl":20,"dose":12.5}')
+    }
+    // one state: one run per panel for both knobs, and the pause is longer
+    // than the debounce of a release
+    await page.waitForTimeout(500)
+    expect(simulations.count()).toBe(4)
+    // a knob moved away from the scenario leaves it, which is no pick
+    await app.locator('#knob-crcl-stops').selectOption({ label: 'mild impairment' })
+    await expect(scenario).toHaveValue('custom')
+    await expect(scenario.locator('option[value=custom]')).toBeDisabled()
+    // and Reset brings the defaults back, which the select follows
+    await app.locator('.knobs button.reset').click()
+    await expect(scenario).toHaveValue('healthy')
+  })
+
+  test('keeps the select of the stops and the slider in step', async ({ page }) => {
+    const app = await openPage(page, 'hctz', 'patient')
+    const stops = app.locator('#knob-crcl-stops')
+    const slider = app.locator('#knob-crcl')
+    await expect(stops).toHaveValue('110')
+    await stops.selectOption({ label: 'moderate impairment' })
+    await expect(slider).toHaveValue('45')
+    await expect(app.locator('.knobs .knob-value').first()).toHaveText('45')
+    // a step of the slider off the stop is no stop, and a step back is it again
+    await slider.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(slider).toHaveValue('46')
+    await expect(stops).toHaveValue('custom')
+    await page.keyboard.press('ArrowLeft')
+    await expect(slider).toHaveValue('45')
+    await expect(stops).toHaveValue('45')
+    // both are reached with the keyboard and named for a screen reader
+    const names = await app.evaluate((element) => {
+      const root = element.shadowRoot
+      const name = (id: string): string =>
+        (root?.getElementById(id)?.getAttribute('aria-labelledby') ?? '')
+          .split(' ')
+          .map((one) => root?.getElementById(one)?.textContent.trim() ?? '')
+          .join(' ')
+      return {
+        stops: name('knob-crcl-stops'),
+        slider: root?.querySelector('label[for="knob-crcl"]')?.textContent.trim() ?? '',
+      }
+    })
+    expect(names).toEqual({
+      stops: 'creatinine clearance [ml/min] named value',
+      slider: 'creatinine clearance [ml/min]',
+    })
+  })
+
+  test('holds the axes of its plots still as the knobs move', async ({ page }) => {
+    const app = await openPage(page, 'hctz', 'patient')
+    const axes = await axesOf(app)
+    // the declared ends: 0 to 2 uM, 0 to 100 umol, 24 h
+    expect(axes[0]).toContain('>2<')
+    expect(axes[1]).toContain('>100<')
+    const before = await curvesOf(app)
+    await app.locator('#knob-crcl-stops').selectOption({ label: 'kidney failure' })
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(before[0])
+    expect(await axesOf(app)).toEqual(axes)
+    const failing = await curvesOf(app)
+    await app.locator('#knob-dose').selectOption({ label: '50 mg' })
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(failing[0])
+    expect(await axesOf(app)).toEqual(axes)
+    const heavy = await curvesOf(app)
+    await app.locator('#scenario').selectOption({ label: 'healthy, 25 mg' })
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(heavy[0])
+    expect(await axesOf(app)).toEqual(axes)
+  })
+})

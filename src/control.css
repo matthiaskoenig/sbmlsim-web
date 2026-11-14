@@ -1,0 +1,41 @@
+/*
+ * The type of a control above a figure: a label and a select, shared by the
+ * control of a knob (`KnobControl.ce.vue`) and the select of the scenarios of
+ * a page (`ScenarioControl.ce.vue`), so the two are drawn alike in a panel and
+ * in the shell of an app, whose text is set otherwise. Each declares its own
+ * size and line height, the ones of the panel. Where a control sits and how
+ * wide it is belongs to the element which draws it.
+ */
+.knob {
+  /* the height of a select and of the row of a slider alike, so the labels of
+   * a slider and a select beside it are at one height and so are the two
+   * controls: a slider is lower than a select, and the row of a slider is as
+   * tall as a select by this */
+  --_knob-control: calc(var(--_font-size) + 12px);
+
+  display: flex;
+  flex: 1 1 160px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--_font-size);
+  line-height: 1.45;
+}
+
+.knob-label {
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
+}
+
+.knob-select {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--_knob-control);
+  padding: 3px 6px;
+  border: 1px solid var(--_line);
+  border-radius: 6px;
+  background: var(--_bg-card);
+  color: var(--_fg);
+  font-family: inherit;
+  font-size: var(--_font-size);
+}
