@@ -120,6 +120,29 @@ test.describe('the slides', () => {
     await expect.poll(() => slideIndex(page)).toBe(2)
   })
 
+  test('the figure reads its values with the arrow keys and keeps them from the deck', async ({
+    page,
+  }) => {
+    const panel = await open(page, 'slides.html')
+    const figure = panel.getByRole('slider', { name: /^Values of / })
+    await figure.focus()
+    await expect(figure).toHaveAttribute('aria-valuenow', '0')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    // the deck stays on its slide, and the readout is at the third point, in
+    // words for a screen reader and in its box for the eye
+    expect(await slideIndex(page)).toBe(1)
+    await expect(figure).toHaveAttribute('aria-valuenow', '2')
+    await expect(figure).toHaveAttribute('aria-valuetext', /^[\d.]+ min: plasma [\d.e+-]+ uM$/)
+    await expect(panel.locator('.readout')).toBeVisible()
+    await expect(panel.locator('.readout-time')).toHaveText(/^[\d.]+ min$/)
+    // the summary of the figure is its description
+    await expect(figure).toHaveAccessibleDescription(/plasma: highest [\d.]+ uM at [\d.]+ min/)
+    // a key the readout has no use for still turns the page
+    await page.keyboard.press('n')
+    await expect.poll(() => slideIndex(page)).toBe(2)
+  })
+
   test('a mouse drag moves the knob and leaves the slide', async ({ page }) => {
     await open(page, 'slides.html')
     const knob = page.locator('sbmlsim-panel input[type=range]').first()
@@ -246,6 +269,40 @@ test.describe('the slides', () => {
       await expect(panel.locator('input[type=range]').first()).toBeEnabled()
     })
   }
+})
+
+test.describe('an endpoint which sheds a request', () => {
+  test('is asked again after the time it names, and the panel loads meanwhile', async ({
+    page,
+  }) => {
+    // the service answers a request of a model beyond the requests it holds
+    // with a 503 and a Retry-After, which is no failure: the panel waits, says
+    // that it loads and shows no error, and draws the answer of the next try
+    let shed = 0
+    await page.route('**/panels/renal_urine/simulate', async (route) => {
+      if (shed === 0) {
+        shed += 1
+        await route.fulfill({
+          status: 503,
+          headers: { 'retry-after': '1', 'content-type': 'application/json' },
+          body: JSON.stringify({ detail: 'The service is busy, retry the request shortly.' }),
+        })
+        return
+      }
+      await route.continue()
+    })
+    const answered = page.waitForResponse(
+      (response) => response.url().endsWith('/simulate') && response.status() === 503,
+    )
+    await page.goto('/demo/plain.html')
+    await answered
+    const panel = page.locator('sbmlsim-panel')
+    await expect(panel.locator('.pending')).toHaveText('Loading the panel')
+    await expect(panel.locator('.error')).toHaveCount(0)
+    await expect(panel.locator('svg path.curve').first()).toBeVisible()
+    await expect(panel.locator('.error')).toHaveCount(0)
+    expect(shed).toBe(1)
+  })
 })
 
 test.describe('a panel frozen while it reads its study data', () => {

@@ -11,6 +11,7 @@ import type {
   SimulateResponse,
 } from './contract'
 import { PANEL_TAG, register } from './index'
+import type { SbmlsimPanelHTMLElement } from './index'
 import { plotSvg, tableMeasure } from './plot'
 
 // the renderer as it is, with `plotSvg` counted: a figure which is laid out
@@ -27,15 +28,8 @@ vi.mock('./plot', async (importOriginal) => {
 // id below is a neutral one: a model, a panel, a knob and a curve are data of
 // a payload and never of this library.
 
-/** The element as a page uses it: its three methods on an `HTMLElement`. */
-interface PanelElement extends HTMLElement {
-  /** Read the declaration and draw the first figure. */
-  activate(): Promise<void>
-  /** Stop every pending request and freeze the knobs. */
-  freeze(): void
-  /** Put every knob back to the value its declaration states. */
-  reset(): void
-}
+/** The element as a page uses it, the type the package gives its tag. */
+type PanelElement = SbmlsimPanelHTMLElement
 
 /** One request the element made. */
 interface Call {
@@ -69,7 +63,7 @@ function declaration(): PanelDeclaration {
       id: 'panelA',
       title: 'Panel A',
       subtitle: 'the question the panel answers',
-      x_label: 'time [h]',
+      x_label: 'time',
       y_label: '',
       y_min: null,
       y_max: null,
@@ -349,7 +343,7 @@ async function mount(
   attributes: Record<string, string> = {},
   parent: HTMLElement = document.body,
 ): Promise<PanelElement> {
-  const element = document.createElement(PANEL_TAG) as PanelElement
+  const element = document.createElement(PANEL_TAG)
   for (const [name, value] of Object.entries(attributes)) {
     element.setAttribute(name, value)
   }
@@ -654,7 +648,8 @@ describe('the declaration and the controls', () => {
     const element = await started()
     const footer = textOf(element, '.provenance')
     expect(footer).toContain('engineA')
-    expect(footer).toContain(HASH.slice(0, 8))
+    // the short hash is labelled as the run it names
+    expect(footer).toContain(`run ${HASH.slice(0, 8)}`)
     expect(footer).not.toContain(HASH.slice(0, 9))
     expect(footer).toContain('0.079 s')
   })
@@ -1712,7 +1707,72 @@ describe('the readout at the cursor', () => {
     expect(part(element, '.cursor').getAttribute('aria-hidden')).toBe('true')
     expect(figure(element)).toContain('role="img"')
     expect(figure(element)).toContain('<title>')
-    expect(shadow(element).querySelector('[tabindex]')).toBeNull()
+    // the one stop of the figure in the order of the keys is the readout of the
+    // keyboard, which says in words what the box shows
+    const stops = [...shadow(element).querySelectorAll('[tabindex]')]
+    expect(stops).toEqual([part(element, '.plot')])
+  })
+
+  /** Press a key on the figure, which bubbles out of the panel unless it is stopped. */
+  async function press(element: PanelElement, key: string): Promise<boolean> {
+    let reached = false
+    const listen = (): void => {
+      reached = true
+    }
+    document.addEventListener('keydown', listen)
+    part(element, '.plot').dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, composed: true, cancelable: true }),
+    )
+    document.removeEventListener('keydown', listen)
+    await nextTick()
+    return reached
+  }
+
+  it('reads every value of every curve with the keys, as words, and keeps the keys from a deck', async () => {
+    const element = await started()
+    const box = laidOut(element)
+    const plotted = part(element, '.plot')
+    expect(plotted.getAttribute('role')).toBe('slider')
+    expect(plotted.getAttribute('tabindex')).toBe('0')
+    expect(plotted.getAttribute('aria-label')).toBe('Values of value over time [h]')
+    expect(plotted.getAttribute('aria-valuemax')).toBe('2')
+    plotted.dispatchEvent(new FocusEvent('focus'))
+    await nextTick()
+    // the first point, with every curve, its value and its unit
+    expect(plotted.getAttribute('aria-valuenow')).toBe('0')
+    expect(plotted.getAttribute('aria-valuetext')).toBe('0 h: curve A 0 uM, curve B 0 umol')
+    // the arrow keys step along the grid and stop at the figure, so a deck
+    // does not turn the slide under them; another key reaches the page
+    expect(await press(element, 'ArrowRight')).toBe(false)
+    expect(plotted.getAttribute('aria-valuenow')).toBe('1')
+    expect(plotted.getAttribute('aria-valuetext')).toMatch(
+      /^1 h: curve A [\d.]+ uM, curve B [\d.]+ umol$/,
+    )
+    expect(await press(element, 'End')).toBe(false)
+    expect(plotted.getAttribute('aria-valuenow')).toBe('2')
+    expect(await press(element, 'ArrowRight')).toBe(false)
+    expect(plotted.getAttribute('aria-valuenow')).toBe('2')
+    expect(await press(element, 'Home')).toBe(false)
+    expect(plotted.getAttribute('aria-valuenow')).toBe('0')
+    expect(await press(element, 'n')).toBe(true)
+    // a sighted reader of the keyboard sees the readout where the keys put it
+    expect(readoutRows(element).map((row) => row[0])).toEqual(['curve A', 'curve B'])
+    const left = (): number =>
+      Number.parseFloat(
+        /left: ([\d.]+)px/.exec(part(element, '.crosshair').getAttribute('style') ?? '')?.[1] ?? '',
+      )
+    const first = left()
+    expect(first).toBeGreaterThanOrEqual(box.x0)
+    await press(element, 'End')
+    expect(left()).toBeGreaterThan(first)
+    expect(left()).toBeLessThanOrEqual(box.x1)
+    // the summary of every curve, which the figure names as its description
+    const summary = part(element, `#${plotted.getAttribute('aria-describedby') ?? ''}`)
+    expect(summary.textContent).toMatch(/curve A: highest [\d.]+ uM at 2 h, [\d.]+ uM at 2 h\./)
+    expect(summary.textContent).toContain('arrow keys')
+    plotted.dispatchEvent(new FocusEvent('blur'))
+    await nextTick()
+    expect(shadow(element).querySelector('.readout')).toBeNull()
   })
 })
 
@@ -3143,5 +3203,25 @@ describe('the knobs of a panel', () => {
     // the release of the choice knob is one run over it, at the value of the other
     expect(simulations().at(-1)?.values).toMatchObject({ knobB: 0.2 })
     expect(simulations().at(-1)?.grid).toEqual({ knob6: 2 })
+  })
+})
+
+describe('the names a reader of the panel is given', () => {
+  it('names the group of the controls after the panel, so the panels of an app are told apart', async () => {
+    const element = await started()
+    const group = part(element, '[role="group"]')
+    const named = group.getAttribute('aria-labelledby') ?? ''
+    expect(named).not.toBe('')
+    expect(group.hasAttribute('aria-label')).toBe(false)
+    expect(textOf(element, `#${named}`)).toBe('Panel A')
+  })
+
+  it('appends the unit of the run to the label of the time axis, as to the one of the value axis', async () => {
+    served.panel = () => {
+      const declared = declaration()
+      return Promise.resolve({ ...declared, panel: { ...declared.panel, x_label: 'elapsed' } })
+    }
+    const element = await started()
+    expect(figure(element)).toContain('>elapsed [h]</text>')
   })
 })

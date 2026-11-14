@@ -146,6 +146,7 @@ describe('the client of an endpoint', () => {
       subtitle: '',
       pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'], scenarios: [] }],
       variants: [],
+      variant: '',
       citation: '',
       doi: '',
       licenses: [],
@@ -224,20 +225,21 @@ describe('the client of an endpoint', () => {
     expect(answer.simulation.derived).toEqual({ targetZ: 'min(knob0 / 110, 1)' })
   })
 
-  it('reads a declaration of the version without the fields it grew as it did', async () => {
-    // an endpoint which speaks `panel/1` without the limits of the axes and the
-    // derived values is still one of the version: they are none
-    const old = declaration() as unknown as Record<string, Record<string, unknown>>
-    const panel = { ...old.panel }
-    delete panel.y_min
-    delete panel.y_max
-    delete panel.x_max
-    const simulation = { ...old.simulation }
+  it('refuses a declaration without the limits of its axes or its derived values', async () => {
+    // they are fields of `panel/1` like every other, which every endpoint of
+    // the version serves
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    for (const field of ['y_min', 'y_max', 'x_max']) {
+      const panel = Object.fromEntries(
+        Object.entries(declaration().panel).filter(([key]) => key !== field),
+      )
+      serve(() => Promise.resolve(json({ ...declaration(), panel })))
+      expect(await kindOf(client.panel('modelA', 'panelA')), field).toBe('body')
+    }
+    const simulation: Record<string, unknown> = { ...declaration().simulation }
     delete simulation.derived
-    serve(() => Promise.resolve(json({ ...old, panel, simulation })))
-    const answer = await new PanelClient(ENDPOINT, DEFAULT_TIMEOUT).panel('modelA', 'panelA')
-    expect([answer.panel.y_min, answer.panel.y_max, answer.panel.x_max]).toEqual([null, null, null])
-    expect(answer.simulation.derived).toEqual({})
+    serve(() => Promise.resolve(json({ ...declaration(), simulation })))
+    expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('body')
   })
 
   it('refuses a declaration whose limits or derived values are of another type', async () => {
@@ -252,7 +254,7 @@ describe('the client of an endpoint', () => {
     }
   })
 
-  it('reads the scenarios of a page, and a page of the version without them as one without', async () => {
+  it('reads the scenarios of a page and the variant of an app, and refuses an app without them', async () => {
     const app = {
       contract: 'app/1',
       title: 'Model A',
@@ -266,9 +268,10 @@ describe('the client of an endpoint', () => {
             { id: 'healthy', label: 'healthy, 25 mg', values: { knobA: 110, knobB: 25 } },
           ],
         },
-        { id: 'pageB', title: 'Page B', panels: ['panelA'] },
+        { id: 'pageB', title: 'Page B', panels: ['panelA'], scenarios: [] },
       ],
       variants: [],
+      variant: '',
       citation: '',
       doi: '',
       licenses: [],
@@ -280,14 +283,16 @@ describe('the client of an endpoint', () => {
     const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
     const read = await client.app('modelA')
     expect(read.pages[0]?.scenarios[0]?.values).toEqual({ knobA: 110, knobB: 25 })
-    // an app of the version without the variant it answers names none
     expect(read.variant).toBe('')
+    expect(read.pages[1]?.scenarios).toEqual([])
     body = { ...app, variant: 'female' }
     expect((await client.app('modelA')).variant).toBe('female')
-    body = { ...app, variant: 1 }
-    expect(await kindOf(client.app('modelA'))).toBe('body')
-    expect(read.pages[1]?.scenarios).toEqual([])
+    for (const variant of [1, undefined]) {
+      body = { ...app, variant }
+      expect(await kindOf(client.app('modelA'))).toBe('body')
+    }
     for (const scenarios of [
+      undefined,
       {},
       [{ id: 'a', label: 'a', values: { knobA: '1' } }],
       [{ id: 'a' }],

@@ -183,7 +183,7 @@ import {
   validValue,
 } from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
-import { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
+import { figureTitle, plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
 import type {
   AxisEnds,
   FontSizes,
@@ -408,6 +408,20 @@ const READOUT_DIGITS = 4
 const STALE_MESSAGE = 'The figure of the settings shown cannot be drawn.'
 /** What a value which is no number is shown as, e.g. a point which did not integrate. */
 const NO_VALUE = '-'
+
+/**
+ * The id of the title of the panel, which names the group of its controls, so
+ * the groups of the panels of an app are told apart; an id is one per shadow
+ * root and so per panel.
+ */
+const TITLE_ID = 'panel-title'
+
+/** The id of the summary of the figure, which is one per shadow root and so per panel. */
+const SUMMARY_ID = 'figure-summary'
+
+/** How the readout of the keyboard is moved, the end of the summary of the figure. */
+const KEYBOARD_HINT =
+  'The arrow keys move the readout along the time axis, Page Up and Page Down by a tenth of it.'
 
 const props = defineProps({
   /** The endpoint of the service, e.g. `https://models.example.org`; empty is the origin of the page. */
@@ -657,6 +671,11 @@ const heldFoot = ref('')
 const study = shallowRef<PanelDataSeries[] | null>(null)
 /** Where the pointer is, `null` while it is not over the plot box. */
 const pointer = ref<PointerState | null>(null)
+/**
+ * The point of the grid the readout of the keyboard is at, `null` while the
+ * figure has no keyboard focus: an index of the x of the drawn figure.
+ */
+const cursor = ref<number | null>(null)
 /** Whether the y axis is drawn logarithmically. */
 const logY = ref(false)
 /** The width of the element as it was last measured, 0 before any measurement. */
@@ -959,14 +978,19 @@ const drawnCurves = computed<DrawnCurve[]>(() => {
   }))
 })
 
-/** The label of the time axis, the one the panel declares or the unit of the run. */
+/**
+ * The label of the time axis, the one the panel declares or `time`, with the
+ * unit of the run.
+ *
+ * The unit is appended here as the renderer appends the one of the curves to
+ * the label of the y axis, so a declared label carries no unit of its own and
+ * names the unit the run is delivered in, whichever `x_unit` that is.
+ */
 const xLabel = computed<string>(() => {
   const declared = declaration.value?.panel.x_label
-  if (declared !== undefined && declared !== '') {
-    return declared
-  }
+  const label = declared === undefined || declared === '' ? 'time' : declared
   const unit = grid.value?.units.x
-  return unit === undefined || unit === null || unit === '' ? 'time' : `time [${unit}]`
+  return unit === undefined || unit === null || unit === '' ? label : `${label} [${unit}]`
 })
 
 /**
@@ -1519,7 +1543,8 @@ const footer = computed<string>(() => {
   }
   const parts = [
     answer.provenance.engine,
-    answer.spec_hash.slice(0, HASH_SHOWN),
+    // the hash names the run, as the footer of an app names its model
+    `run ${answer.spec_hash.slice(0, HASH_SHOWN)}`,
     `${shortNumber(answer.provenance.seconds, SECOND_DIGITS)} s`,
   ].filter((one) => one !== '' && one !== ' s')
   if (fromStore.value) {
@@ -1749,6 +1774,64 @@ const readoutStyle = {
   swatch: READOUT_SWATCH,
   gap: READOUT_ROW_GAP,
 }
+
+/**
+ * The text a screen reader is given for the point of the readout of the keyboard.
+ *
+ * It is the readout as words, every curve and not only the rows the box has
+ * room for, and it is built from the figure alone, so it is there where
+ * nothing could be measured as well.
+ */
+const cursorText = computed<string>(() => {
+  const spec = plot.value
+  const index = cursor.value ?? 0
+  const time = spec?.x[index]
+  if (spec === null || time === undefined) {
+    return ''
+  }
+  const rows = spec.series.map(
+    (one) => `${one.label} ${readoutValue(one.values[index], one.unit ?? null)}`,
+  )
+  return `${readoutValue(time, grid.value?.units.x ?? null)}: ${rows.join(', ')}`
+})
+
+/**
+ * The summary of the figure a screen reader is given with the readout of the
+ * keyboard: per curve its highest value and when, and its value at the end.
+ */
+const figureSummary = computed<string>(() => {
+  const spec = plot.value
+  if (spec === null) {
+    return ''
+  }
+  const unit = grid.value?.units.x ?? null
+  const lines = spec.series.map((one) => {
+    let peak: number | null = null
+    for (const [index, value] of one.values.entries()) {
+      const best = peak === null ? undefined : one.values[peak]
+      if (Number.isFinite(value) && (best === undefined || value > best)) {
+        peak = index
+      }
+    }
+    const last = spec.x.length - 1
+    const highest =
+      peak === null
+        ? 'no value'
+        : `highest ${readoutValue(one.values[peak], one.unit ?? null)} at ` +
+          readoutValue(spec.x[peak], unit)
+    return (
+      `${one.label}: ${highest}, ${readoutValue(one.values[last], one.unit ?? null)} at ` +
+      `${readoutValue(spec.x[last], unit)}.`
+    )
+  })
+  return `${lines.join(' ')} ${KEYBOARD_HINT}`
+})
+
+/** The name of the readout of the keyboard, the title of the figure it reads. */
+const cursorLabel = computed<string>(() => {
+  const spec = plot.value
+  return spec === null ? '' : `Values of ${figureTitle(spec)}`
+})
 
 /** The markers where the crosshair crosses the curves, none without a readout. */
 const dots = computed<Dot[]>(() =>
@@ -2369,6 +2452,95 @@ function onPointerMove(event: Event): void {
 
 /** Take the pointer off the figure, which takes the readout with it. */
 function onPointerLeave(): void {
+  pointer.value = cursor.value === null ? null : cursorState(cursor.value)
+}
+
+/**
+ * Get where the readout of the keyboard is, as a pointer at its point would be.
+ *
+ * @param index the index of the x it is at
+ * @returns the state of a pointer on the crosshair of that x, in the middle of
+ *   the plot box, `null` where nothing could be measured
+ */
+function cursorState(index: number): PointerState | null {
+  const drawn = geometry.value
+  const box = plotted.value
+  const figure = box?.querySelector('svg') ?? null
+  const time = plot.value?.x[index]
+  if (drawn === null || box === null || figure === null || time === undefined) {
+    return null
+  }
+  const inner = figure.getBoundingClientRect()
+  const outer = box.getBoundingClientRect()
+  if (!(inner.width > 0) || !(drawn.width > 0)) {
+    return null
+  }
+  const scale = inner.width / drawn.width
+  const left = inner.left - outer.left
+  const top = inner.top - outer.top
+  return {
+    x: left + drawn.xAt(time) * scale,
+    y: top + ((drawn.box.y0 + drawn.box.y1) / 2) * scale,
+    left,
+    top,
+    scale,
+    font: fontSizeOf(box),
+  }
+}
+
+/**
+ * Move the readout of the keyboard to a point of the grid.
+ *
+ * @param index the index of the x, which is kept on the grid
+ */
+function moveCursor(index: number): void {
+  const count = plot.value?.x.length ?? 0
+  if (count === 0) {
+    return
+  }
+  cursor.value = clamp(Math.round(index), 0, count - 1)
+  pointer.value = props.hover === 'off' ? null : cursorState(cursor.value)
+}
+
+/**
+ * Take a key on the figure: the arrow keys move its readout along the x of the grid.
+ *
+ * A key the readout acts on stops at the figure, so a deck does not turn the
+ * slide under a reader who reads the values; every other key reaches the host.
+ *
+ * @param event the `keydown` event
+ */
+function onFigureKey(event: KeyboardEvent): void {
+  const count = plot.value?.x.length ?? 0
+  const at = cursor.value ?? 0
+  const page = Math.max(1, Math.round(count / 10))
+  const moves: Record<string, number> = {
+    ArrowRight: at + 1,
+    ArrowUp: at + 1,
+    ArrowLeft: at - 1,
+    ArrowDown: at - 1,
+    PageUp: at + page,
+    PageDown: at - page,
+    Home: 0,
+    End: count - 1,
+  }
+  const next = moves[event.key]
+  if (next === undefined || count === 0) {
+    return
+  }
+  event.preventDefault()
+  event.stopPropagation()
+  moveCursor(next)
+}
+
+/** Show the readout of the keyboard where it was, at the first point the first time. */
+function onFigureFocus(): void {
+  moveCursor(cursor.value ?? 0)
+}
+
+/** Take the readout of the keyboard off the figure with its focus. */
+function onFigureBlur(): void {
+  cursor.value = null
   pointer.value = null
 }
 
@@ -2631,7 +2803,9 @@ defineExpose({ activate, freeze, reset })
     :class="[`layout-${drawnLayout}`, { frozen: frozen }]"
   >
     <header v-if="title !== '' || subtitle !== ''" class="head">
-      <component :is="headingTag" v-if="title !== ''" class="title">{{ title }}</component>
+      <component :is="headingTag" v-if="title !== ''" :id="TITLE_ID" class="title">{{
+        title
+      }}</component>
       <p v-if="subtitle !== ''" class="subtitle">{{ subtitle }}</p>
     </header>
     <div class="body">
@@ -2639,7 +2813,8 @@ defineExpose({ activate, freeze, reset })
         class="controls"
         :class="{ 'control-row': drawnLayout !== 'sidebar' }"
         role="group"
-        aria-label="Simulation settings"
+        :aria-labelledby="title !== '' ? TITLE_ID : undefined"
+        :aria-label="title !== '' ? undefined : 'Simulation settings'"
         @keydown="keepControlKeys($event)"
       >
         <KnobControl
@@ -2679,13 +2854,28 @@ defineExpose({ activate, freeze, reset })
         :style="{ minHeight: `${figureHeight}px` }"
         :aria-busy="pending ? 'true' : 'false'"
       >
+        <!-- the figure is the readout of the keyboard as well: a slider over the
+             x of the grid, whose value is the readout as words, so a reader
+             without a pointer reads every value of every curve -->
         <div
           v-if="svg !== '' && !stale"
           ref="plotted"
           class="plot"
+          role="slider"
+          tabindex="0"
+          aria-orientation="horizontal"
+          :aria-label="cursorLabel"
+          :aria-describedby="SUMMARY_ID"
+          aria-valuemin="0"
+          :aria-valuemax="Math.max(0, (plot?.x.length ?? 1) - 1)"
+          :aria-valuenow="cursor ?? 0"
+          :aria-valuetext="cursorText"
           @pointermove="onPointerMove($event)"
           @pointerleave="onPointerLeave()"
           @pointercancel="onPointerLeave()"
+          @keydown="onFigureKey($event)"
+          @focus="onFigureFocus()"
+          @blur="onFigureBlur()"
         >
           <!-- eslint-disable-next-line vue/no-v-html -- the renderer builds this string itself and escapes every text of it -->
           <div class="figure-svg" v-html="svg"></div>
@@ -2742,6 +2932,9 @@ defineExpose({ activate, freeze, reset })
         ></div>
         <!-- eslint-enable vue/no-v-html -->
         <p v-else-if="errorMessage === ''" class="pending">Loading the panel</p>
+        <p v-if="svg !== '' && !stale" :id="SUMMARY_ID" class="visually-hidden">
+          {{ figureSummary }}
+        </p>
       </div>
     </div>
     <div v-if="errorMessage !== '' || footer !== '' || heldFoot !== ''" part="foot" class="foot">
@@ -3050,6 +3243,19 @@ defineExpose({ activate, freeze, reset })
   margin: 0;
   color: var(--_fg-soft);
   font-size: var(--_font-size-small);
+}
+
+/* the text a screen reader is given and a sighted reader sees as the figure */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
 }
 
 .error {

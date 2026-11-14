@@ -48,6 +48,9 @@ export type {
   PanelTexts,
   PanelsResponse,
   Provenance,
+  Scenario,
+  SharedKnob,
+  SharedPanel,
   SimulateRequest,
   SimulateResponse,
   Status,
@@ -78,6 +81,52 @@ export type {
 export { APP_TAG, PANEL_TAG }
 
 /**
+ * `<sbmlsim-panel>` as a page sees it: an element with its three methods, which
+ * `document.querySelector('sbmlsim-panel')` gives a TypeScript host.
+ */
+export interface SbmlsimPanelHTMLElement extends HTMLElement {
+  /** Start the panel, or lift a freeze and do what it dropped. */
+  activate(): Promise<void>
+  /** Stop every pending request and freeze the knobs. */
+  freeze(): void
+  /** Put every knob back to the value its declaration states. */
+  reset(): void
+}
+
+/** `<sbmlsim-app>` as a page sees it, an element which is driven by its attributes alone. */
+export type SbmlsimAppHTMLElement = HTMLElement
+
+/**
+ * The class of a custom element of the package, which the browser builds an
+ * element of; it is typed as the element a page sees and not as the class of
+ * vue it is built with, so the types of the package import nothing of vue,
+ * which every bundle inlines.
+ */
+export interface ElementClass<Element extends HTMLElement> {
+  new (): Element
+  readonly prototype: Element
+}
+
+/**
+ * Type the class of a custom element vue built as the element a page sees.
+ *
+ * @param built the class
+ * @returns the same class
+ */
+function elementClass<Element extends HTMLElement>(
+  built: CustomElementConstructor,
+): ElementClass<Element> {
+  return built as ElementClass<Element>
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'sbmlsim-panel': SbmlsimPanelHTMLElement
+    'sbmlsim-app': SbmlsimAppHTMLElement
+  }
+}
+
+/**
  * The class of `<sbmlsim-panel>`, a custom element with a shadow root.
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
@@ -87,7 +136,9 @@ export { APP_TAG, PANEL_TAG }
  * `provenance` and the `spec_hash` of the answer, when a simulation succeeded:
  * never for a failure and never for a stored fallback, which is no simulation.
  */
-export const SbmlsimPanelElement = defineCustomElement(SbmlsimPanel)
+export const SbmlsimPanelElement = elementClass<SbmlsimPanelHTMLElement>(
+  defineCustomElement(SbmlsimPanel),
+)
 
 /**
  * The class of `<sbmlsim-app>`, the shell of the app of a model.
@@ -98,7 +149,9 @@ export const SbmlsimPanelElement = defineCustomElement(SbmlsimPanel)
  * page. It places the panels under the tag `register` was called with, so the
  * panel has to be registered under it where the shell is used.
  */
-export const SbmlsimAppElement = defineCustomElement(SbmlsimApp)
+export const SbmlsimAppElement = elementClass<SbmlsimAppHTMLElement>(
+  defineCustomElement(SbmlsimApp),
+)
 
 /**
  * Define one element, unless its tag is taken or there is nothing to define it in.

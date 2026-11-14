@@ -148,15 +148,13 @@ function allIdentified(items: unknown[]): boolean {
 }
 
 /**
- * Get whether a value of a payload is a number which may be absent.
+ * Get whether a value of a payload is a limit of an axis.
  *
  * @param value the value
- * @returns whether it is a finite number, `null` or absent
+ * @returns whether it is a finite number or `null`, which is no limit
  */
 function isLimit(value: unknown): boolean {
-  return (
-    value === undefined || value === null || (typeof value === 'number' && Number.isFinite(value))
-  )
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
 /**
@@ -192,14 +190,12 @@ function isNumbers(value: unknown): value is Record<string, number> {
  * controls, its curves and its series: a body which is checked here is a body
  * every reader of it can read without a guard of its own.
  *
- * A field the contract grew within its version may be absent, since an
- * endpoint which speaks the version without it is still one of the version: the
- * limits of the axes are then `null` and the derived values none, which is what
- * a declaration which states neither means. A field which is present and of
- * another type is no declaration.
+ * The limits of the axes and the derived values are fields of `panel/1` like
+ * every other, so a body without them, or with one of another type, is no
+ * declaration.
  *
  * @param body the parsed body, of the contract `panel/1`
- * @returns the declaration, with the fields which may be absent filled in
+ * @returns the declaration
  * @throws PanelRequestError of the kind `body` for a body which is no
  *   declaration
  */
@@ -218,22 +214,11 @@ function asDeclaration(body: unknown): PanelDeclaration {
     !isLimit(body.panel.y_min) ||
     !isLimit(body.panel.y_max) ||
     !isLimit(body.panel.x_max) ||
-    !(body.simulation.derived === undefined || isTexts(body.simulation.derived))
+    !isTexts(body.simulation.derived)
   ) {
     throw new PanelRequestError('body')
   }
-  const panel = body.panel
-  const simulation = body.simulation
-  return {
-    ...body,
-    panel: {
-      ...panel,
-      y_min: panel.y_min ?? null,
-      y_max: panel.y_max ?? null,
-      x_max: panel.x_max ?? null,
-    },
-    simulation: { ...simulation, derived: simulation.derived ?? {} },
-  } as unknown as PanelDeclaration
+  return body as unknown as PanelDeclaration
 }
 
 /**
@@ -314,24 +299,22 @@ function isHeads(value: unknown): boolean {
 /**
  * Get whether the scenarios of a page can be read.
  *
- * @param value the `scenarios` of a page, absent for a page of an endpoint
- *   which states none
- * @returns whether it is absent or a list of scenarios, each with its id, which
+ * @param value the `scenarios` of a page
+ * @returns whether it is a list of scenarios, each with its id, which
  *   is not empty (an SId never is, and the select of the scenarios takes the
  *   empty value for the state of no scenario), its label and the values it sets
  */
 function isScenarios(value: unknown): boolean {
   return (
-    value === undefined ||
-    (Array.isArray(value) &&
-      value.every(
-        (one) =>
-          isObject(one) &&
-          typeof one.id === 'string' &&
-          one.id !== '' &&
-          typeof one.label === 'string' &&
-          isNumbers(one.values),
-      ))
+    Array.isArray(value) &&
+    value.every(
+      (one) =>
+        isObject(one) &&
+        typeof one.id === 'string' &&
+        one.id !== '' &&
+        typeof one.label === 'string' &&
+        isNumbers(one.values),
+    )
   )
 }
 
@@ -344,12 +327,11 @@ function isScenarios(value: unknown): boolean {
  * shared knobs is no app: the shell would show every panel with controls of
  * its own, which is a page of two states when its panels share a knob. A body
  * without the heads is none either, since every card would move when the head
- * of its panel arrives. The scenarios of a page may be absent, as of an
- * endpoint which speaks the version without them, and are none then, and so
- * may the variant the app answers, which is empty then.
+ * of its panel arrives. The scenarios of every page and the variant the app
+ * answers are fields of `app/1` like every other.
  *
  * @param body the parsed body, of the contract `app/1`
- * @returns the app, every page with its scenarios
+ * @returns the app
  * @throws PanelRequestError of the kind `body` for a body which is no app
  */
 function asApp(body: unknown): AppDeclaration {
@@ -373,15 +355,11 @@ function asApp(body: unknown): AppDeclaration {
     !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string') ||
     !isShared(body.shared) ||
     !isHeads(body.heads) ||
-    !(body.variant === undefined || typeof body.variant === 'string')
+    typeof body.variant !== 'string'
   ) {
     throw new PanelRequestError('body')
   }
-  const pages = (body.pages as Record<string, unknown>[]).map((page) => ({
-    ...page,
-    scenarios: page.scenarios ?? [],
-  }))
-  return { ...body, pages, variant: body.variant ?? '' } as unknown as AppDeclaration
+  return body as unknown as AppDeclaration
 }
 
 /**

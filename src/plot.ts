@@ -1462,6 +1462,16 @@ function axisLabel(label: string, unit: string | undefined): string {
 }
 
 /**
+ * Get the title of a figure, the name a reader who does not see it is given.
+ *
+ * @param spec the figure
+ * @returns `<y label> [<unit>] over <x label>`, the `<title>` of its SVG
+ */
+export function figureTitle(spec: PlotSpec): string {
+  return `${axisLabel(spec.yLabel, sharedUnit(spec.series))} over ${spec.xLabel}`
+}
+
+/**
  * Get the unit every series of a figure carries, if it is one.
  *
  * @param series the series of the figure
@@ -3029,8 +3039,7 @@ export function plotSvg(spec: PlotSpec): string {
     type,
   )
 
-  const label = axisLabel(spec.yLabel, sharedUnit(series))
-  const title = tag('title', {}, escape(`${label} over ${spec.xLabel}`))
+  const title = tag('title', {}, escape(figureTitle(spec)))
   const background = tag('rect', {
     class: 'background',
     x: 0,

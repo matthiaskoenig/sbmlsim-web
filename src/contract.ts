@@ -249,7 +249,12 @@ export interface PanelTexts {
   title: string
   /** The question the panel answers, empty for a panel without one. */
   subtitle: string
-  /** The label of the time axis. */
+  /**
+   * The label of the time axis, `time` for a panel which declares none.
+   *
+   * A renderer appends the unit the run delivers its time in (`x_unit`), as
+   * it appends the one of the curves to `y_label`, so the unit is no part of it.
+   */
   x_label: string
   /**
    * The label of the value axis, empty for a panel which declares none.
@@ -496,8 +501,7 @@ export interface AppDeclaration {
    * The id of the variant the app answers: the one it was read in with
    * `?variant=`, else the default variant of the model, which an app read
    * without one is of. Its knobs, its scenarios and its heads are of that
-   * variant. Empty for an endpoint of the version without it, which says
-   * nothing of the variant it answers.
+   * variant.
    */
   variant: string
 }

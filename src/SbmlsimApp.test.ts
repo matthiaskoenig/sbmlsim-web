@@ -66,7 +66,7 @@ function panelDeclaration(id: string): PanelDeclaration {
       id,
       title: `Title of ${id}`,
       subtitle: subtitlesOf[id] ?? '',
-      x_label: 'time [h]',
+      x_label: 'time',
       y_label: '',
       y_min: null,
       y_max: null,
@@ -1385,12 +1385,12 @@ describe('the variant an app answers', () => {
         return answer
       }
       const body = (await answer.json()) as Record<string, unknown>
-      delete body.variant
+      body.variant = ''
       return json(body)
     })
     const element = await shell()
     expect(part(element, '[role="alert"]').textContent.trim()).toBe(FAILURE_MESSAGES.body)
-    // an app of one variant needs no switcher, so it says nothing of its variant
+    // an app of one variant needs no switcher, so it may say nothing of its variant
     document.body.innerHTML = ''
     declared = app({ variants: [{ id: 'variantA', label: 'Variant A' }] })
     const one = await shell()
