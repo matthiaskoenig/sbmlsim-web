@@ -143,6 +143,50 @@ test.describe('the slides', () => {
     await expect.poll(() => slideIndex(page)).toBe(2)
   })
 
+  test('puts the readout on the point it reads out on a scaled slide, in the colour of the curve', async ({
+    page,
+  }) => {
+    // the deck scales its slides to the window, by a sixth here, and the
+    // overlay of the readout is placed in the pixels of the slide, not of the
+    // screen
+    await page.setViewportSize({ width: 1280, height: 820 })
+    const panel = await open(page, 'slides.html')
+    const scaled = await page.evaluate(() => {
+      const slides = document.querySelector('.slides')
+      return slides === null ? '' : getComputedStyle(slides).transform
+    })
+    expect(scaled).not.toBe('none')
+    const plot = await panel.locator('.plot').boundingBox()
+    if (plot === null) {
+      throw new Error('the panel has no plot')
+    }
+    for (const share of [0.2, 0.6, 0.9]) {
+      const at = { x: plot.x + plot.width * share, y: plot.y + plot.height / 2 }
+      await page.mouse.move(at.x, at.y)
+      await expect(panel.locator('.crosshair')).toBeVisible()
+      const crosshair = await panel.locator('.crosshair').boundingBox()
+      // the nearest point of a grid of 51 points over less than the width of
+      // the plot is at most half a step of the grid away from the pointer
+      expect(Math.abs((crosshair?.x ?? 0) - at.x), String(share)).toBeLessThan(plot.width / 100 + 2)
+    }
+    // the dot on the crosshair and the swatch of the box are of the colour of
+    // the curve, which the scheme of the page decides
+    const colours = await panel.evaluate((host) => {
+      const root = host.shadowRoot
+      const colour = (selector: string, property: 'stroke' | 'backgroundColor'): string => {
+        const found = root?.querySelector(selector)
+        return found ? getComputedStyle(found)[property] : ''
+      }
+      return {
+        curve: colour('svg path.curve', 'stroke'),
+        dot: colour('.dot', 'backgroundColor'),
+        swatch: colour('.readout-swatch', 'backgroundColor'),
+      }
+    })
+    expect(colours.dot).toBe(colours.curve)
+    expect(colours.swatch).toBe(colours.curve)
+  })
+
   test('a mouse drag moves the knob and leaves the slide', async ({ page }) => {
     await open(page, 'slides.html')
     const knob = page.locator('sbmlsim-panel input[type=range]').first()

@@ -1631,6 +1631,22 @@ function nearestIndex(xs: number[], drawn: PlotGeometry, at: number): number | n
 }
 
 /**
+ * Get the colour of a curve for the overlay of the readout.
+ *
+ * The figure writes the public tokens of the ramp, which the panel declares
+ * for the figure alone (`.figure-svg`); the dot on the crosshair and the
+ * swatch of the box sit beside the figure, so they read the private tokens the
+ * public ones are taken from, which carry what the page set and the colour of
+ * its scheme alike.
+ *
+ * @param colour the colour of the curve in the figure
+ * @returns the same colour of the private tokens
+ */
+function overlayColour(colour: string): string {
+  return colour.replaceAll('--sbmlsim-ramp-', '--_ramp-')
+}
+
+/**
  * Write a value of the readout with its unit.
  *
  * @param value the value, `undefined` for a curve which has none here
@@ -1725,7 +1741,7 @@ const readout = computed<Readout | null>(() => {
     return {
       id: one.id,
       label: one.label,
-      colour: seriesColour(position, spec.series.length),
+      colour: overlayColour(seriesColour(position, spec.series.length)),
       value: readoutValue(value, one.unit ?? null),
       dot: pixel === null || pixel < y0 || pixel > y1 ? null : pixel,
     }
@@ -2431,14 +2447,32 @@ function pointerState(event: Event): PointerState | null {
   if (!(inner.width > 0) || !(drawn.width > 0)) {
     return null
   }
+  const local = pixelsOf(box, outer)
   return {
-    x: clientX - outer.left,
-    y: clientY - outer.top,
-    left: inner.left - outer.left,
-    top: inner.top - outer.top,
-    scale: inner.width / drawn.width,
+    x: (clientX - outer.left) / local,
+    y: (clientY - outer.top) / local,
+    left: (inner.left - outer.left) / local,
+    top: (inner.top - outer.top) / local,
+    scale: inner.width / local / drawn.width,
     font: fontSizeOf(box),
   }
+}
+
+/**
+ * Get the pixels of the screen per pixel of the box the overlay is drawn in.
+ *
+ * The overlay is placed in the pixels of its box, and a page may scale that
+ * box: a deck of reveal.js scales its slides to the window. What is measured
+ * on the screen is turned into the pixels of the box with this, so the
+ * crosshair sits on the point it reads out on a scaled slide as well.
+ *
+ * @param box the box of the overlay
+ * @param outer its rectangle on the screen
+ * @returns the ratio, 1 where the box has no size of its own (no layout)
+ */
+function pixelsOf(box: HTMLElement, outer: DOMRect): number {
+  const ratio = outer.width / box.offsetWidth
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : 1
 }
 
 /**
@@ -2475,9 +2509,10 @@ function cursorState(index: number): PointerState | null {
   if (!(inner.width > 0) || !(drawn.width > 0)) {
     return null
   }
-  const scale = inner.width / drawn.width
-  const left = inner.left - outer.left
-  const top = inner.top - outer.top
+  const local = pixelsOf(box, outer)
+  const scale = inner.width / local / drawn.width
+  const left = (inner.left - outer.left) / local
+  const top = (inner.top - outer.top) / local
   return {
     x: left + drawn.xAt(time) * scale,
     y: top + ((drawn.box.y0 + drawn.box.y1) / 2) * scale,
