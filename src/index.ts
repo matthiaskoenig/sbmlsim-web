@@ -64,7 +64,16 @@ export { interpolate } from './interpolate'
 export { canvasMeasure, fontOf } from './measure'
 export type { FigureFont } from './measure'
 export { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
-export type { Limits, PlotBox, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
+export type {
+  AxisEnds,
+  Limits,
+  PlotBox,
+  PlotGeometry,
+  PlotSpec,
+  Points,
+  Series,
+  TextMeasure,
+} from './plot'
 
 export { APP_TAG, PANEL_TAG }
 

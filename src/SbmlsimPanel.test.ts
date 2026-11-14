@@ -2538,3 +2538,81 @@ describe('the named stops of a range knob', () => {
     expect(control(element, 'knobB').getAttribute('aria-labelledby')).toBeNull()
   })
 })
+
+describe('the declared ends of the axes', () => {
+  /** The declaration with the ends of its axes. */
+  function ended(ends: { y_min?: number; y_max?: number; x_max?: number }): PanelDeclaration {
+    const declared = declaration()
+    return { ...declared, panel: { ...declared.panel, ...ends } }
+  }
+
+  /** Get the axes of the figure: both axis lines and every tick, which are where it is laid out. */
+  function axes(element: PanelElement): string {
+    const drawn = figure(element)
+    return drawn.split('<g class="data"')[0] ?? ''
+  }
+
+  it('draws the value axis between the ends a panel declares, whatever its knobs are at', async () => {
+    served.panel = () => Promise.resolve(ended({ y_min: 0, y_max: 100 }))
+    // a run over the choice knob answers ten times the curves of a run over
+    // the range knob, which the frame of either answer follows
+    served.simulate = (body) =>
+      Promise.resolve(
+        Object.keys(body.grid ?? {})[0] === 'knobA'
+          ? run(
+              'knobA',
+              CHOICES.map((value) => [0, value, 2 * value]),
+            )
+          : run(),
+      )
+    const element = await started()
+    const drawn = axes(element)
+    expect(drawn).toContain('>100<')
+    expect(drawn).toContain('>0<')
+    // the gridded knob moves the curve inside the axis
+    const before = figure(element)
+    move(control(element, 'knobB'), '0.2', 'input')
+    await nextTick()
+    expect(figure(element)).not.toBe(before)
+    expect(axes(element)).toBe(drawn)
+    // a knob the grid does not cover runs again, an answer of another frame
+    move(control(element, 'knobA'), '12.5', 'change')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await nextTick()
+    expect(simulations()).toHaveLength(2)
+    expect(axes(element)).toBe(drawn)
+  })
+
+  it('frames the value axis of its answer where it declares no end', async () => {
+    served.simulate = (body) =>
+      Promise.resolve(
+        Object.keys(body.grid ?? {})[0] === 'knobA'
+          ? run(
+              'knobA',
+              CHOICES.map((value) => [0, value, 2 * value]),
+            )
+          : run(),
+      )
+    const element = await started()
+    const drawn = axes(element)
+    move(control(element, 'knobA'), '12.5', 'change')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await nextTick()
+    expect(axes(element)).not.toBe(drawn)
+  })
+
+  it('ends the time axis at the end a panel declares', async () => {
+    served.panel = () => Promise.resolve(ended({ x_max: 1.5 }))
+    const element = await started()
+    const xAxis = (figure(element).split('<g class="axis x"')[1] ?? '').split(
+      '<g class="axis y"',
+    )[0]
+    const labels = [
+      ...(xAxis ?? '').matchAll(/<g class="tick">.*?<text[^>]*>([^<]*)<\/text>/g),
+    ].map((one) => one[1])
+    // the answer runs to 2 and the axis ends at 1.5, its ticks inside
+    const ticks = labels.map(Number)
+    expect(Math.max(...ticks)).toBeLessThanOrEqual(1.5)
+    expect(Math.max(...ticks)).toBeGreaterThanOrEqual(1.4)
+  })
+})

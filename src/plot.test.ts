@@ -757,6 +757,199 @@ describe('the limits of the value axis', () => {
   })
 })
 
+describe('the declared ends of the axes', () => {
+  /** Get the labels of the ticks of an axis, `x` or `y`, in their order. */
+  function ticksOf(svg: string, axis: 'x' | 'y'): string[] {
+    const group =
+      (svg.split(`<g class="axis ${axis}"`)[1] ?? '').split(/<g class="(?:axis|data)/)[0] ?? ''
+    return [...group.matchAll(/<g class="tick">.*?<text[^>]*>([^<]*)<\/text>/g)].map(
+      (one) => one[1] ?? '',
+    )
+  }
+
+  /** The data group of a figure, which is clipped to its plot box. */
+  function dataOf(svg: string): string {
+    return (
+      /<g class="data" clip-path="url\(#([^)]*)\)">(.*?)<\/g><g class="legend/.exec(svg)?.[2] ?? ''
+    )
+  }
+
+  it('runs a linear axis exactly from the one declared end to the other, with its ticks inside', () => {
+    const figure = spec(1, { yEnds: { low: 0, high: 10 } })
+    const drawn = plotGeometry(figure)
+    expect(drawn.yAt(0)).toBeCloseTo(drawn.box.y1, 9)
+    expect(drawn.yAt(10)).toBeCloseTo(drawn.box.y0, 9)
+    const ticks = ticksOf(plotSvg(figure), 'y').map(Number)
+    expect(ticks[0]).toBe(0)
+    expect(ticks.at(-1)).toBe(10)
+    // a frame of a caller holds nothing open beyond declared ends
+    const framed = plotGeometry(
+      spec(1, { yEnds: { low: 0, high: 10 }, yLimits: { low: -5, high: 50 } }),
+    )
+    expect(framed.yAt(10)).toBeCloseTo(framed.box.y0, 9)
+    expect(framed.yAt(0)).toBeCloseTo(framed.box.y1, 9)
+  })
+
+  it('runs a logarithmic axis exactly over the decades its ends declare', () => {
+    const figure = spec(1, { logY: true, yEnds: { low: 1e-3, high: 100 } })
+    const drawn = plotGeometry(figure)
+    expect(drawn.yAt(1e-3)).toBeCloseTo(drawn.box.y1, 9)
+    expect(drawn.yAt(100)).toBeCloseTo(drawn.box.y0, 9)
+    // the decades of the ends, every one inside them
+    const ticks = ticksOf(plotSvg(figure), 'y').map(Number)
+    expect(ticks[0]).toBe(0.001)
+    expect(ticks.every((one) => one >= 1e-3 && one <= 100)).toBe(true)
+  })
+
+  it('works the other end out of what is drawn where one end is declared', () => {
+    // the values 1..4: the upper end is the declared 10 exactly, the lower one
+    // the margin of the span the axis shows, 1 less 5 % of 9
+    const upper = plotGeometry(spec(1, { yEnds: { high: 10 } }))
+    expect(upper.yAt(10)).toBeCloseTo(upper.box.y0, 9)
+    expect(upper.yAt(1 - 0.45)).toBeCloseTo(upper.box.y1, 9)
+    const lower = plotGeometry(spec(1, { yEnds: { low: -2 } }))
+    expect(lower.yAt(-2)).toBeCloseTo(lower.box.y1, 9)
+    expect(lower.yAt(4 + 0.3)).toBeCloseTo(lower.box.y0, 9)
+    // a declared end which a logarithmic axis cannot show, the 0 of a linear
+    // panel drawn logarithmic, is no end of it, and the other one still is
+    const log = plotGeometry(spec(1, { logY: true, yEnds: { low: 0, high: 10 } }))
+    expect(log.yAt(10)).toBeCloseTo(log.box.y0, 9)
+    expect(log.yAt(1)).toBeLessThan(log.box.y1)
+    expect(log.drawable(0)).toBe(false)
+  })
+
+  it('takes no pair of ends which is no span', () => {
+    expect(plotSvg(spec(1, { yEnds: { low: 5, high: 5 } }))).toBe(plotSvg(spec(1)))
+    expect(plotSvg(spec(1, { yEnds: { low: 6, high: 2 } }))).toBe(plotSvg(spec(1)))
+  })
+
+  it('cuts a curve and a series beyond the declared ends at the plot box', () => {
+    const figure = spec(1, {
+      yEnds: { low: 0, high: 2 },
+      points: [
+        { id: 'study', label: 'Study', curve: 'curve1', x: [1, 2], y: [1, 30], yerr: [3, 0] },
+      ],
+    })
+    const svg = plotSvg(figure)
+    const box = plotGeometry(figure).box
+    // the curve 1..4 and the point at 30 are drawn in the group which is
+    // clipped to the plot box, and nothing of the data is drawn outside it
+    const clip =
+      /<clipPath id="([^"]*)"><rect x="([^"]*)" y="([^"]*)" width="([^"]*)" height="([^"]*)"/.exec(
+        svg,
+      )
+    expect(clip?.slice(2).map(Number)).toEqual([box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0])
+    const data = dataOf(svg)
+    expect(data).toContain('class="curve"')
+    expect(data).toContain('data-series="study"')
+    expect(svg.split('class="curve"')).toHaveLength(2)
+    expect(svg.split('class="marker"').length - 1).toBe(2)
+    // the bar of the point at 1 reaches past both ends: it ends at them and
+    // has no cap of a bound the axis does not show
+    const bar = /<path class="errorbar"[^>]*d="([^"]*)"/.exec(svg)?.[1] ?? ''
+    expect(bar.split('M')).toHaveLength(2)
+  })
+
+  it('ends the x axis exactly at its declared end and draws nothing beyond it', () => {
+    const figure = spec(1, {
+      xEnd: 2,
+      points: [{ id: 'study', label: 'Study', curve: 'curve1', x: [1, 2.5], y: [2, 3] }],
+    })
+    const drawn = plotGeometry(figure)
+    expect(drawn.xAt(2)).toBeCloseTo(drawn.box.x1, 9)
+    const svg = plotSvg(figure)
+    // the point beyond the end is no point of the figure, as one beyond the
+    // curves is not; the curve beyond it is cut at the plot box
+    expect(svg.split('class="marker"').length - 1).toBe(1)
+    expect(ticksOf(svg, 'x').at(-1)).toBe('2')
+    expect(dataOf(svg)).toContain('class="curve"')
+  })
+
+  it('keeps the axes and the box where they are whatever is drawn, where both ends are declared', () => {
+    // two states of the knobs of a panel, a curve of a tenth and one of
+    // twice the other: the axis is the declared one in either
+    const ends = { yEnds: { low: 0, high: 10 }, xEnd: 3 }
+    const small = spec(1, { ...ends, series: [series(1, [0, 0.1, 0.2, 0.1])] })
+    const large = spec(1, {
+      ...ends,
+      series: [series(1, [0, 8, 12, 4])],
+      yLimits: { low: 0, high: 12 },
+    })
+    const one = plotSvg(small)
+    const other = plotSvg(large)
+    expect(plotGeometry(small).box).toEqual(plotGeometry(large).box)
+    expect(ticksOf(one, 'y')).toEqual(ticksOf(other, 'y'))
+    expect(ticksOf(one, 'x')).toEqual(ticksOf(other, 'x'))
+  })
+})
+
+describe('a scale of the x axis', () => {
+  /** The four arms of a study, whose legend a figure of a phone holds. */
+  const ARMS = ['Frost 2013, 2.5 mg', 'Frost 2013, 5 mg', 'Frost 2013, 10 mg', 'Frost 2013, 25 mg']
+
+  /** Get the labels of the ticks of the x axis. */
+  function xLabels(svg: string): string[] {
+    const axis = (svg.split('<g class="axis x"')[1] ?? '').split('<g class="axis y"')[0] ?? ''
+    return [...axis.matchAll(/<g class="tick">.*?<text[^>]*>([^<]*)<\/text>/g)].map(
+      (one) => one[1] ?? '',
+    )
+  }
+
+  /** A figure of a phone over 0..143000 in the sizes of a host, with four arms. */
+  function narrow(width: number, measure: TextMeasure): PlotSpec {
+    const grid = Array.from({ length: 50 }, (_, index) => (143000 * index) / 49)
+    return {
+      ...spec(1, {
+        x: grid,
+        width,
+        height: 200,
+        xLabel: 'time (min)',
+        yLabel: 'plasma concentration',
+      }),
+      series: [
+        {
+          ...series(
+            1,
+            grid.map((_, index) => (3 * index) / 49),
+          ),
+          label: 'plasma',
+          unit: 'uM',
+        },
+      ],
+      declaredLegends: [ARMS],
+      points: ARMS.map((label, index) => ({
+        id: `arm${String(index)}`,
+        label,
+        curve: 'curve1',
+        x: [70000],
+        y: [1],
+      })),
+      fontSizes: { label: 16, small: 14 },
+      measure,
+    }
+  }
+
+  it('is drawn with a first and a last tick where a layout can draw them apart', () => {
+    // 220 to 230 px with four arms in 16 and 14 px drew the column beside the
+    // plot over a single label, 1.5e+5, from which no scale can be read: the
+    // band draws 0 and 1.5e+5 apart, so the column is no candidate there
+    const single: string[] = []
+    let excluded = 0
+    for (const measure of [tableMeasure, chromeLike]) {
+      for (let width = 220; width <= 230; width += 1) {
+        const figure = narrow(width, measure)
+        const labels = xLabels(plotSvg(figure))
+        if (labels.length < 2) {
+          single.push(`${String(width)}: ${labels.join(' ')}`)
+        }
+        excluded += marginFits(figure).filter((fit) => !fit.candidate).length
+      }
+    }
+    expect(single).toEqual([])
+    expect(excluded).toBeGreaterThan(0)
+  })
+})
+
 describe('plotGeometry', () => {
   it('gives the box the figure draws its axes along', () => {
     const one = spec(1)

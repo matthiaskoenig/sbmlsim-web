@@ -173,7 +173,16 @@ import ResetButton from './ResetButton.ce.vue'
 import { carries, hostValues, keepControlKeys, knobsOf, ownValue, shortNumber } from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
 import { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
-import type { FontSizes, Limits, PlotGeometry, PlotSpec, Points, Series, TextMeasure } from './plot'
+import type {
+  AxisEnds,
+  FontSizes,
+  Limits,
+  PlotGeometry,
+  PlotSpec,
+  Points,
+  Series,
+  TextMeasure,
+} from './plot'
 
 /** How the controls are placed next to the figure. */
 type LayoutName = 'auto' | 'sidebar' | 'stacked' | 'toolbar'
@@ -1113,6 +1122,30 @@ watch(
 )
 
 /**
+ * The ends of the value axis the panel declares, which are the ends of the
+ * axis exactly whatever the knobs are at, so two of their states are drawn
+ * against one axis; none for a panel which declares none, whose axis is the
+ * frame of its answer.
+ */
+const yEnds = computed<AxisEnds>(() => {
+  const texts = declaration.value?.panel
+  const ends: AxisEnds = {}
+  if (typeof texts?.y_min === 'number' && Number.isFinite(texts.y_min)) {
+    ends.low = texts.y_min
+  }
+  if (typeof texts?.y_max === 'number' && Number.isFinite(texts.y_max)) {
+    ends.high = texts.y_max
+  }
+  return ends
+})
+
+/** The end of the time axis the panel declares, `null` for the end of its simulation. */
+const xEnd = computed<number | null>(() => {
+  const end = declaration.value?.panel.x_max
+  return typeof end === 'number' && Number.isFinite(end) ? end : null
+})
+
+/**
  * The values the y axis of the figure holds, `null` while there are none.
  *
  * The figure draws one line per curve, interpolated out of the answer at the
@@ -1167,6 +1200,9 @@ const frame = computed<Limits | null>(() => {
     low = Math.min(low, value)
     high = Math.max(high, value)
   }
+  // the x the figure draws: the x axis of a panel which declares its end
+  // ends there, and nothing beyond it is drawn or holds the frame open
+  const end = xEnd.value ?? Number.POSITIVE_INFINITY
   const failed = new Set(answer.status.failed)
   for (const one of drawnCurves.value) {
     const rows = answer.curves[one.id] ?? []
@@ -1178,13 +1214,16 @@ const frame = computed<Limits | null>(() => {
       // types a row as a list of numbers and nulls, a hand written answer may
       // carry something else where a row belongs, and a figure which draws the
       // rows it can read is worth more there than one which blanks
-      for (const value of rows[index] ?? []) {
-        hold(value)
+      for (const [column, value] of (rows[index] ?? []).entries()) {
+        if (!((answer.x[column] ?? Number.NEGATIVE_INFINITY) > end)) {
+          hold(value)
+        }
       }
     }
   }
-  // the x the curves cover, which is what the renderer clips a series to
-  // (`curveRange`): a figure whose answer carries no x clips nothing
+  // the x the curves cover up to the end of the axis, which is what the
+  // renderer clips a series to (`xRange`): a figure whose answer carries no x
+  // clips nothing
   let first = Number.POSITIVE_INFINITY
   let last = Number.NEGATIVE_INFINITY
   for (const at of answer.x) {
@@ -1193,6 +1232,7 @@ const frame = computed<Limits | null>(() => {
       last = Math.max(last, at)
     }
   }
+  last = Math.min(last, end)
   const clipped = Number.isFinite(first) && Number.isFinite(last)
   const swept = new Set(answer.dims.map((dim) => dim.id))
   const declared = new Map(dataOf(declaration.value).map((one) => [one.id, one]))
@@ -1242,6 +1282,10 @@ const plot = computed<PlotSpec | null>(() => {
     height: figureHeight.value,
     logY: logY.value,
     ...(held === null ? {} : { yLimits: held }),
+    ...(yEnds.value.low === undefined && yEnds.value.high === undefined
+      ? {}
+      : { yEnds: yEnds.value }),
+    ...(xEnd.value === null ? {} : { xEnd: xEnd.value }),
     ...(measure.value === null ? {} : { measure: measure.value }),
     ...(fontSizes.value === null ? {} : { fontSizes: fontSizes.value }),
   }

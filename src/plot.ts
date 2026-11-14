@@ -101,6 +101,14 @@ export interface Limits {
   high: number
 }
 
+/** The ends an axis is given, which are its limits exactly; an end which is absent is not given. */
+export interface AxisEnds {
+  /** The lower end. */
+  low?: number
+  /** The upper end. */
+  high?: number
+}
+
 /** Everything one figure draws. */
 export interface PlotSpec {
   /** The x of every value of every series, the output times of a run. */
@@ -125,6 +133,25 @@ export interface PlotSpec {
    * line. A figure which does not carry it takes its limits from what it draws.
    */
   yLimits?: Limits
+  /**
+   * The ends of the y axis a caller declares, which are its limits exactly.
+   *
+   * A frame (`yLimits`) is what the axis is derived from, with its margin and
+   * its rules; an end is no such frame, it is where the axis ends: the axis
+   * runs from the one to the other, its ticks inside, and a curve or a point
+   * beyond them is cut at the plot box and drawn over none of the margins, the
+   * legend or the labels. Where one end is given, the other is derived as
+   * without, from the frame or from what is drawn cut at the given end. On a
+   * logarithmic axis the ends are the ends of the decades it shows, and an end
+   * which is not positive is not taken there.
+   */
+  yEnds?: AxisEnds
+  /**
+   * The end of the x axis a caller declares, which is its limit exactly;
+   * nothing beyond it is drawn, and study data beyond it is no point of the
+   * figure, as data beyond the x of the curves is not.
+   */
+  xEnd?: number
   /**
    * Every legend of study data the figure may draw, each the labels of the
    * series drawn together, in the order the caller declares them.
@@ -1190,17 +1217,64 @@ function logLimits(values: number[]): Limits {
 }
 
 /**
- * Build an axis of a figure.
+ * Get the limits of an axis of the values it covers and the ends it is given.
+ *
+ * Without an end, the limits are the ones the values give, with the margin of
+ * the axis and on a logarithmic axis the rule of the decades. An end which is
+ * given is the end of the axis exactly: a figure which declares where its axis
+ * ends is drawn against that axis whatever its values reach, so two states of
+ * it can be compared, and a value beyond the end is cut at the plot box. Where
+ * one end is given the other is the one the values give, taken over the values
+ * cut at the given end and the end itself, so its margin is the one of the span
+ * the axis shows. On a logarithmic axis an end which is not positive is no end
+ * of it and is not taken: a panel which declares its linear axis to start at
+ * 0 and is drawn logarithmic has the decades of its values there.
  *
  * @param values the values the axis covers
+ * @param log whether it is logarithmic
+ * @param ends the ends it is given, none of them without; a pair which is no
+ *   span, a lower end at or above the upper one, is not taken
+ * @returns the limits, the lower one below the upper one
+ */
+function limitsOf(values: number[], log: boolean, ends: AxisEnds = {}): Limits {
+  const usable = (end: number | undefined): end is number =>
+    end !== undefined && Number.isFinite(end) && (!log || end > 0)
+  let low = usable(ends.low) ? ends.low : undefined
+  let high = usable(ends.high) ? ends.high : undefined
+  if (low !== undefined && high !== undefined && !(low < high)) {
+    low = undefined
+    high = undefined
+  }
+  if (low !== undefined && high !== undefined) {
+    return { low, high }
+  }
+  const derive = log ? logLimits : linearLimits
+  if (low === undefined && high === undefined) {
+    return derive(values)
+  }
+  const kept = values.filter((value) => Number.isFinite(value) && (!log || value > 0))
+  if (high !== undefined) {
+    const top = high
+    return { low: derive([...kept.map((value) => Math.min(value, top)), top]).low, high: top }
+  }
+  const bottom = low ?? 0
+  return {
+    low: bottom,
+    high: derive([...kept.map((value) => Math.max(value, bottom)), bottom]).high,
+  }
+}
+
+/**
+ * Build an axis of a figure.
+ *
+ * @param limits the limits of the axis (`limitsOf`)
  * @param log whether it is logarithmic
  * @param from the pixel of its lower limit
  * @param to the pixel of its upper limit
  * @param count how many ticks are wanted
  * @returns the axis
  */
-function axisOf(values: number[], log: boolean, from: number, to: number, count: number): Axis {
-  const limits = log ? logLimits(values) : linearLimits(values)
+function axisOf(limits: Limits, log: boolean, from: number, to: number, count: number): Axis {
   const low = log ? Math.log10(limits.low) : limits.low
   const high = log ? Math.log10(limits.high) : limits.high
   const span = high - low
@@ -1384,6 +1458,23 @@ function curveRange(xs: number[]): Limits | null {
 }
 
 /**
+ * Get the x a figure draws: the x its curves cover, up to the end of its x axis.
+ *
+ * @param spec the figure
+ * @returns the smallest x of the curves and the largest one or the declared
+ *   end of the x axis, whichever is smaller; `null` for a figure whose curves
+ *   cover no x, which cuts nothing
+ */
+function xRange(spec: PlotSpec): Limits | null {
+  const range = curveRange(spec.x)
+  const end = spec.xEnd
+  if (range === null || end === undefined || !Number.isFinite(end) || end >= range.high) {
+    return range
+  }
+  return { low: range.low, high: Math.max(range.low, end) }
+}
+
+/**
  * Cut a series of study data to the x the curves cover.
  *
  * A study measures what it measured and a panel simulates the horizon it
@@ -1465,13 +1556,19 @@ function errorsOf(points: Points, x: Axis, y: Axis): string {
       continue
     }
     const reaches = y.drawable(low) && low >= y.limits.low
+    // the upper end alike: an axis which ends below the bar, where a caller
+    // declared its end, cuts the bar there and draws no cap of a bound which
+    // was not measured
+    const tops = high <= y.limits.high
     const px = coord(x.position(at))
     const left = coord(x.position(at) - CAP)
     const right = coord(x.position(at) + CAP)
-    const top = coord(y.position(high))
+    const top = coord(y.position(tops ? high : y.limits.high))
     const bottom = coord(y.position(reaches ? low : y.limits.low))
     parts.push(`M${px} ${top} L${px} ${bottom}`)
-    parts.push(`M${left} ${top} L${right} ${top}`)
+    if (tops) {
+      parts.push(`M${left} ${top} L${right} ${top}`)
+    }
     if (reaches) {
       parts.push(`M${left} ${bottom} L${right} ${bottom}`)
     }
@@ -2053,6 +2150,11 @@ interface Fitted {
   bound: number
   /** Whether the solve of its ends left the plot `MIN_PLOT` of width or more. */
   wide: boolean
+  /**
+   * Whether its x axis draws its first and its last tick apart, and not the
+   * last alone, which no scale can be read from.
+   */
+  apart: boolean
   /** Whether it ended on a pass which asked for nothing. */
   settled: boolean
 }
@@ -2078,13 +2180,13 @@ interface XTicks {
 /**
  * Get the x axis of the ticks it draws.
  *
- * @param xs the values the axis covers
+ * @param xs the limits of the axis
  * @param from the pixel its lower limit is at
  * @param to the pixel of its upper limit
  * @param ticks the ticks it asks for and every how many it draws
  * @returns the axis with the ticks it draws
  */
-function xAxisOf(xs: number[], from: number, to: number, ticks: XTicks): Axis {
+function xAxisOf(xs: Limits, from: number, to: number, ticks: XTicks): Axis {
   const axis = axisOf(xs, false, from, to, ticks.count)
   if (ticks.stride === 0) {
     return { ...axis, ticks: axis.ticks.slice(-1) }
@@ -2111,7 +2213,7 @@ function xAxisOf(xs: number[], from: number, to: number, ticks: XTicks): Axis {
  * its label reaches past, while the first never asks for more than the room
  * of the y label (`passBound`).
  *
- * @param xs the values the axis covers
+ * @param xs the limits of the axis
  * @param from the pixel its lower limit is at
  * @param to the pixel of its upper limit
  * @param type the lettering of the figure
@@ -2119,7 +2221,7 @@ function xAxisOf(xs: number[], from: number, to: number, ticks: XTicks): Axis {
  *   a count depend on the limits alone, so an axis of these ticks which is
  *   longer keeps the gap as well
  */
-function xTicksOf(xs: number[], from: number, to: number, type: Lettering): XTicks {
+function xTicksOf(xs: Limits, from: number, to: number, type: Lettering): XTicks {
   const count = tickCount(to - from, X_TICK_ROOM)
   const all = axisOf(xs, false, from, to, count).ticks.length
   for (let stride = 1; stride < all; stride += 1) {
@@ -2167,7 +2269,7 @@ function tickLabelsClear(axis: Axis, type: Lettering): boolean {
  * ticks of this box, an axis which ends at the returned `to` or before it and
  * starts at the returned `from` or after it writes every label inside.
  *
- * @param xs the values the axis covers
+ * @param xs the limits of the axis
  * @param ticks the ticks the axis draws (`xTicksOf`)
  * @param from the pixel its lower limit is at
  * @param to the pixel of its upper limit
@@ -2178,7 +2280,7 @@ function tickLabelsClear(axis: Axis, type: Lettering): boolean {
  *   at, `-Infinity` and `Infinity` on a side no label constrains
  */
 function tickReach(
-  xs: number[],
+  xs: Limits,
   ticks: XTicks,
   from: number,
   to: number,
@@ -2218,7 +2320,7 @@ function tickReach(
  * are the ones of a count, the count the height of a box asks for, and depend
  * on the limits alone.
  *
- * @param ys the values the y axis covers
+ * @param ys the limits of the y axis
  * @param log whether it is logarithmic
  * @param count the ticks the axis asks for
  * @param lines the lines of the y label
@@ -2226,7 +2328,7 @@ function tickReach(
  * @returns the smallest pixel the plot may start at
  */
 function yTickClear(
-  ys: number[],
+  ys: Limits,
   log: boolean,
   count: number,
   lines: number,
@@ -2307,8 +2409,8 @@ function passBound(entries: number): number {
  *
  * @param spec the figure
  * @param full the label of the y axis with the unit of its curves
- * @param xs the values the x axis covers, which decide its ticks
- * @param ys the values the y axis covers, which decide its ticks
+ * @param xs the limits of the x axis, which decide its ticks
+ * @param ys the limits of the y axis, which decide its ticks
  * @param width the width of the figure in whole pixels
  * @param height its height in whole pixels
  * @param column the pixels right of the plot, 0 for a figure with nothing there
@@ -2320,8 +2422,8 @@ function passBound(entries: number): number {
 function fitBox(
   spec: PlotSpec,
   full: string,
-  xs: number[],
-  ys: number[],
+  xs: Limits,
+  ys: Limits,
   width: number,
   height: number,
   column: number,
@@ -2418,6 +2520,7 @@ function fitBox(
     column,
     under: rows * type.row,
     wide: right >= left + MIN_PLOT - ROUNDING,
+    apart: xTicks.stride !== 0,
     xTicks,
     yCount,
     passes,
@@ -2438,7 +2541,7 @@ function layoutFor(spec: PlotSpec): Layout {
   const type = letteringOf(spec)
   const series = spec.series
   const declared = spec.points ?? []
-  const range = curveRange(spec.x)
+  const range = xRange(spec)
   const points = declared.map((one) => clipPoints(one, range))
   const hasColourbar = series.length > LEGEND_LIMIT
 
@@ -2505,30 +2608,37 @@ function layoutFor(spec: PlotSpec): Layout {
   // the y axis holds the frame of the spec or what the figure draws, and its
   // tick labels are fitted into the left margin, so it is known before the box
   const frame = spec.yLimits
-  const ys: number[] = frame === undefined ? [] : [frame.low, frame.high]
+  const yValues: number[] = frame === undefined ? [] : [frame.low, frame.high]
   if (frame === undefined) {
     for (const one of series) {
       for (let index = 0; index < Math.min(spec.x.length, one.values.length); index += 1) {
         const value = one.values[index]
         if (value !== undefined) {
-          ys.push(value)
+          yValues.push(value)
         }
       }
     }
     for (const one of points) {
       for (const [index, value] of one.y.entries()) {
         const error = one.yerr?.[index]
-        ys.push(value)
+        yValues.push(value)
         if (error !== undefined && Number.isFinite(error)) {
-          ys.push(value - Math.abs(error), value + Math.abs(error))
+          yValues.push(value - Math.abs(error), value + Math.abs(error))
         }
       }
     }
   }
+  // the limits are a function of the spec and not of the box, so they are
+  // taken once: the ends a caller declares are the ends of their axis exactly
+  const ys = limitsOf(yValues, spec.logY, spec.yEnds)
   const full = axisLabel(spec.yLabel, sharedUnit(series))
   // the ticks of the x axis are the ticks of the values the figure draws over,
   // so the margins of the box are fitted to them and not to the box alone
-  const xs: number[] = spec.x.length > 0 ? [...spec.x] : points.flatMap((one) => one.x)
+  const xs = limitsOf(
+    spec.x.length > 0 ? spec.x : points.flatMap((one) => one.x),
+    false,
+    spec.xEnd === undefined ? {} : { high: spec.xEnd },
+  )
   const beside = fitBox(
     spec,
     full,
@@ -2555,7 +2665,12 @@ function layoutFor(spec: PlotSpec): Layout {
     (one) =>
       one.wide && (one === beside || height - one.bottomRoom - one.under - type.top >= MIN_PLOT),
   )
-  const candidates = drawable.length > 0 ? drawable : [beside]
+  // a layout whose x axis draws its last tick alone, a number without a second
+  // one to read a scale from, is no candidate where the other one draws its
+  // first and its last tick apart, as a layout too narrow for its own tick
+  // labels is none: a figure keeps a scale over a few pixels of plot
+  const scaled = drawable.filter((one) => one.apart)
+  const candidates = scaled.length > 0 ? scaled : drawable.length > 0 ? drawable : [beside]
   const fitted = candidates.reduce((best, one) =>
     boxArea(one.box) > boxArea(best.box) ? one : best,
   )
