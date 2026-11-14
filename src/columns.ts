@@ -8,7 +8,7 @@
  * and not a row of five over one knob alone. The rows are as few as the columns
  * which fit allow and differ by one knob at most, the longer ones first, so
  * seven knobs which fit three columns are three rows of 3, 2 and 2 and not of
- * 3, 3 and 1 (`rowsOf`). A column is as wide as it can be up to `20rem` and the
+ * 3, 3 and 1 (`rowsOf`). A column is as wide as it can be up to `COLUMN_MAX` and the
  * card is not filled beyond that.
  *
  * The width the card has is a matter of the layout and not of a script: the
@@ -22,12 +22,22 @@
 export const COLUMN_MIN = 200
 /** The gap between two columns of the card, the `column-gap` of a row of controls. */
 export const COLUMN_GAP = 16
-/** The widest column of the card, its `20rem` at the 16px of the root of a page. */
+/**
+ * The widest column of the card. Every length of the rule is in px, as the
+ * grid it lays out is (`SbmlsimApp.ce.vue`): a length of the layout of a
+ * component never depends on the root font of its host, which a documentation
+ * theme sets to 125 % and a slide deck to its own, so the container queries,
+ * the columns and the room of the Reset are one unit system.
+ */
 export const COLUMN_MAX = 320
 /**
- * The room the Reset takes in a column of its own: the button, about 50px in
- * the type of the panel, and the slack of a larger type. It is the room a level
- * keeps beside full columns of knobs before it gives the Reset a column there.
+ * The room the Reset takes in a column of its own, beside the columns of the
+ * knobs and the gap before it: the button is 49.7px wide in the 11px of the
+ * small type of the panel (its padding of 2 x 10px, its border of 2 x 1px and
+ * its label), so the room leaves 30px for a larger small type a host sets
+ * (`--sbmlsim-font-size-small`), about 17px. It is the room a level keeps
+ * beside full columns of knobs before it gives the Reset a column there; the
+ * end to end tests measure the button against it.
  */
 export const RESET_ROOM = 80
 /** The numbers of columns which can fit that the card lays out a level for; the last level holds for every wider card. */
@@ -35,7 +45,7 @@ export const LEVELS = 8
 
 /** The layout of the card at one number of columns which fit. */
 export interface CardLevel {
-  /** The columns of the knobs, each as wide as the card gives it up to 20rem. */
+  /** The columns of the knobs, each as wide as the card gives it up to `COLUMN_MAX`. */
   columns: number
   /**
    * Whether the Reset has a column of its own after them, as wide as the Reset:

@@ -1165,6 +1165,16 @@ describe('the frame of the value axis', () => {
     }
   }
 
+  it('lays itself out in px and never in rem, which the root font of a host changes', async () => {
+    const element = await started()
+    const style = [...shadow(element).querySelectorAll('style')]
+      .map((one) => one.textContent)
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(style).toContain('grid')
+    expect(style).not.toMatch(/\d\s*rem\b/)
+  })
+
   it('reserves the legend of its declared study data from its first figure, before the data arrives', async () => {
     // the legend a panel may draw is the one it declares: a panel of one curve
     // with study data keeps the entry of its curve and the room of its series

@@ -503,7 +503,7 @@ describe('the shell of an app', () => {
     expect(element.shadowRoot.querySelector('.grid')).toBeNull()
   })
 
-  it('lays its panels out in as many columns as fit 30rem and collapses an empty track', async () => {
+  it('lays its panels out in as many columns as fit 480px and collapses an empty track', async () => {
     const element = await shell()
     const style = [...element.shadowRoot.querySelectorAll('style')]
       .map((one) => one.textContent)
@@ -511,8 +511,17 @@ describe('the shell of an app', () => {
     // one column below about 976px of the width of the shell, two above, and a
     // lone panel takes the row, which `auto-fit` is for and `auto-fill` is not
     const grid = /\n\.grid \{[^}]*\}/.exec(style)?.[0] ?? ''
-    expect(grid).toMatch(/repeat\(auto-fit,\s*minmax\(min\(100%,\s*30rem\),\s*1fr\)\)/)
+    expect(grid).toMatch(/repeat\(auto-fit,\s*minmax\(min\(100%,\s*480px\),\s*1fr\)\)/)
     expect(grid).not.toMatch(/auto-fill/)
+  })
+
+  it('lays itself out in px and never in rem, which the root font of a host changes', async () => {
+    const element = await shell()
+    const style = [...element.shadowRoot.querySelectorAll('style')]
+      .map((one) => one.textContent)
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(style).not.toMatch(/\d\s*rem\b/)
   })
 
   it('reserves the head of every card with the heads of the app, laid out and never shown', async () => {

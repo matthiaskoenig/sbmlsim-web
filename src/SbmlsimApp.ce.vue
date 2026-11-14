@@ -24,7 +24,7 @@
  *
  * ## The grid
  *
- * The grid has as many columns as fit panels of at least 30rem, and a track
+ * The grid has as many columns as fit panels of at least 480px, and a track
  * which would stay empty collapses, so a lone panel takes the row: two columns
  * from about 976px of the width of the shell, one below it, which is also the
  * one column of a phone. The width is the one of the shell and not of the
@@ -1017,7 +1017,9 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 16px;
   box-sizing: border-box;
-  max-width: 76rem;
+  /* px, as every length of the layout of a component, never the root font of
+   * the host: a documentation theme sets `html { font-size: 125% }` */
+  max-width: 1216px;
   margin: 0 auto;
   padding: 16px;
   /* the grid below reads the width of the shell and not of the window, so an
@@ -1178,7 +1180,7 @@ onBeforeUnmount(() => {
  * range of its inner width, from `fit * 200 + (fit - 1) * 16` px on, and reads
  * the columns of that level (`--_columns-<fit>`, which the shell computes from
  * its knobs) and starts a line at the knobs of that level (`.start-<fit>`). A
- * column is as wide as the card gives it up to 20rem and no wider, so the card
+ * column is as wide as the card gives it up to 320px and no wider, so the card
  * is not filled beyond that; a control fills a phone. A Reset which has a
  * column of its own (`--_reset-<fit>`, `auto` or nothing) has one as wide as it
  * is, and it never takes width from a control.
@@ -1187,12 +1189,12 @@ onBeforeUnmount(() => {
   /* the columns keep their width and do not absorb what the card has beyond
    * them, the column of the Reset neither */
   justify-content: start;
-  grid-template-columns: repeat(var(--_columns-1, 1), minmax(0, 20rem)) var(--_reset-1,);
+  grid-template-columns: repeat(var(--_columns-1, 1), minmax(0, 320px)) var(--_reset-1,);
 }
 
 @container knobs (416px <= width < 632px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-2), minmax(0, 20rem)) var(--_reset-2,);
+    grid-template-columns: repeat(var(--_columns-2), minmax(0, 320px)) var(--_reset-2,);
   }
 
   .knobs-grid > .start-2 {
@@ -1202,7 +1204,7 @@ onBeforeUnmount(() => {
 
 @container knobs (632px <= width < 848px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-3), minmax(0, 20rem)) var(--_reset-3,);
+    grid-template-columns: repeat(var(--_columns-3), minmax(0, 320px)) var(--_reset-3,);
   }
 
   .knobs-grid > .start-3 {
@@ -1212,7 +1214,7 @@ onBeforeUnmount(() => {
 
 @container knobs (848px <= width < 1064px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-4), minmax(0, 20rem)) var(--_reset-4,);
+    grid-template-columns: repeat(var(--_columns-4), minmax(0, 320px)) var(--_reset-4,);
   }
 
   .knobs-grid > .start-4 {
@@ -1222,7 +1224,7 @@ onBeforeUnmount(() => {
 
 @container knobs (1064px <= width < 1280px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-5), minmax(0, 20rem)) var(--_reset-5,);
+    grid-template-columns: repeat(var(--_columns-5), minmax(0, 320px)) var(--_reset-5,);
   }
 
   .knobs-grid > .start-5 {
@@ -1232,7 +1234,7 @@ onBeforeUnmount(() => {
 
 @container knobs (1280px <= width < 1496px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-6), minmax(0, 20rem)) var(--_reset-6,);
+    grid-template-columns: repeat(var(--_columns-6), minmax(0, 320px)) var(--_reset-6,);
   }
 
   .knobs-grid > .start-6 {
@@ -1242,7 +1244,7 @@ onBeforeUnmount(() => {
 
 @container knobs (1496px <= width < 1712px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-7), minmax(0, 20rem)) var(--_reset-7,);
+    grid-template-columns: repeat(var(--_columns-7), minmax(0, 320px)) var(--_reset-7,);
   }
 
   .knobs-grid > .start-7 {
@@ -1252,7 +1254,7 @@ onBeforeUnmount(() => {
 
 @container knobs (width >= 1712px) {
   .knobs-grid.control-row {
-    grid-template-columns: repeat(var(--_columns-8), minmax(0, 20rem)) var(--_reset-8,);
+    grid-template-columns: repeat(var(--_columns-8), minmax(0, 320px)) var(--_reset-8,);
   }
 
   .knobs-grid > .start-8 {
@@ -1299,7 +1301,7 @@ onBeforeUnmount(() => {
   --_track-edge: calc(var(--_card-pad) + 1px - 4px);
 
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
   grid-auto-rows: auto auto minmax(calc(var(--_font-size-small) * 1.45 + var(--_track-edge)), auto);
   gap: 16px;
 }

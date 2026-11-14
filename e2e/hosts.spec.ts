@@ -720,7 +720,7 @@ test.describe('the app shell', () => {
     tracks: number[]
     knobs: { top: number; left: number; width: number; centre: number }[]
     scenario: { left: number; width: number; centre: number } | null
-    reset: { top: number; left: number; centre: number }
+    reset: { top: number; left: number; centre: number; width: number }
   }
 
   /** Read the card of the shared controls of an app. */
@@ -761,6 +761,7 @@ test.describe('the app shell', () => {
         reset: {
           top: button?.top ?? Number.NaN,
           left: button?.left ?? Number.NaN,
+          width: button?.width ?? Number.NaN,
           centre: button === undefined ? Number.NaN : centre(button),
         },
       }
@@ -839,36 +840,58 @@ test.describe('the app shell', () => {
     return problems
   }
 
+  /** The room of the Reset beside the columns of the knobs, `RESET_ROOM` of `columns.ts`. */
+  const RESET_ROOM = 80
+
   for (const width of [390, 640, 768, 1024, 1280]) {
-    test(`balances the rows of the shared knobs at their natural width at ${String(width)} px`, async ({
+    test(`balances the rows of the shared knobs at their natural width, whatever the root font of the page, at ${String(width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 900 })
       const found: string[] = []
-      // the patient page with its two knobs and grown to 3 to 7, with examples
+      // the patient page with its two knobs and grown to 3 to 7, with examples,
+      // and the dose page, two knobs and no examples
+      const pages = [
+        ...[2, 3, 4, 5, 6, 7].map((count) => ({ id: 'patient', count, examples: true })),
+        { id: 'dose', count: 2, examples: false },
+      ]
       const knobs = { count: 2 }
       await patientKnobs(page, knobs)
-      for (const count of [2, 3, 4, 5, 6, 7]) {
-        knobs.count = count
-        await page.goto('/demo/app.html')
-        await page.evaluate(() =>
-          document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
-        )
-        const app = page.locator('sbmlsim-app')
-        await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(count)
-        for (const one of cardProblems(await card(app), true)) {
-          found.push(`patient ${String(count)}: ${one}`)
+      // the root font of a page, which a documentation theme sets to 125 %: the
+      // card is laid out alike at every one of them
+      const cards = new Map<string, Card[]>()
+      for (const root of ['100%', '125%', '75%']) {
+        const laid: Card[] = []
+        for (const one of pages) {
+          knobs.count = one.count
+          await page.goto('/demo/app.html')
+          await page.evaluate(
+            ({ id, size }) => {
+              document.documentElement.style.fontSize = size
+              document.querySelector('sbmlsim-app')?.setAttribute('page', id)
+            },
+            { id: one.id, size: root },
+          )
+          expect(
+            await page.evaluate(() => getComputedStyle(document.documentElement).fontSize),
+          ).toBe(`${String((16 * Number.parseFloat(root)) / 100)}px`)
+          const app = page.locator('sbmlsim-app')
+          await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(one.count)
+          const layout = await card(app)
+          laid.push(layout)
+          for (const problem of cardProblems(layout, one.examples)) {
+            found.push(`${root} ${one.id} ${String(one.count)}: ${problem}`)
+          }
+          if (layout.reset.width > RESET_ROOM) {
+            found.push(`${root} ${one.id}: a Reset of ${String(layout.reset.width)} px`)
+          }
         }
-      }
-      // the dose page, two knobs and no examples
-      await page.goto('/demo/app.html')
-      await page.evaluate(() => document.querySelector('sbmlsim-app')?.setAttribute('page', 'dose'))
-      const app = page.locator('sbmlsim-app')
-      await expect(app.locator('.knobs .knob')).toHaveCount(2)
-      for (const one of cardProblems(await card(app), false)) {
-        found.push(`dose: ${one}`)
+        cards.set(root, laid)
       }
       expect(found).toEqual([])
+      // the same rows, columns, selects and Reset at every root font
+      expect(cards.get('125%')).toEqual(cards.get('100%'))
+      expect(cards.get('75%')).toEqual(cards.get('100%'))
     })
   }
 
