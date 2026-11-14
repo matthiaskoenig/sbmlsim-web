@@ -738,12 +738,13 @@ onBeforeUnmount(() => {
 
 /* the controls of the knobs the panels of the page share, on a card as the
  * panels are; a control fills a phone and is no wider than a reader reads a
- * select at on a wide page */
+ * select at on a wide page. They start at one height, as the controls of a
+ * panel do, and the Reset sits at the foot of the row */
 .knobs {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  align-items: flex-end;
+  align-items: flex-start;
   padding: 12px 16px;
   border: 1px solid var(--_line);
   border-radius: var(--_radius);
@@ -753,6 +754,10 @@ onBeforeUnmount(() => {
 
 .knobs .knob {
   max-width: 20rem;
+}
+
+.knobs .reset {
+  align-self: flex-end;
 }
 
 /*

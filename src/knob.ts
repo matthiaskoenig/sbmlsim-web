@@ -117,6 +117,24 @@ function niceStep(wanted: number): number {
   return (share <= 1.5 ? 1 : share <= 3 ? 2 : share <= 7 ? 5 : 10) * magnitude
 }
 
+/** The finer steps of the ladder 1, 2, 5 a range knob tries for its stops, as shares of the nice step. */
+const FINER = [1, 2, 5, 10, 20, 50, 100]
+
+/**
+ * Get whether values lie on the ladder a step builds from a start.
+ *
+ * @param start the smallest value of the knob, where the ladder starts
+ * @param step the step of the ladder
+ * @param values the values which have to lie on it
+ * @returns whether each is a whole number of steps from the start
+ */
+function onLadder(start: number, step: number, values: number[]): boolean {
+  return values.every((value) => {
+    const steps = (value - start) / step
+    return Math.abs(steps - Math.round(steps)) <= ON_LADDER
+  })
+}
+
 /**
  * Get the step a range knob moves in.
  *
@@ -129,7 +147,11 @@ function niceStep(wanted: number): number {
  * shown, and told by a screen reader, a number the panel is not simulating. A
  * nice step near a hundredth of the span usually lands on it; where it does
  * not, the distance from the smallest value to the declared one is divided
- * into a whole number of steps of about that size instead.
+ * into a whole number of steps of about that size instead. The named stops of
+ * a knob have to lie on the ladder as well, or a slider moved onto a stop
+ * would pass it and never show it in the select of the stops: a finer step of
+ * the ladder 1, 2, 5 which reaches the default and every stop is taken where
+ * the nice one does not, down to a hundredth of it.
  *
  * @param axis the knob, of the kind `range`
  * @returns the step, 1 for a knob whose bounds are no span
@@ -142,6 +164,15 @@ export function rangeStep(axis: PanelAxis): number {
     return 1
   }
   const nice = niceStep(span / RANGE_STEPS)
+  const stops = stopsOf(axis).map((one) => one.value)
+  if (stops.length > 0) {
+    const reached = FINER.map((share) => nice / share).find((step) =>
+      onLadder(low, step, [axis.default, ...stops]),
+    )
+    if (reached !== undefined) {
+      return reached
+    }
+  }
   const offset = axis.default - low
   if (!(offset > 0)) {
     return nice
@@ -151,6 +182,68 @@ export function rangeStep(axis: PanelAxis): number {
     return nice
   }
   return offset / Math.max(1, Math.round(steps))
+}
+
+/**
+ * Get the named stops of a range knob.
+ *
+ * @param axis the knob
+ * @returns the choices of a range knob which lie within its bounds, in the
+ *   order it declares them; none for a choice knob, whose choices are its
+ *   values and no stops on a slider
+ */
+export function stopsOf(axis: PanelAxis): PanelChoice[] {
+  if (axis.kind !== 'range') {
+    return []
+  }
+  const low = axis.min ?? Number.NEGATIVE_INFINITY
+  const high = axis.max ?? Number.POSITIVE_INFINITY
+  return axis.choices.filter((one) => one.value >= low && one.value <= high)
+}
+
+/**
+ * Get whether two values of a knob are one value.
+ *
+ * A value is a number of a payload or of a control, so it is compared with a
+ * tolerance of the last bits a value of a slider is computed with.
+ *
+ * @param one a value
+ * @param other another value
+ * @returns whether they are equal to a part in a billion of their magnitude
+ */
+export function sameValue(one: number, other: number): boolean {
+  return Math.abs(one - other) <= ON_LADDER * Math.max(1, Math.abs(one), Math.abs(other))
+}
+
+/**
+ * Get the choice of a list a value is at.
+ *
+ * @param choices the choices, the named stops of a range knob or the choices of a choice knob
+ * @param value the value
+ * @returns the first choice whose value it is, `null` for a value which is none of them
+ */
+export function choiceAt(choices: PanelChoice[], value: number): PanelChoice | null {
+  return choices.find((one) => sameValue(one.value, value)) ?? null
+}
+
+/**
+ * Get whether a value is a value a knob takes.
+ *
+ * @param axis the knob
+ * @param value the value
+ * @returns whether it is a finite number within the bounds of a range knob, or
+ *   one of the choices of a choice knob
+ */
+export function validValue(axis: PanelAxis, value: number): boolean {
+  if (!Number.isFinite(value)) {
+    return false
+  }
+  if (axis.kind === 'choice') {
+    return choiceAt(axis.choices, value) !== null
+  }
+  const low = axis.min ?? Number.NEGATIVE_INFINITY
+  const high = axis.max ?? Number.POSITIVE_INFINITY
+  return value >= low - ON_LADDER * Math.abs(low) && value <= high + ON_LADDER * Math.abs(high)
 }
 
 /**

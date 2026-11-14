@@ -360,6 +360,48 @@ test.describe('the app shell', () => {
     expect(await look(app.locator('.knobs'))).toEqual(drawn)
   })
 
+  test('puts the label of a slider and of a select beside it at one height', async ({ page }) => {
+    /** The top of the label and of the control of every knob of a row of controls. */
+    const tops = (root: Locator): Promise<number[][]> =>
+      root
+        .locator('.knob')
+        .evaluateAll((all) =>
+          all.map((knob) => [
+            knob.querySelector('.knob-label')?.getBoundingClientRect().top ?? Number.NaN,
+            knob.querySelector('select, .knob-row')?.getBoundingClientRect().top ?? Number.NaN,
+            knob.querySelector('select, .knob-row')?.getBoundingClientRect().bottom ?? Number.NaN,
+          ]),
+        )
+    // the dose page shares a slider of the dose and a select of the renal function
+    const app = await openApp(page)
+    await app.locator('.tab', { hasText: 'Dose' }).click()
+    await expect(app.locator('.knobs input[type=range]')).toHaveCount(1)
+    const shared = await tops(app.locator('.knobs'))
+    expect(shared).toHaveLength(2)
+    expect(shared[1]).toEqual(shared[0])
+    // and the dose panel alone draws both in its stacked controls
+    await page.goto('/demo/plain.html')
+    await page.evaluate(() => {
+      document.querySelector('sbmlsim-panel')?.remove()
+      const one = document.createElement('sbmlsim-panel')
+      for (const [name, value] of Object.entries({
+        endpoint: '',
+        model: 'hctz',
+        panel: 'dose_plasma',
+        layout: 'stacked',
+        auto: '',
+      })) {
+        one.setAttribute(name, value)
+      }
+      document.body.append(one)
+    })
+    const alone = page.locator('sbmlsim-panel')
+    await expect(alone.locator('svg path').first()).toBeVisible()
+    const stacked = await tops(alone)
+    expect(stacked).toHaveLength(2)
+    expect(stacked[1]).toEqual(stacked[0])
+  })
+
   for (const width of [390, 1024, 1280]) {
     test(`fits a card to its panel and a shared control to the page at ${String(width)} px`, async ({
       page,

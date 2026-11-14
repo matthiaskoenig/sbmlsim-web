@@ -2449,3 +2449,92 @@ describe('the legend of the study data', () => {
     expect(apart).toEqual(together)
   })
 })
+
+describe('the named stops of a range knob', () => {
+  /** The stops of the range knob, the values of the grid it runs over. */
+  const STOPS = [
+    { label: 'full', value: 1 },
+    { label: 'middle', value: 0.6 },
+    { label: 'low', value: 0.2 },
+  ]
+
+  /** The declaration with the stops on its range knob. */
+  function stopped(): PanelDeclaration {
+    const declared = declaration()
+    return {
+      ...declared,
+      axes: declared.axes.map((one) => (one.id === 'knobB' ? { ...one, choices: STOPS } : one)),
+    }
+  }
+
+  /** Get the select of the stops of the range knob. */
+  function stops(element: PanelElement): HTMLSelectElement {
+    const found = shadow(element).querySelector('#knob-knobB-stops')
+    if (!(found instanceof HTMLSelectElement)) {
+      throw new Error('the range knob has no select of its stops')
+    }
+    return found
+  }
+
+  it('draws a select of its stops above its slider, under one label which names both', async () => {
+    served.panel = () => Promise.resolve(stopped())
+    const element = await started()
+    const knob = control(element, 'knobB').closest('.knob')
+    expect(knob?.querySelectorAll('label')).toHaveLength(1)
+    const label = knob?.querySelector('label')
+    // the visible label names the slider, and the select by the label and the
+    // words after it, so a screen reader names both and tells them apart
+    expect(label?.getAttribute('for')).toBe('knob-knobB')
+    const named = stops(element).getAttribute('aria-labelledby')?.split(' ') ?? []
+    expect(named[0]).toBe(label?.id)
+    expect(shadow(element).getElementById(named[1] ?? '')?.textContent).toBe('named value')
+    // the select comes before the slider, which is above it in the column of the knob
+    const order = [...(knob?.querySelectorAll('select, input') ?? [])].map((one) => one.id)
+    expect(order).toEqual(['knob-knobB-stops', 'knob-knobB'])
+    expect([...stops(element).options].map((one) => one.textContent.trim())).toEqual([
+      'full',
+      'middle',
+      'low',
+    ])
+    expect(stops(element).value).toBe('1')
+  })
+
+  it('moves the slider to a stop a reader picks and draws the panel there', async () => {
+    served.panel = () => Promise.resolve(stopped())
+    const element = await started()
+    const before = figure(element)
+    move(stops(element), '0.6', 'change')
+    await nextTick()
+    expect(control(element, 'knobB').value).toBe('0.6')
+    expect(textOf(element, '.knob-value')).toBe('0.6')
+    expect(stops(element).value).toBe('0.6')
+    expect(figure(element)).not.toBe(before)
+    // the grid of the run covers the knob, so the stop is read out of it
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(simulations()).toHaveLength(1)
+  })
+
+  it('shows the stop a slider is moved onto, and an entry which cannot be picked off them', async () => {
+    served.panel = () => Promise.resolve(stopped())
+    const element = await started()
+    move(control(element, 'knobB'), '0.4', 'input')
+    await nextTick()
+    expect(stops(element).value).toBe('custom')
+    const custom = [...stops(element).options].find((one) => one.value === 'custom')
+    expect(custom?.textContent.trim()).toBe('custom')
+    expect(custom?.disabled).toBe(true)
+    move(control(element, 'knobB'), '0.2', 'input')
+    await nextTick()
+    expect(stops(element).value).toBe('0.2')
+    // the entry is there only while the value is no stop
+    expect([...stops(element).options].map((one) => one.value)).toEqual(['1', '0.6', '0.2'])
+  })
+
+  it('draws a range knob without stops as it always did', async () => {
+    const element = await started()
+    const knob = control(element, 'knobB').closest('.knob')
+    expect(knob?.querySelector('select')).toBeNull()
+    expect(knob?.classList.contains('stopped')).toBe(false)
+    expect(control(element, 'knobB').getAttribute('aria-labelledby')).toBeNull()
+  })
+})

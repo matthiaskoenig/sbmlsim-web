@@ -2524,11 +2524,20 @@ defineExpose({ activate, freeze, reset })
   flex-direction: column;
 }
 
+/* the controls of a row start at one height, so their labels and their first
+ * controls line up, and a knob of named stops, which draws its slider under
+ * the select of its stops, reaches below the others; the options sit at the
+ * foot of the row */
 .layout-stacked .controls,
 .layout-toolbar .controls {
   flex-flow: row wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   width: 100%;
+}
+
+.layout-stacked .options,
+.layout-toolbar .options {
+  align-self: flex-end;
 }
 
 .layout-stacked .figure {

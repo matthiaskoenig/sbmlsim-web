@@ -674,6 +674,34 @@ describe('the knobs the panels of a page share', () => {
     expect(placed(element, 'panelA').hasAttribute('values')).toBe(false)
   })
 
+  it('draws the select of the stops of a shared range knob, which moves every panel', async () => {
+    const stopped = {
+      ...rangeKnob('knobA'),
+      choices: [
+        { label: 'full', value: 1 },
+        { label: 'half', value: 0.5 },
+      ],
+    }
+    knobsOf = { panelB: [stopped], panelC: [stopped] }
+    const element = await shell({ page: 'pageB' })
+    // the control a panel draws: one label, the select of the stops and the slider
+    expect(shellKnobs(element)).toEqual(['knob-knobA-stops', 'knob-knobA'])
+    expect(element.shadowRoot.querySelectorAll('.knobs label')).toHaveLength(1)
+    const stops = part(element, '#knob-knobA-stops') as HTMLSelectElement
+    expect(stops.value).toBe('1')
+    stops.value = '0.5'
+    stops.dispatchEvent(new Event('change'))
+    await settled()
+    expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('0.5')
+    expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":0.5}')
+    expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":0.5}')
+    const slider = part(element, '#knob-knobA') as HTMLInputElement
+    slider.value = '0.7'
+    slider.dispatchEvent(new Event('input'))
+    await settled()
+    expect(stops.value).toBe('custom')
+  })
+
   it('moves every panel which declares the knob to one value', async () => {
     knobsOf = {
       panelB: [rangeKnob('knobB'), choiceKnob('knobS')],
