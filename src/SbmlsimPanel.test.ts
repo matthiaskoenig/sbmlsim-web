@@ -644,8 +644,9 @@ describe('the declaration and the controls', () => {
       expect(shadow(element).querySelector(`#${target}`)).not.toBeNull()
     }
     // the unit of a range knob is part of its label, as sbmlsim labels an
-    // axis, so its readout stays a bare number next to a narrow slider
-    expect(textOf(element, 'label[for="knob-knobB"]')).toBe('knob B [dimensionless]')
+    // axis, so its readout stays a bare number next to a narrow slider; a
+    // dimensionless unit is no unit to a reader and is left out
+    expect(textOf(element, 'label[for="knob-knobB"]')).toBe('knob B')
     expect(textOf(element, 'label[for="knob-knobA"]')).toBe('knob A')
   })
 
@@ -1917,6 +1918,75 @@ describe('the variant of the model', () => {
     ])
   })
 
+  it('keeps its head, its controls and its provenance line while it reads the variant it is switched to', async () => {
+    let release: (() => void) | null = null
+    served.panel = (variant) =>
+      variant === 'variantB'
+        ? new Promise((resolve) => {
+            release = () => {
+              resolve(declaration())
+            }
+          })
+        : Promise.resolve(declaration())
+    const element = await started({ variant: 'variantA' })
+    const foot = textOf(element, '.provenance')
+    expect(foot).not.toBe('')
+    element.setAttribute('variant', 'variantB')
+    await settled()
+    // the head, the controls and the provenance of variant A stay, the
+    // controls taking no movement and the provenance dimmed with the figure
+    expect(textOf(element, '.title')).toBe('Panel A')
+    expect(shadow(element).querySelectorAll('.knob')).toHaveLength(2)
+    const held = part(element, '.provenance.held')
+    expect(held.textContent.trim()).toBe(foot)
+    expect(held.getAttribute('aria-hidden')).toBe('true')
+    ;(release as unknown as () => void)()
+    await settled()
+    expect(shadow(element).querySelector('.provenance.held')).toBeNull()
+    expect(textOf(element, '.provenance')).not.toBe('')
+  })
+
+  it('shows the head it is given until it has read its declaration', async () => {
+    let release: (() => void) | null = null
+    served.panel = () =>
+      new Promise((resolve) => {
+        release = () => {
+          resolve(declaration())
+        }
+      })
+    const element = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      head: JSON.stringify({ title: 'Panel A of the app', subtitle: 'what the app says' }),
+    })
+    void element.activate()
+    await settled()
+    expect(textOf(element, '.title')).toBe('Panel A of the app')
+    expect(textOf(element, '.subtitle')).toBe('what the app says')
+    ;(release as unknown as () => void)()
+    await settled()
+    expect(textOf(element, '.title')).toBe('Panel A')
+    // a head which cannot be read is as if it were absent: nothing is shown
+    // until the declaration arrives
+    served.panel = () => new Promise<never>(() => undefined)
+    const other = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      head: '{',
+    })
+    void other.activate()
+    await settled()
+    expect(textOf(other, '.title')).toBe('')
+  })
+
+  it('sends a value of its host which is a choice to the last bits as that choice', async () => {
+    const element = await started({ values: JSON.stringify({ knobA: 12.500000000000002 }) })
+    expect(element).toBeDefined()
+    expect(simulations()[0]?.values).toEqual({ knobA: 12.5 })
+  })
+
   it('reads its declaration and its study data again when it changes, and runs that', async () => {
     vi.useFakeTimers()
     served.panel = () => Promise.resolve(withData())
@@ -1962,16 +2032,23 @@ describe('the variant of the model', () => {
     const before = figure(element)
     element.setAttribute('variant', 'variantB')
     await settled()
-    // the title and the controls of variant A are gone while the declaration
-    // of variant B is read, and no figure of either is drawn as current: the
-    // figure of variant A is held, dimmed, inert and hidden from a reader
+    // while the declaration of variant B is read no figure of either is drawn
+    // as current: the figure of variant A is held, dimmed, inert and hidden
+    // from a reader, and the head and the controls of variant A are kept, the
+    // controls taking no movement, so the panel keeps its height
     expect(figure(element)).toBe('')
-    expect(textOf(element, '.title')).toBe('')
-    expect(shadow(element).querySelectorAll('.knob')).toHaveLength(0)
-    const held = heldFigure(element)
-    expect(held?.innerHTML).toBe(before)
-    expect(held?.hasAttribute('inert')).toBe(true)
-    expect(held?.getAttribute('aria-hidden')).toBe('true')
+    expect(textOf(element, '.title')).toBe('Panel A')
+    const held = [
+      ...shadow(element).querySelectorAll<HTMLSelectElement | HTMLInputElement>(
+        '.knob select, .knob input',
+      ),
+    ]
+    expect(held).toHaveLength(2)
+    expect(held.every((one) => one.disabled)).toBe(true)
+    const holding = heldFigure(element)
+    expect(holding?.innerHTML).toBe(before)
+    expect(holding?.hasAttribute('inert')).toBe(true)
+    expect(holding?.getAttribute('aria-hidden')).toBe('true')
     expect(textOf(element, '.pending')).toBe('')
     expect(release).not.toBeNull()
     ;(release as unknown as () => void)()

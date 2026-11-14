@@ -510,8 +510,9 @@ describe('the shell of an app', () => {
       .join('\n')
     // one column below about 976px of the width of the shell, two above, and a
     // lone panel takes the row, which `auto-fit` is for and `auto-fill` is not
-    expect(style).toMatch(/repeat\(auto-fit,\s*minmax\(min\(100%,\s*30rem\),\s*1fr\)\)/)
-    expect(style).not.toMatch(/auto-fill/)
+    const grid = /\n\.grid \{[^}]*\}/.exec(style)?.[0] ?? ''
+    expect(grid).toMatch(/repeat\(auto-fit,\s*minmax\(min\(100%,\s*30rem\),\s*1fr\)\)/)
+    expect(grid).not.toMatch(/auto-fill/)
   })
 
   it('reserves the head of every card with the heads of the app, laid out and never shown', async () => {
@@ -1396,5 +1397,81 @@ describe('the variant an app answers', () => {
         (one) => one.id,
       ),
     ).toEqual(['knob-knobA'])
+  })
+})
+
+describe('the return paths of a switch of the variant', () => {
+  /** Switch the variant with the switcher, as a reader does. */
+  async function choose(element: AppElement, variant: string): Promise<void> {
+    const select = part(element, '.variant-select') as HTMLSelectElement
+    select.value = variant
+    select.dispatchEvent(new Event('change'))
+    await settled()
+  }
+
+  it('gives every panel the head the app names for it', async () => {
+    subtitlesOf = { panelC: 'what panel C answers' }
+    const element = await shell({ page: 'pageB' })
+    expect(part(element, 'sbmlsim-panel[panel="panelC"]').getAttribute('head')).toBe(
+      JSON.stringify({ title: 'Title of panelC', subtitle: 'what panel C answers' }),
+    )
+  })
+
+  it('shows the provenance of the variant shown again after a failed switch and a return', async () => {
+    variantApps = { variantB: null }
+    const element = await shell({ page: 'pageB' })
+    const before = part(element, '.simulated').textContent
+    await choose(element, 'variantB')
+    expect(element.shadowRoot.querySelector('.simulated')).toBeNull()
+    await choose(element, 'variantA')
+    expect(part(element, '.simulated').textContent).toBe(before)
+    expect(part(element, '.simulated').classList.contains('held')).toBe(false)
+  })
+
+  it('keeps the caption of a switch whose runs are pending when the reader returns to it from a third variant', async () => {
+    declared = {
+      ...app(),
+      variants: [
+        { id: 'variantA', label: 'Variant A' },
+        { id: 'variantB', label: 'Variant B' },
+        { id: 'variantC', label: 'Variant C' },
+      ],
+    }
+    const element = await shell({ page: 'pageB' })
+    // the runs of B do not answer while the test looks
+    hang = []
+    await choose(element, 'variantB')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('Switching to Variant B …')
+    // on to C, whose app is still read, and back to B
+    appGate = new Promise<void>(() => undefined)
+    await choose(element, 'variantC')
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('Switching to Variant C …')
+    await choose(element, 'variantB')
+    // B is still not drawn: the caption names it and the provenance stays dimmed
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('Switching to Variant B …')
+    expect(part(element, '.simulated').classList.contains('held')).toBe(true)
+  })
+
+  it('keeps a shared value of the variant before as the number the new variant declares', async () => {
+    const slightly = {
+      ...choiceKnob('knobS'),
+      choices: [
+        { label: 'low', value: 12.500000000000002 },
+        { label: 'high', value: 25 },
+      ],
+    }
+    knobsOf = { panelB: [choiceKnob('knobS')], panelC: [choiceKnob('knobS')] }
+    variantKnobs = { variantB: { panelB: [slightly], panelC: [slightly] } }
+    const element = await shell({ page: 'pageB' })
+    const select = part(element, '#knob-knobS') as HTMLSelectElement
+    select.value = '12.5'
+    select.dispatchEvent(new Event('change'))
+    await settled()
+    await choose(element, 'variantB')
+    expect(part(element, 'sbmlsim-panel[panel="panelB"]').getAttribute('values')).toBe(
+      '{"knobS":12.500000000000002}',
+    )
   })
 })

@@ -137,58 +137,61 @@ function say(kind: 'input' | 'change', event: Event): void {
 <template>
   <div class="knob" :class="{ stopped: stops.length > 0 }">
     <label :id="labelId()" class="knob-label" :for="controlId()">{{ knobLabel(props.axis) }}</label>
-    <template v-if="props.axis.kind === 'range'">
-      <template v-if="stops.length > 0">
-        <!-- the words which name the select after the label; hidden, since the
-             label is the one visible name of the two controls -->
-        <span :id="stopsNameId()" hidden>named value</span>
-        <select
-          :id="stopsId()"
-          class="knob-select"
-          :value="stopShown"
-          :aria-labelledby="`${labelId()} ${stopsNameId()}`"
-          :aria-describedby="props.describedBy"
-          :disabled="props.disabled"
-          @change="say('change', $event)"
-        >
-          <option v-if="stopShown === CUSTOM" :value="CUSTOM" disabled>custom</option>
-          <option v-for="stop of stops" :key="stop.label" :value="String(stop.value)">
-            {{ stop.label }}
-          </option>
-        </select>
+    <!-- the controls of the knob, under the line of its label -->
+    <div class="knob-body">
+      <template v-if="props.axis.kind === 'range'">
+        <template v-if="stops.length > 0">
+          <!-- the words which name the select after the label; hidden, since the
+               label is the one visible name of the two controls -->
+          <span :id="stopsNameId()" hidden>named value</span>
+          <select
+            :id="stopsId()"
+            class="knob-select"
+            :value="stopShown"
+            :aria-labelledby="`${labelId()} ${stopsNameId()}`"
+            :aria-describedby="props.describedBy"
+            :disabled="props.disabled"
+            @change="say('change', $event)"
+          >
+            <option v-if="stopShown === CUSTOM" :value="CUSTOM" disabled>custom</option>
+            <option v-for="stop of stops" :key="stop.label" :value="String(stop.value)">
+              {{ stop.label }}
+            </option>
+          </select>
+        </template>
+        <div class="knob-row">
+          <input
+            :id="controlId()"
+            type="range"
+            :min="props.axis.min ?? 0"
+            :max="props.axis.max ?? 1"
+            :step="rangeStep(props.axis)"
+            :value="props.value"
+            :aria-valuetext="valueText"
+            :aria-describedby="props.describedBy"
+            :disabled="props.disabled"
+            @input="say('input', $event)"
+            @change="say('change', $event)"
+          />
+          <output class="knob-value" :for="controlId()" aria-live="off">{{
+            shortNumber(props.value, KNOB_DIGITS)
+          }}</output>
+        </div>
       </template>
-      <div class="knob-row">
-        <input
-          :id="controlId()"
-          type="range"
-          :min="props.axis.min ?? 0"
-          :max="props.axis.max ?? 1"
-          :step="rangeStep(props.axis)"
-          :value="props.value"
-          :aria-valuetext="valueText"
-          :aria-describedby="props.describedBy"
-          :disabled="props.disabled"
-          @input="say('input', $event)"
-          @change="say('change', $event)"
-        />
-        <output class="knob-value" :for="controlId()" aria-live="off">{{
-          shortNumber(props.value, KNOB_DIGITS)
-        }}</output>
-      </div>
-    </template>
-    <select
-      v-else
-      :id="controlId()"
-      class="knob-select"
-      :value="props.value"
-      :aria-describedby="props.describedBy"
-      :disabled="props.disabled"
-      @change="say('change', $event)"
-    >
-      <option v-for="choice of props.axis.choices" :key="choice.label" :value="choice.value">
-        {{ choice.label }}
-      </option>
-    </select>
+      <select
+        v-else
+        :id="controlId()"
+        class="knob-select"
+        :value="props.value"
+        :aria-describedby="props.describedBy"
+        :disabled="props.disabled"
+        @change="say('change', $event)"
+      >
+        <option v-for="choice of props.axis.choices" :key="choice.label" :value="choice.value">
+          {{ choice.label }}
+        </option>
+      </select>
+    </div>
   </div>
 </template>
 

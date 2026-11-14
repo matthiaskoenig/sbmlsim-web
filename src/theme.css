@@ -161,6 +161,8 @@
    * row of controls is centred in, so a slider and a select beside it line up
    * and so does the Reset; it is no token of the design but of the controls */
   --_control-height: calc(var(--_font-size) + 12px);
+  /* the gap between two lines of a row of controls (`control.css`) */
+  --_line-gap: 10px;
 
   --_axis-width: var(--sbmlsim-axis-width, 1px);
   --_curve-width: var(--sbmlsim-curve-width, 1.8px);

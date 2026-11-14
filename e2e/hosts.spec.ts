@@ -477,8 +477,13 @@ test.describe('the app shell', () => {
       await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
       const shell = await row(app, '.knobs .reset')
       const [example, stops, dose] = shell.selects
-      // the Reset is centred on the line of the selects of its row, the dose's
-      expect(Math.abs(shell.reset - (dose?.centre ?? Number.NaN))).toBeLessThan(0.5)
+      // the Reset is centred on the line of the selects of its row, the dose's,
+      // or on a line of its own under it where the row has no column left for it
+      if (width >= 1280) {
+        expect(Math.abs(shell.reset - (dose?.centre ?? Number.NaN))).toBeLessThan(0.5)
+      } else {
+        expect(shell.reset).toBeGreaterThan((dose?.centre ?? 0) + 12)
+      }
       // and the select of the examples is as wide as the control under it
       expect(Math.abs((example?.right ?? 0) - (stops?.right ?? 1))).toBeLessThan(0.5)
       expect(Math.abs((example?.left ?? 0) - (stops?.left ?? 1))).toBeLessThan(0.5)
@@ -500,7 +505,7 @@ test.describe('the app shell', () => {
       })
       const alone = page.locator('sbmlsim-panel')
       await expect(alone.locator('svg path').first()).toBeVisible()
-      const own = await row(alone, '.options')
+      const own = await row(alone, '.options .control-line')
       const ownDose = own.selects.at(-1)
       const sameRow = Math.abs(own.reset - (ownDose?.centre ?? Number.NaN)) < 0.5
       // beside the selects, or on a line of its own where the row wraps, never at a slider
@@ -511,17 +516,159 @@ test.describe('the app shell', () => {
         // row below the controls above it
         const gap = await alone.evaluate((element) => {
           const root = element.shadowRoot
-          const options = root?.querySelector('.options')?.getBoundingClientRect()
-          const bottoms = [...(root?.querySelectorAll('.controls > .knob') ?? [])].map(
+          const options = root?.querySelector('.options .control-line')?.getBoundingClientRect()
+          const bottoms = [...(root?.querySelectorAll('.controls > .knob .knob-body') ?? [])].map(
             (one) => one.getBoundingClientRect().bottom,
           )
+          // the gap between two lines of a row of controls
           const rowGap = Number.parseFloat(
-            getComputedStyle(root?.querySelector('.controls') ?? element).rowGap,
+            getComputedStyle(root?.querySelector('.controls') ?? element).getPropertyValue(
+              '--_line-gap',
+            ),
           )
           return { gap: (options?.top ?? 0) - Math.max(...bottoms), rowGap }
         })
         expect(Math.abs(gap.gap - gap.rowGap)).toBeLessThan(0.5)
       }
+    })
+  }
+
+  for (const width of [390, 470, 640, 768, 1280]) {
+    test(`puts the options and the Reset on the line of the selects, for one to four knobs, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      // the knobs of the patient page and of its plasma panel, cut to one or
+      // grown to four with choice knobs of their own
+      let count = 2
+      const extra = (index: number): Record<string, unknown> => ({
+        id: `extra${String(index)}`,
+        label: `extra knob ${String(index)}`,
+        target: null,
+        unit: null,
+        kind: 'choice',
+        min: null,
+        max: null,
+        steps: 2,
+        choices: [
+          { label: 'one', value: 1 },
+          { label: 'two', value: 2 },
+        ],
+        default: 1,
+      })
+      const knobsOf = (given: Record<string, unknown>[]): Record<string, unknown>[] =>
+        [...given, ...[0, 1].map(extra)].slice(0, count)
+      await page.route(
+        (url) => url.pathname === '/api/models/hctz/panels/patient_plasma',
+        async (route) => {
+          const response = await route.fetch()
+          const body = (await response.json()) as Record<string, unknown>
+          body.axes = knobsOf(body.axes as Record<string, unknown>[])
+          await route.fulfill({ response, json: body })
+        },
+      )
+      await page.route(
+        (url) => url.pathname === '/api/models/hctz/app',
+        async (route) => {
+          const response = await route.fetch()
+          const body = (await response.json()) as {
+            shared: Record<string, { knob: Record<string, unknown>; panels: unknown[] }[]>
+          }
+          const shared = body.shared.patient ?? []
+          const panels = shared[0]?.panels ?? []
+          body.shared.patient = knobsOf(shared.map((one) => one.knob)).map((knob) => ({
+            knob,
+            panels,
+          }))
+          await route.fulfill({ response, json: body })
+        },
+      )
+      /**
+       * The problems of a row of controls: an item without a label (the
+       * options, the Reset) whose line has knobs and which is not centred on
+       * the first select of that line, or whose line has none and which does
+       * not start at the top of its line.
+       */
+      const problems = (root: Locator, row: string, item: string): Promise<string[]> =>
+        root.evaluate(
+          (element, [rowSelector, itemSelector]) => {
+            const scope = element.shadowRoot ?? element
+            const container = scope.querySelector(rowSelector ?? '')
+            const target = scope.querySelector(itemSelector ?? '')
+            if (container === null || target === null) {
+              return ['no row or no item']
+            }
+            const line = target.querySelector('.control-line')?.getBoundingClientRect()
+            const box = target.getBoundingClientRect()
+            const centre = (one: DOMRect): number => (one.top + one.bottom) / 2
+            const knobs = [...container.querySelectorAll(':scope > .knob')].filter(
+              (one) => Math.abs(one.getBoundingClientRect().top - box.top) < 0.5,
+            )
+            if (line === undefined) {
+              return ['no line']
+            }
+            if (knobs.length === 0) {
+              return Math.abs(line.top - box.top) < 0.5
+                ? []
+                : [`alone at ${String(line.top - box.top)}`]
+            }
+            const select = knobs[0]?.querySelector('select, .knob-row')?.getBoundingClientRect()
+            const off = select === undefined ? Number.NaN : centre(line) - centre(select)
+            return Math.abs(off) < 1 ? [] : [`${String(knobs.length)} knobs, off by ${String(off)}`]
+          },
+          [row, item],
+        )
+      const found: string[] = []
+      for (count = 1; count <= 4; count += 1) {
+        await page.goto('/demo/app.html')
+        await page.evaluate(() =>
+          document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
+        )
+        const app = page.locator('sbmlsim-app')
+        await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(count)
+        for (const one of await problems(app, '.knobs', '.knobs-reset')) {
+          found.push(`shell ${String(count)}: ${one}`)
+        }
+        // the Reset takes no width from a select of its line: the selects of a
+        // column are as wide as each other, the last one under the others too
+        const columns = await app.evaluate((element) => {
+          const widths = new Map<number, number[]>()
+          for (const one of element.shadowRoot?.querySelectorAll('.knobs select') ?? []) {
+            const box = one.getBoundingClientRect()
+            widths.set(Math.round(box.left), [
+              ...(widths.get(Math.round(box.left)) ?? []),
+              box.width,
+            ])
+          }
+          return [...widths.values()]
+        })
+        for (const widths of columns) {
+          if (Math.max(...widths) - Math.min(...widths) > 0.5) {
+            found.push(`shell ${String(count)}: selects of one column ${widths.join(', ')}`)
+          }
+        }
+        await page.goto('/demo/plain.html')
+        await page.evaluate(() => {
+          document.querySelector('sbmlsim-panel')?.remove()
+          const one = document.createElement('sbmlsim-panel')
+          for (const [name, value] of Object.entries({
+            endpoint: '',
+            model: 'hctz',
+            panel: 'patient_plasma',
+            layout: 'stacked',
+            auto: '',
+          })) {
+            one.setAttribute(name, value)
+          }
+          document.body.append(one)
+        })
+        const alone = page.locator('sbmlsim-panel')
+        await expect(alone.locator('.knob')).toHaveCount(count)
+        for (const one of await problems(alone, '.controls', '.options')) {
+          found.push(`panel ${String(count)}: ${one}`)
+        }
+      }
+      expect(found).toEqual([])
     })
   }
 
@@ -1188,7 +1335,14 @@ test.describe('the page of a patient', () => {
   test('picks a scenario, which moves both plots, the select of the stops and the slider', async ({
     page,
   }) => {
-    const simulations = countSimulations(page)
+    // the runs of the patient page, not of the page the demo opens on first
+    let runs = 0
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().includes('/panels/patient_')) {
+        runs += 1
+      }
+    })
+    const simulations = { count: (): number => runs }
     const app = await openPage(page, 'hctz', 'patient')
     await expect.poll(simulations.count).toBe(2)
     const scenario = app.locator('#scenario')
@@ -1285,11 +1439,22 @@ test.describe('the page of a patient', () => {
         gates[name] = resolve
       })
     const appRead = gate('app')
+    const declarations = gate('declarations')
     const runs = gate('runs')
     await page.route(
       (url) => url.pathname.endsWith('/app') && url.searchParams.get('variant') === 'low_reference',
       async (route) => {
         await appRead
+        await route.continue()
+      },
+    )
+    await page.route(
+      (url) =>
+        url.pathname.includes('/panels/') &&
+        !url.pathname.endsWith('/data') &&
+        url.searchParams.get('variant') === 'low_reference',
+      async (route) => {
+        await declarations
         await route.continue()
       },
     )
@@ -1338,6 +1503,14 @@ test.describe('the page of a patient', () => {
     await expect(line).toHaveText(provenance ?? '')
     await expect(line).toHaveClass(/held/)
     gates.app?.()
+    // the app of the variant names the heads of its panels, which the cards
+    // show at once, while the panels still read their declarations
+    await expect(app.locator('sbmlsim-panel .title')).toHaveText([
+      'Plasma concentration of a patient (reference 90 ml/min)',
+      'Urinary excretion of a patient (reference 90 ml/min)',
+    ])
+    expect(await boxes()).toBe(before)
+    gates.declarations?.()
     // the panels read their declarations of the variant and hold the figures
     // before until their runs answer
     await expect(app.locator('sbmlsim-panel .title').first()).toHaveText(
@@ -1362,6 +1535,65 @@ test.describe('the page of a patient', () => {
     await expect(caption).toHaveText('')
     expect(await boxes()).toBe(before)
     await expect(line).not.toHaveClass(/held/)
+  })
+
+  test('keeps the height of a panel alone while it is switched to another variant', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 900 })
+    let release: (() => void) | null = null
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route(
+      (url) =>
+        url.pathname.includes('/panels/') && url.searchParams.get('variant') === 'low_reference',
+      async (route) => {
+        await held
+        await route.continue()
+      },
+    )
+    await page.goto('/demo/plain.html')
+    await page.evaluate(() => {
+      document.querySelector('sbmlsim-panel')?.remove()
+      const one = document.createElement('sbmlsim-panel')
+      for (const [name, value] of Object.entries({
+        endpoint: '',
+        model: 'hctz_variants',
+        panel: 'patient_plasma',
+        variant: 'default',
+        auto: '',
+      })) {
+        one.setAttribute(name, value)
+      }
+      document.body.append(one)
+    })
+    const alone = page.locator('sbmlsim-panel')
+    await expect(alone.locator('.plot svg path').first()).toBeVisible()
+    // the height of the panel on every frame from the switch until its new figure
+    await page.evaluate(() => {
+      const panel = document.querySelector('sbmlsim-panel')
+      const heights: number[] = []
+      ;(window as unknown as { heights: number[] }).heights = heights
+      const tick = (): void => {
+        heights.push(panel?.getBoundingClientRect().height ?? 0)
+        if (heights.length < 2000) {
+          requestAnimationFrame(tick)
+        }
+      }
+      requestAnimationFrame(tick)
+      panel?.setAttribute('variant', 'low_reference')
+    })
+    await page.waitForTimeout(500)
+    // the head, the controls and the provenance of the variant before stay
+    await expect(alone.locator('.held svg path').first()).toBeAttached()
+    await expect(alone.locator('.provenance.held')).toHaveCount(1)
+    ;(release as unknown as () => void)()
+    await expect(alone.locator('.plot svg path').first()).toBeVisible()
+    await page.waitForTimeout(300)
+    const heights = await page.evaluate(() => (window as unknown as { heights: number[] }).heights)
+    expect(heights.length).toBeGreaterThan(10)
+    expect(new Set(heights).size).toBe(1)
   })
 
   test('switches the declaration on screen with the variant', async ({ page }) => {

@@ -6,19 +6,33 @@
  * size and line height, the ones of the panel. Where a control sits and how
  * wide it is belongs to the element which draws it.
  */
+/*
+ * A control is two rows: the line of its label and its body, the select, the
+ * select of the stops of a knob and its slider. A row of controls lays every
+ * item out on two rows of its own line (`controls.css`), so the bodies of a
+ * line start together and an item without a label, the options and a Reset,
+ * sits on the line of the selects beside knobs and at the top of a line of its
+ * own, by the layout alone.
+ */
 .knob {
-  display: flex;
-  flex: 1 1 160px;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-rows: auto auto;
   min-width: 0;
   font-size: var(--_font-size);
   line-height: 1.45;
 }
 
 .knob-label {
+  margin-bottom: 4px;
   color: var(--_fg-soft);
   font-size: var(--_font-size-small);
+}
+
+.knob-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .knob-select {
@@ -32,4 +46,48 @@
   color: var(--_fg);
   font-family: inherit;
   font-size: var(--_font-size);
+}
+
+/*
+ * A row of controls, the controls of a panel above or below its figure and the
+ * shared controls of a page of an app: a grid whose items each take two rows of
+ * the line they are on, the line of the labels and the line of the bodies
+ * (`grid-template-rows: subgrid`). The line of the labels of a line is as tall
+ * as its tallest label, and of no height on a line whose items have none, so
+ * an item without a label - the options of a panel, the Reset of the shell -
+ * starts with the selects beside knobs and at the top of a line of its own,
+ * whatever wraps where and whatever font the page draws its text in: it is the
+ * layout and not a measure of it which places them. A line is a row of the
+ * grid and not a gap of it, so the gap between two lines is the margin under
+ * the bodies (`--_line-gap`), which the element of the row takes back under its
+ * last line.
+ */
+.control-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-auto-rows: auto;
+  column-gap: 16px;
+  row-gap: 0;
+  align-items: start;
+}
+
+.control-row > :not([hidden]) {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  min-width: 0;
+}
+
+.control-row > :not([hidden]) > :last-child {
+  margin-bottom: var(--_line-gap);
+}
+
+/* the body of an item without a label, which is on the line of the bodies */
+.control-line {
+  display: flex;
+  grid-row: 2;
+  gap: 12px;
+  align-items: center;
+  justify-self: start;
+  height: var(--_control-height);
 }

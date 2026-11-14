@@ -179,6 +179,7 @@ import {
   knobsOf,
   ownValue,
   shortNumber,
+  snapValue,
   validValue,
 } from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
@@ -439,6 +440,14 @@ const props = defineProps({
    * empty attribute: a panel the page gives no `values` carries none.
    */
   values: { type: String, default: undefined },
+  /**
+   * The head the panel shows until it has read its declaration, a JSON object
+   * of its `title` and its `subtitle`: the shell of an app gives every panel
+   * the head the app names for it (`heads`), so a card shows the head of the
+   * variant it is switched to at once and not a blank one while the panel
+   * reads its declaration. A text which cannot be read is as if it were absent.
+   */
+  head: { type: String, default: undefined },
   /** Where the controls go: `auto` (the default), `sidebar`, `stacked` or `toolbar`. */
   layout: { type: String as PropType<LayoutName>, default: 'auto' },
   /**
@@ -495,31 +504,6 @@ const props = defineProps({
 const host = useHost()
 const root = useTemplateRef<HTMLElement>('root')
 const plotted = useTemplateRef<HTMLElement>('plotted')
-const options = useTemplateRef<HTMLElement>('options')
-/**
- * Whether the options of a row of controls wrapped onto a line of their own.
- *
- * Beside knobs the options sit on the line of the selects, one label line
- * below the top of the row; on a line of their own there is no label above
- * them to be level with, so they carry no such margin. Which line they are on
- * is a matter of the widths the browser lays out, so it is read off the
- * layout (`placeOptions`), before the frame is painted.
- */
-const optionsAlone = ref(false)
-
-/** Read whether the options of the controls wrapped onto a line of their own. */
-function placeOptions(): void {
-  const box = options.value
-  const first = box?.parentElement?.querySelector<HTMLElement>(':scope > .knob')
-  if (box === null || first === null || first === undefined) {
-    optionsAlone.value = false
-    return
-  }
-  // the top of the line the options are on, without the margin they carry beside knobs
-  const margin = Number.parseFloat(globalThis.getComputedStyle(box).marginTop) || 0
-  const top = box.getBoundingClientRect().top - margin
-  optionsAlone.value = top > first.getBoundingClientRect().top + 1
-}
 
 /**
  * How wide a text of the figure is drawn, `null` where the page cannot measure.
@@ -655,6 +639,15 @@ const dropped = ref(false)
  */
 const held = shallowRef('')
 /**
+ * The declaration of the variant before a switch, which the panel draws its
+ * controls and, without a `head` attribute, its head of until the declaration
+ * of the new variant arrives, so its height does not change under the reader;
+ * `null` while it holds none.
+ */
+const heldDeclaration = shallowRef<PanelDeclaration | null>(null)
+/** The provenance line of the figure the panel holds, dimmed with it, empty while it holds none. */
+const heldFoot = ref('')
+/**
  * The study data of the panel, `null` until it arrived.
  *
  * It is read once per declaration: it is the data of a study and depends on
@@ -788,11 +781,63 @@ const shownAxes = computed<PanelAxis[]>(() =>
   axes.value.filter((one) => !Object.hasOwn(ownedValues.value, one.id)),
 )
 
+/**
+ * The knobs whose controls are drawn: the ones of the declaration, and while a
+ * switch of the variant reads the declaration of the new one, the ones of the
+ * variant before (`heldDeclaration`), which take no movement then, so the
+ * panel keeps its controls and its height until the new declaration replaces
+ * them.
+ */
+const drawnAxes = computed<PanelAxis[]>(() =>
+  declaration.value !== null
+    ? shownAxes.value
+    : knobsOf(heldDeclaration.value).filter((one) => !Object.hasOwn(ownedValues.value, one.id)),
+)
+
+/** The head the attribute `head` gives, `null` for none or one which cannot be read. */
+const givenHead = computed<{ title: string; subtitle: string } | null>(() => {
+  const text = props.head
+  if (text === undefined || text === '') {
+    return null
+  }
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null
+    }
+    const fields = parsed as Record<string, unknown>
+    return {
+      title: typeof fields.title === 'string' ? fields.title : '',
+      subtitle: typeof fields.subtitle === 'string' ? fields.subtitle : '',
+    }
+  } catch {
+    return null
+  }
+})
+
 /** The title of the panel, empty until the declaration was read. */
-const title = computed<string>(() => declaration.value?.panel.title ?? '')
+/**
+ * The panel whose head is shown: the declaration, else the head the attribute
+ * gives, else the declaration of the variant before a switch.
+ */
+const shownHead = computed<{ title: string; subtitle: string }>(() => {
+  const declared = declaration.value ?? null
+  if (declared !== null) {
+    return { title: declared.panel.title, subtitle: declared.panel.subtitle }
+  }
+  const held = heldDeclaration.value
+  return (
+    givenHead.value ??
+    (held === null
+      ? { title: '', subtitle: '' }
+      : { title: held.panel.title, subtitle: held.panel.subtitle })
+  )
+})
+
+const title = computed<string>(() => shownHead.value.title)
 
 /** The question the panel answers, empty for a panel without one. */
-const subtitle = computed<string>(() => declaration.value?.panel.subtitle ?? '')
+const subtitle = computed<string>(() => shownHead.value.subtitle)
 
 /** The heading the title is drawn as, `h2` unless the page asks for another. */
 const headingTag = computed<string>(() => {
@@ -831,7 +876,7 @@ const resettable = computed<boolean>(() => {
  * takes the toolbar whatever was asked for.
  */
 const drawnLayout = computed<DrawnLayout>(() => {
-  if (shownAxes.value.length === 0) {
+  if (drawnAxes.value.length === 0) {
     return 'toolbar'
   }
   const asked = props.layout
@@ -1803,6 +1848,8 @@ function fail(error: unknown): void {
   }
   failure.value = kind
   held.value = ''
+  heldFoot.value = ''
+  heldDeclaration.value = null
   const keep = stored.value
   if (keep !== null) {
     drawStored(keep)
@@ -1878,6 +1925,7 @@ async function simulate(gridId: string | null): Promise<void> {
     failure.value = null
     dropped.value = false
     held.value = ''
+    heldFoot.value = ''
     host?.dispatchEvent(
       new CustomEvent('sbmlsim-result', {
         detail: { provenance: answer.provenance, spec_hash: answer.spec_hash },
@@ -1971,9 +2019,10 @@ async function load(kept: Record<string, number> = {}): Promise<void> {
     }
     flight = null
     declaration.value = declared
+    heldDeclaration.value = null
     knobValues.value = withHost(knobsOf(declared), (one) => {
       const value = ownValue(kept, one.id)
-      return value !== undefined && validValue(one, value) ? value : one.default
+      return value !== undefined && validValue(one, value) ? snapValue(one, value) : one.default
     })
     logY.value = initialLog(declared)
     await Promise.all([simulate(firstGridded(declared)), loadData(declared)])
@@ -2110,7 +2159,13 @@ function runsFor(id: string): boolean {
  */
 function withHost(knobs: PanelAxis[], own: (axis: PanelAxis) => number): Record<string, number> {
   const given = ownedValues.value
-  return Object.fromEntries(knobs.map((one) => [one.id, ownValue(given, one.id) ?? own(one)]))
+  // a value of the host which is a number of the knob to the last bits is sent as that number
+  return Object.fromEntries(
+    knobs.map((one) => {
+      const value = ownValue(given, one.id)
+      return [one.id, value === undefined ? own(one) : snapValue(one, value)]
+    }),
+  )
 }
 
 /**
@@ -2143,7 +2198,9 @@ function takeHostValues(given: Record<string, number>, before: Record<string, nu
   for (const axis of knobsOf(declared)) {
     const owned = Object.hasOwn(given, axis.id)
     const released = !owned && Object.hasOwn(before, axis.id)
-    const value = owned ? given[axis.id] : released ? axis.default : undefined
+    const hosted = owned ? given[axis.id] : undefined
+    const value =
+      hosted !== undefined ? snapValue(axis, hosted) : released ? axis.default : undefined
     if (value === undefined || value === next[axis.id]) {
       continue
     }
@@ -2297,8 +2354,11 @@ function restart(variant = false): void {
     return
   }
   const kept = variant ? { ...knobValues.value } : {}
-  const shown = svg.value !== '' && !stale.value && !fromStore.value ? svg.value : held.value
+  const current = svg.value !== '' && !stale.value && !fromStore.value
+  const shown = current ? svg.value : held.value
   held.value = variant ? shown : ''
+  heldFoot.value = variant ? (current ? footer.value : heldFoot.value) : ''
+  heldDeclaration.value = variant ? (declaration.value ?? heldDeclaration.value) : null
   dropped.value = variant && (dropped.value || (grid.value !== null && !fromStore.value))
   stopWork()
   sequence += 1
@@ -2308,7 +2368,9 @@ function restart(variant = false): void {
   grid.value = null
   stored.value = null
   study.value = null
-  knobValues.value = {}
+  // the controls of a switch of the variant keep the values they show until the
+  // declaration of the new one arrives, which keeps the ones it takes
+  knobValues.value = kept
   drawnValues.value = {}
   fromStore.value = false
   failure.value = null
@@ -2428,14 +2490,6 @@ watch(
   },
 )
 
-watch(
-  () => [measured.value, shownAxes.value, drawnLayout.value, options.value],
-  () => {
-    void nextTick(placeOptions)
-  },
-  { flush: 'post' },
-)
-
 onMounted(() => {
   if (props.auto) {
     void activate()
@@ -2465,25 +2519,28 @@ defineExpose({ activate, freeze, reset })
     <div class="body">
       <div
         class="controls"
+        :class="{ 'control-row': drawnLayout !== 'sidebar' }"
         role="group"
         aria-label="Simulation settings"
         @keydown="keepControlKeys($event)"
       >
         <KnobControl
-          v-for="axis of shownAxes"
+          v-for="axis of drawnAxes"
           :key="axis.id"
           :axis="axis"
           :value="ownValue(knobValues, axis.id) ?? axis.default"
-          :disabled="frozen"
+          :disabled="frozen || declaration === null"
           @input="onInput(axis, $event)"
           @change="onChange(axis, $event)"
         />
-        <div ref="options" class="options" :class="{ alone: optionsAlone }">
-          <label class="toggle">
-            <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
-            <span>logarithmic y</span>
-          </label>
-          <ResetButton :disabled="frozen" :idle="!resettable" @reset="reset()" />
+        <div class="options">
+          <div class="control-line">
+            <label class="toggle">
+              <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
+              <span>logarithmic y</span>
+            </label>
+            <ResetButton :disabled="frozen" :idle="!resettable" @reset="reset()" />
+          </div>
         </div>
       </div>
       <div
@@ -2557,9 +2614,12 @@ defineExpose({ activate, freeze, reset })
         <p v-else-if="errorMessage === ''" class="pending">Loading the panel</p>
       </div>
     </div>
-    <div v-if="errorMessage !== '' || footer !== ''" part="foot" class="foot">
+    <div v-if="errorMessage !== '' || footer !== '' || heldFoot !== ''" part="foot" class="foot">
       <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
       <p v-if="footer !== ''" class="provenance">{{ footer }}</p>
+      <!-- the provenance of the figure of the variant before a switch, which the
+           panel holds, dimmed and hidden from a reader as that figure is -->
+      <p v-else-if="heldFoot !== ''" class="provenance held" aria-hidden="true">{{ heldFoot }}</p>
     </div>
   </div>
 </template>
@@ -2657,18 +2717,15 @@ defineExpose({ activate, freeze, reset })
   gap: 8px;
 }
 
-.controls {
-  display: flex;
-  gap: 10px 16px;
-}
-
 .layout-sidebar .body {
   flex-direction: row;
 }
 
 .layout-sidebar .controls {
+  display: flex;
   flex: 0 0 200px;
   flex-direction: column;
+  gap: 10px;
   width: 200px;
 }
 
@@ -2682,42 +2739,25 @@ defineExpose({ activate, freeze, reset })
   flex-direction: column;
 }
 
-/* the controls of a row start at one height, so their labels and their first
- * controls line up, and a knob of named stops, which draws its slider under
- * the select of its stops, reaches below the others */
+/* the controls above or below the figure are a row of controls (`control.css`),
+ * which places the options on the line of the selects beside knobs and at the
+ * top of a line of their own by the layout alone */
 .layout-stacked .controls,
 .layout-toolbar .controls {
-  flex-flow: row wrap;
-  align-items: flex-start;
   width: 100%;
-}
-
-/* the options beside knobs are level with the first line of controls, a
- * select or the select of the stops of a knob, as the Reset of the shell is:
- * one label line and the gap of a control below the top of the row, centred
- * in the height of a select, and never below a slider */
-.layout-stacked .knob ~ .options,
-.layout-toolbar .knob ~ .options {
-  align-self: flex-start;
-  height: var(--_control-height);
-  margin-top: calc(var(--_font-size-small) * 1.45 + 4px);
-}
-
-/* options which wrapped onto a line of their own have no label to be level with */
-.layout-stacked .knob ~ .options.alone,
-.layout-toolbar .knob ~ .options.alone {
-  margin-top: 0;
+  /* the gap under the last line of the row is the gap of the body */
+  margin-bottom: calc(-1 * var(--_line-gap));
 }
 
 .layout-stacked .figure {
   order: -1;
 }
 
-.options {
+.options .control-line {
   display: flex;
-  flex: 0 0 auto;
   gap: 12px;
   align-items: center;
+  height: var(--_control-height);
 }
 
 .toggle {

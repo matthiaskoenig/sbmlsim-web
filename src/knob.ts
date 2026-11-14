@@ -105,16 +105,20 @@ function isChoice(value: unknown): boolean {
   )
 }
 
+/** The units which are no unit to a reader: a dimensionless number is written without one. */
+const NO_UNITS: ReadonlySet<string> = new Set(['', 'dimensionless', '1'])
+
 /**
  * Get the label of a knob.
  *
  * @param axis the knob
  * @returns `<label> [<unit>]` for a range knob, whose readout is a bare
  *   number, as sbmlsim labels the axis of a figure; the label alone for a
- *   choice knob, whose choices carry their units themselves
+ *   choice knob, whose choices carry their units themselves, and for a knob
+ *   of no unit or of a dimensionless one, which a reader reads as no unit
  */
 export function knobLabel(axis: PanelAxis): string {
-  return axis.kind === 'range' && axis.unit !== null && axis.unit !== ''
+  return axis.kind === 'range' && axis.unit !== null && !NO_UNITS.has(axis.unit.trim())
     ? `${axis.label} [${axis.unit}]`
     : axis.label
 }
@@ -238,6 +242,32 @@ export function sameValue(one: number, other: number): boolean {
  */
 export function choiceAt(choices: PanelChoice[], value: number): PanelChoice | null {
   return choices.find((one) => sameValue(one.value, value)) ?? null
+}
+
+/**
+ * Get the value a knob takes for a value which is one of its numbers to the
+ * last bits.
+ *
+ * A value which is a bound or a choice of its knob within the tolerance of
+ * `sameValue` - a value a host computed, `0.30000000000000004` for a choice of
+ * 0.3 - is taken for that number and sent as it, since the endpoint compares a
+ * value with the numbers of the declaration exactly and refuses one it does not
+ * take. Every other value is the value as it is.
+ *
+ * @param axis the knob
+ * @param value the value
+ * @returns the bound or the choice it is, else the value
+ */
+export function snapValue(axis: PanelAxis, value: number): number {
+  if (axis.kind === 'choice') {
+    return choiceAt(axis.choices, value)?.value ?? value
+  }
+  for (const bound of [axis.min, axis.max]) {
+    if (bound !== null && sameValue(bound, value)) {
+      return bound
+    }
+  }
+  return choiceAt(stopsOf(axis), value)?.value ?? value
 }
 
 /**

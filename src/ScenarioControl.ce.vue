@@ -55,16 +55,20 @@ function say(event: Event): void {
 <template>
   <div class="knob scenario">
     <label class="knob-label" for="scenario">{{ props.label }}</label>
-    <select
-      id="scenario"
-      class="knob-select"
-      :value="props.shown ?? CUSTOM"
-      :disabled="props.disabled"
-      @change="say($event)"
-    >
-      <option v-if="props.shown === null" :value="CUSTOM" disabled>custom</option>
-      <option v-for="one of props.scenarios" :key="one.id" :value="one.id">{{ one.label }}</option>
-    </select>
+    <div class="knob-body">
+      <select
+        id="scenario"
+        class="knob-select"
+        :value="props.shown ?? CUSTOM"
+        :disabled="props.disabled"
+        @change="say($event)"
+      >
+        <option v-if="props.shown === null" :value="CUSTOM" disabled>custom</option>
+        <option v-for="one of props.scenarios" :key="one.id" :value="one.id">
+          {{ one.label }}
+        </option>
+      </select>
+    </div>
   </div>
 </template>
 

@@ -146,7 +146,6 @@
 
 import {
   computed,
-  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -177,7 +176,7 @@ import type {
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
-import { drawableKnob, keepControlKeys, ownValue, sameValue, validValue } from './knob'
+import { drawableKnob, keepControlKeys, ownValue, sameValue, snapValue, validValue } from './knob'
 import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -221,33 +220,6 @@ const props = defineProps({
 
 const host = useHost()
 const grid = useTemplateRef<HTMLElement>('grid')
-const knobRow = useTemplateRef<HTMLElement>('knobRow')
-
-/**
- * The width of the first shared control of the page, which the select of its
- * scenarios takes, `null` until it was measured: the select is in a row of its
- * own, the controls shrink below their widest when a row holds more of them,
- * and the select of a page and the control under it are drawn alike.
- */
-const firstWidth = ref<number | null>(null)
-/** The observer of the width of the first shared control, `null` where there is none. */
-let widthObserver: ResizeObserver | null = null
-
-/** Observe the width of the first shared control of the page, the one under the select of the scenarios. */
-function observeFirst(): void {
-  widthObserver?.disconnect()
-  widthObserver = null
-  const first = knobRow.value?.querySelector<HTMLElement>(':scope > .knob')
-  if (first === null || first === undefined || typeof ResizeObserver === 'undefined') {
-    firstWidth.value = null
-    return
-  }
-  widthObserver = new ResizeObserver((entries) => {
-    const width = entries[0]?.borderBoxSize[0]?.inlineSize ?? first.getBoundingClientRect().width
-    firstWidth.value = Number.isFinite(width) && width > 0 ? width : null
-  })
-  widthObserver.observe(first)
-}
 
 /** The app, `null` until it arrived and where it could not be read. */
 const app = shallowRef<AppDeclaration | null>(null)
@@ -349,6 +321,14 @@ function captionOf(label: string): string {
  */
 const simulatedHeld = computed<boolean>(() => switching.value || awaiting.value.size > 0)
 
+/**
+ * The versions which simulated what the page shows, as the footer names them:
+ * none while the app of a variant cannot be read, whose figures of the variant
+ * before are not drawn, and the answers of the variant which is drawn again
+ * when the reader returns to it.
+ */
+const simulatedShown = computed<string>(() => (switchFailure.value === null ? simulated.value : ''))
+
 /** The scenarios of the page which is shown, none for a page without. */
 const scenarios = computed<Scenario[]>(() => current.value?.scenarios ?? [])
 
@@ -423,6 +403,22 @@ function valuesOf(id: string): string | undefined {
     ])
   // built of entries, so every knob id is a property of its own, `__proto__` among them
   return given.length === 0 ? undefined : JSON.stringify(Object.fromEntries(given))
+}
+
+/**
+ * Get the attribute `head` of a panel of the page.
+ *
+ * @param id the id of the panel
+ * @returns the JSON of the title and the subtitle the app names for it, which
+ *   the panel shows until it has read its declaration, so a card shows the head
+ *   of the variant of the app at once; `undefined` for a panel the app names
+ *   no head of
+ */
+function headOf(id: string): string | undefined {
+  const one = heads.value.get(id)
+  return one === undefined
+    ? undefined
+    : JSON.stringify({ title: one.title, subtitle: one.subtitle })
 }
 
 /**
@@ -597,7 +593,9 @@ function adopt(declared: AppDeclaration, variant: string): void {
       const value = ownValue(shared.value, one.knob.id)
       return [
         one.knob.id,
-        value !== undefined && validValue(one.knob, value) ? value : one.knob.default,
+        value !== undefined && validValue(one.knob, value)
+          ? snapValue(one.knob, value)
+          : one.knob.default,
       ]
     }),
   )
@@ -632,9 +630,6 @@ async function switchTo(variant: string): Promise<void> {
     switching.value = false
     return
   }
-  // the panels which still draw the variant before a switch before this one
-  // are no longer awaited: the caption names the variant of this switch
-  awaiting.value = new Set()
   switching.value = true
   const known = read.get(variant)
   if (known !== undefined) {
@@ -667,8 +662,6 @@ async function switchTo(variant: string): Promise<void> {
     const kind = failureKind(error)
     if (kind !== 'aborted') {
       switchFailure.value = kind
-      // the figures of the variant before are cleared, and so are their answers
-      answers.value = {}
       announce(kind)
     }
   } finally {
@@ -795,18 +788,9 @@ onMounted(() => {
   void load()
 })
 
-watch(
-  () => [knobRow.value, sharedKnobs.value, scenarios.value.length],
-  () => {
-    void nextTick(observeFirst)
-  },
-  { flush: 'post' },
-)
-
 onBeforeUnmount(() => {
   flight?.abort()
   switchFlight?.abort()
-  widthObserver?.disconnect()
 })
 </script>
 
@@ -854,27 +838,21 @@ onBeforeUnmount(() => {
       </div>
       <div
         v-if="sharedKnobs.length > 0"
-        ref="knobRow"
-        class="knobs"
+        class="knobs control-row"
         role="group"
         aria-label="Simulation settings of the page"
         @keydown="keepControlKeys($event)"
       >
         <!-- the examples of the page set the controls below, so they are above them,
              in a row of their own -->
-        <div
+        <ScenarioControl
           v-if="scenarios.length > 0"
-          class="scenarios"
-          :style="firstWidth === null ? undefined : { '--_scenario-width': `${firstWidth}px` }"
-        >
-          <ScenarioControl
-            :label="SCENARIO_LABEL"
-            :scenarios="scenarios"
-            :shown="scenarioShown"
-            :disabled="switching"
-            @pick="pickScenario($event)"
-          />
-        </div>
+          :label="SCENARIO_LABEL"
+          :scenarios="scenarios"
+          :shown="scenarioShown"
+          :disabled="switching"
+          @pick="pickScenario($event)"
+        />
         <KnobControl
           v-for="one of sharedKnobs"
           :key="one.knob.id"
@@ -887,7 +865,9 @@ onBeforeUnmount(() => {
         />
         <!-- level with the first line of controls, the selects, and never below a slider -->
         <div class="knobs-reset">
-          <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
+          <div class="control-line">
+            <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
+          </div>
         </div>
         <!-- hidden, so a screen reader hears the text once, as the description of its
              control, and not again after the controls; aria-describedby reads it -->
@@ -923,6 +903,7 @@ onBeforeUnmount(() => {
             :heading-level="panelLevel"
             :variant="variantOfPanels"
             :values.attr="valuesOf(one)"
+            :head.attr="headOf(one)"
             :inert="switching"
             :aria-hidden.attr="switching ? 'true' : undefined"
           ></component>
@@ -953,12 +934,12 @@ onBeforeUnmount(() => {
           <span v-if="app.licenses.length > 0">{{ app.licenses.join(', ') }}</span>
         </p>
         <p
-          v-if="simulated !== ''"
+          v-if="simulatedShown !== ''"
           class="simulated"
           :class="{ held: simulatedHeld }"
           :aria-hidden="simulatedHeld ? 'true' : undefined"
         >
-          {{ simulated }}
+          {{ simulatedShown }}
         </p>
       </footer>
     </template>
@@ -1138,46 +1119,39 @@ onBeforeUnmount(() => {
 }
 
 /* the controls of the knobs the panels of the page share, on a card as the
- * panels are; a control fills a phone and is no wider than a reader reads a
- * select at on a wide page. They start at one height, as the controls of a
- * panel do, and the Reset sits at the foot of the row */
+ * panels are, a row of controls (`control.css`) as the controls of a panel
+ * are, so the Reset sits on the line of the selects; a control fills a phone
+ * and is no wider than a reader reads a select at on a wide page. The padding
+ * under the last line is the card's less the gap of a line, which that line
+ * carries */
 .knobs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  align-items: flex-start;
-  padding: 12px 16px;
+  padding: 12px 16px calc(12px - var(--_line-gap));
   border: 1px solid var(--_line);
   border-radius: var(--_radius);
   background: var(--_bg-card);
   box-shadow: var(--_shadow);
 }
 
+/* columns of at least 200px, which hold the label of an example, and at most
+ * 20rem, which a control fills: a control fills a phone and stays at 20rem on a
+ * wide page, and its Reset follows it at a column gap or takes a line of its
+ * own, but never width from a control of its line */
+.knobs.control-row {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 20rem));
+}
+
 .knobs .knob {
   max-width: 20rem;
 }
 
-/* the select of the scenarios takes a row of its own, above the knobs it sets,
- * as wide as the first of them under it (`firstWidth`) */
-.scenarios {
-  display: flex;
-  flex: 1 1 100%;
+/* the select of the scenarios takes a line of its own, above the knobs it
+ * sets, in the first column, so it is as wide as the first of them under it */
+.knobs > .scenario {
+  grid-column: 1;
 }
 
-.scenarios .knob {
-  flex: 0 1 var(--_scenario-width, 20rem);
-}
-
-/* the Reset is level with the first line of controls of the row, a select or
- * the select of the stops of a knob: it starts one label line and the gap of a
- * control below the top of the row and is centred in the height of a select,
- * so it sits beside the selects and never below a slider */
-.knobs-reset {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  height: var(--_control-height);
-  margin-top: calc(var(--_font-size-small) * 1.45 + 4px);
+.knobs > .scenario + * {
+  grid-column-start: 1;
 }
 
 /*

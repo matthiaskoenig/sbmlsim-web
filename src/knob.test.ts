@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PanelAxis } from './contract'
-import { choiceAt, rangeStep, stopsOf, validValue } from './knob'
+import { choiceAt, knobLabel, rangeStep, snapValue, stopsOf, validValue } from './knob'
 
 /** A range knob of a clearance, with the stops of a renal impairment. */
 function clearance(more: Partial<PanelAxis> = {}): PanelAxis {
@@ -72,5 +72,26 @@ describe('the stops of a range knob', () => {
     const choice = clearance({ kind: 'choice', min: null, max: null })
     expect(validValue(choice, 75)).toBe(true)
     expect(validValue(choice, 52)).toBe(false)
+  })
+})
+
+describe('the label of a knob', () => {
+  it('carries the unit of a range knob, and no unit which is none to a reader', () => {
+    expect(knobLabel(clearance())).toBe('creatinine clearance [ml/min]')
+    for (const unit of ['dimensionless', '1', '', null]) {
+      expect(knobLabel(clearance({ label: 'cirrhosis degree', unit }))).toBe('cirrhosis degree')
+    }
+  })
+})
+
+describe('the value a knob is sent at', () => {
+  it('is the bound or the choice a value is to the last bits, and the value otherwise', () => {
+    expect(snapValue(clearance(), 150.00000000000003)).toBe(150)
+    expect(snapValue(clearance(), 9.999999999999998)).toBe(10)
+    expect(snapValue(clearance(), 75.00000000000001)).toBe(75)
+    expect(snapValue(clearance(), 52.3)).toBe(52.3)
+    const choice = clearance({ kind: 'choice', min: null, max: null })
+    expect(snapValue(choice, 0.30000000000000004 + 74.7)).toBe(75)
+    expect(snapValue(choice, 52)).toBe(52)
   })
 })
