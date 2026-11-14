@@ -1,0 +1,543 @@
+{
+  "app": {
+    "contract": "app/1",
+    "title": "Hydrochlorothiazide",
+    "subtitle": "the model of hydrochlorothiazide in renal impairment",
+    "pages": [
+      {
+        "id": "renal",
+        "title": "Renal impairment",
+        "panels": [
+          "renal_plasma",
+          "renal_urine"
+        ],
+        "scenarios": []
+      },
+      {
+        "id": "dose",
+        "title": "Dose",
+        "panels": [
+          "dose_plasma",
+          "dose_urine"
+        ],
+        "scenarios": []
+      },
+      {
+        "id": "patient",
+        "title": "Patient",
+        "panels": [
+          "patient_plasma",
+          "patient_urine"
+        ],
+        "scenarios": [
+          {
+            "id": "healthy",
+            "label": "healthy, 25 mg",
+            "values": {
+              "crcl": 110,
+              "dose": 25
+            }
+          },
+          {
+            "id": "moderate",
+            "label": "moderate impairment, 25 mg",
+            "values": {
+              "crcl": 45,
+              "dose": 25
+            }
+          },
+          {
+            "id": "severe",
+            "label": "severe impairment, 12.5 mg",
+            "values": {
+              "crcl": 20,
+              "dose": 12.5
+            }
+          }
+        ]
+      }
+    ],
+    "variants": [],
+    "citation": "Beermann et al. (1976)",
+    "doi": "10.5281/zenodo.0000000",
+    "licenses": [
+      "CC BY-SA 4.0"
+    ],
+    "shared": {
+      "renal": [
+        {
+          "knob": {
+            "id": "egfr",
+            "label": "renal function",
+            "target": "f_renal_function",
+            "unit": "dimensionless",
+            "kind": "choice",
+            "min": null,
+            "max": null,
+            "steps": 5,
+            "choices": [
+              {
+                "label": "impaired",
+                "value": 0.4
+              },
+              {
+                "label": "mildly impaired",
+                "value": 0.7
+              },
+              {
+                "label": "normal",
+                "value": 1
+              }
+            ],
+            "default": 1
+          },
+          "panels": [
+            {
+              "id": "renal_plasma",
+              "title": "Plasma concentration over the renal function"
+            },
+            {
+              "id": "renal_urine",
+              "title": "Urinary excretion over the renal function"
+            }
+          ]
+        },
+        {
+          "knob": {
+            "id": "dose",
+            "label": "dose",
+            "target": "PODOSE_hctz",
+            "unit": "mg",
+            "kind": "choice",
+            "min": null,
+            "max": null,
+            "steps": 5,
+            "choices": [
+              {
+                "label": "5 mg",
+                "value": 5
+              },
+              {
+                "label": "12.5 mg",
+                "value": 12.5
+              },
+              {
+                "label": "25 mg",
+                "value": 25
+              },
+              {
+                "label": "50 mg",
+                "value": 50
+              }
+            ],
+            "default": 25
+          },
+          "panels": [
+            {
+              "id": "renal_plasma",
+              "title": "Plasma concentration over the renal function"
+            },
+            {
+              "id": "renal_urine",
+              "title": "Urinary excretion over the renal function"
+            }
+          ]
+        }
+      ],
+      "dose": [
+        {
+          "knob": {
+            "id": "dose",
+            "label": "dose",
+            "target": "PODOSE_hctz",
+            "unit": "mg",
+            "kind": "range",
+            "min": 12.5,
+            "max": 50,
+            "steps": 4,
+            "choices": [],
+            "default": 25
+          },
+          "panels": [
+            {
+              "id": "dose_plasma",
+              "title": "Plasma concentration over the dose"
+            },
+            {
+              "id": "dose_urine",
+              "title": "Urinary excretion over the dose"
+            }
+          ]
+        },
+        {
+          "knob": {
+            "id": "egfr",
+            "label": "renal function",
+            "target": "f_renal_function",
+            "unit": "dimensionless",
+            "kind": "choice",
+            "min": null,
+            "max": null,
+            "steps": 5,
+            "choices": [
+              {
+                "label": "impaired",
+                "value": 0.4
+              },
+              {
+                "label": "mildly impaired",
+                "value": 0.7
+              },
+              {
+                "label": "normal",
+                "value": 1
+              }
+            ],
+            "default": 1
+          },
+          "panels": [
+            {
+              "id": "dose_plasma",
+              "title": "Plasma concentration over the dose"
+            },
+            {
+              "id": "dose_urine",
+              "title": "Urinary excretion over the dose"
+            }
+          ]
+        }
+      ],
+      "patient": [
+        {
+          "knob": {
+            "id": "crcl",
+            "label": "creatinine clearance",
+            "target": null,
+            "unit": "ml/min",
+            "kind": "range",
+            "min": 10,
+            "max": 150,
+            "steps": 8,
+            "choices": [
+              {
+                "label": "normal",
+                "value": 110
+              },
+              {
+                "label": "mild impairment",
+                "value": 75
+              },
+              {
+                "label": "moderate impairment",
+                "value": 45
+              },
+              {
+                "label": "severe impairment",
+                "value": 20
+              },
+              {
+                "label": "kidney failure",
+                "value": 10
+              }
+            ],
+            "default": 110
+          },
+          "panels": [
+            {
+              "id": "patient_plasma",
+              "title": "Plasma concentration of a patient"
+            },
+            {
+              "id": "patient_urine",
+              "title": "Urinary excretion of a patient"
+            }
+          ]
+        },
+        {
+          "knob": {
+            "id": "dose",
+            "label": "dose",
+            "target": "PODOSE_hctz",
+            "unit": "mg",
+            "kind": "choice",
+            "min": null,
+            "max": null,
+            "steps": 5,
+            "choices": [
+              {
+                "label": "5 mg",
+                "value": 5
+              },
+              {
+                "label": "12.5 mg",
+                "value": 12.5
+              },
+              {
+                "label": "25 mg",
+                "value": 25
+              },
+              {
+                "label": "50 mg",
+                "value": 50
+              }
+            ],
+            "default": 25
+          },
+          "panels": [
+            {
+              "id": "patient_plasma",
+              "title": "Plasma concentration of a patient"
+            },
+            {
+              "id": "patient_urine",
+              "title": "Urinary excretion of a patient"
+            }
+          ]
+        }
+      ]
+    },
+    "heads": {
+      "renal": [
+        {
+          "id": "renal_plasma",
+          "title": "Plasma concentration over the renal function",
+          "subtitle": "hydrochlorothiazide in the venous plasma and in the kidney"
+        },
+        {
+          "id": "renal_urine",
+          "title": "Urinary excretion over the renal function",
+          "subtitle": "the cumulative amount of hydrochlorothiazide in the urine"
+        }
+      ],
+      "dose": [
+        {
+          "id": "dose_plasma",
+          "title": "Plasma concentration over the dose",
+          "subtitle": "hydrochlorothiazide in plasma"
+        },
+        {
+          "id": "dose_urine",
+          "title": "Urinary excretion over the dose",
+          "subtitle": "the cumulative amount of hydrochlorothiazide in the urine"
+        }
+      ],
+      "patient": [
+        {
+          "id": "patient_plasma",
+          "title": "Plasma concentration of a patient",
+          "subtitle": "hydrochlorothiazide over the creatinine clearance of a patient"
+        },
+        {
+          "id": "patient_urine",
+          "title": "Urinary excretion of a patient",
+          "subtitle": "the cumulative amount over the creatinine clearance of a patient"
+        }
+      ]
+    },
+    "variant": "default"
+  },
+  "panel": {
+    "contract": "panel/1",
+    "panel": {
+      "id": "renal_urine",
+      "title": "Urinary excretion over the renal function",
+      "subtitle": "the cumulative amount of hydrochlorothiazide in the urine",
+      "x_label": "time (min)",
+      "y_label": "amount excreted",
+      "y_min": null,
+      "y_max": null,
+      "x_max": null
+    },
+    "axes": [
+      {
+        "id": "egfr",
+        "label": "renal function",
+        "target": "f_renal_function",
+        "unit": "dimensionless",
+        "kind": "choice",
+        "min": null,
+        "max": null,
+        "steps": 5,
+        "choices": [
+          {
+            "label": "impaired",
+            "value": 0.4
+          },
+          {
+            "label": "mildly impaired",
+            "value": 0.7
+          },
+          {
+            "label": "normal",
+            "value": 1
+          }
+        ],
+        "default": 1
+      },
+      {
+        "id": "dose",
+        "label": "dose",
+        "target": "PODOSE_hctz",
+        "unit": "mg",
+        "kind": "choice",
+        "min": null,
+        "max": null,
+        "steps": 5,
+        "choices": [
+          {
+            "label": "5 mg",
+            "value": 5
+          },
+          {
+            "label": "12.5 mg",
+            "value": 12.5
+          },
+          {
+            "label": "25 mg",
+            "value": 25
+          },
+          {
+            "label": "50 mg",
+            "value": 50
+          }
+        ],
+        "default": 25
+      }
+    ],
+    "curves": [
+      {
+        "id": "Aurine_hctz",
+        "label": "urine",
+        "unit": "umol",
+        "scale": "linear"
+      }
+    ],
+    "data": [
+      {
+        "id": "beermann1976_urine",
+        "label": "Beermann 1976 (5 mg, oral)",
+        "curve": "Aurine_hctz",
+        "dataset": "Beermann1976_Tab1A",
+        "x": "time",
+        "y": "value",
+        "yerr": null,
+        "sel": {
+          "label": "amount_urine_hctz5po_4"
+        },
+        "at": {
+          "egfr": 1,
+          "dose": 5
+        },
+        "conversion": "1/(297.7 g/mole)",
+        "unit": null
+      }
+    ],
+    "simulation": {
+      "variant": null,
+      "end": 1440,
+      "points": 50,
+      "x_unit": null,
+      "preinit": {
+        "PODOSE_hctz": 0,
+        "BW": 75
+      },
+      "derived": {}
+    },
+    "limits": {
+      "end": 10000,
+      "points": 2000,
+      "knobs": 8,
+      "grid": 64,
+      "curves": 16
+    }
+  },
+  "data": {
+    "contract": "paneldata/1",
+    "series": [
+      {
+        "id": "beermann1976_urine",
+        "label": "Beermann 1976 (5 mg, oral)",
+        "x": [
+          0,
+          720,
+          5760,
+          10080
+        ],
+        "y": [
+          0,
+          10.110849848841115,
+          13.873026536781996,
+          13.889821968424588
+        ],
+        "yerr": null,
+        "x_unit": "min",
+        "unit": "umol",
+        "count": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    ]
+  },
+  "run": {
+    "contract": "panel/1",
+    "spec_hash": "7e1dc27700534f5eb8b1b76f2d1aed12aff272fa91f3907283a6ce0e69fc5463",
+    "x": [
+      0,
+      28.8,
+      57.6
+    ],
+    "dims": [
+      {
+        "id": "egfr",
+        "label": "renal function",
+        "unit": "dimensionless",
+        "values": [
+          0.4,
+          0.7,
+          1
+        ]
+      }
+    ],
+    "curves": {
+      "Aurine_hctz": [
+        [
+          6.72215e-56,
+          0.187525,
+          0.96439
+        ],
+        [
+          1.17636e-55,
+          0.295609,
+          1.46981
+        ],
+        [
+          1.68048e-55,
+          0.383951,
+          1.85754
+        ]
+      ]
+    },
+    "units": {
+      "x": "min",
+      "Aurine_hctz": "umol"
+    },
+    "provenance": {
+      "model": "hctz",
+      "panel": "renal_urine",
+      "model_sha256": "e47e40b60ff28f8d3a12b0b99d09482ed3cba8e239dcb5cd9cc14cadae48f82c",
+      "variant": "default",
+      "engine": "roadrunner",
+      "sbmlsim": "0.0.0",
+      "seconds": 0,
+      "created": "2026-01-01T00:00:00+00:00"
+    },
+    "status": {
+      "ok": true,
+      "points": 3,
+      "failed": []
+    }
+  }
+}

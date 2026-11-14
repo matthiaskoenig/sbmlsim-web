@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { PanelClient } from './client'
 
 import { CONTRACTS, ContractError, checkContract } from './contract'
 import type {
@@ -275,5 +279,71 @@ describe('checkContract', () => {
       }
     }
     expect(new ContractError(2, CONTRACTS.panel).contract).toBe(2)
+  })
+})
+
+/**
+ * The payloads of a live endpoint, `src/fixtures/contract.json`, which
+ * `e2e/contract.spec.ts` compares with what the endpoint of the end to end
+ * tests serves of `examples.panels.hctz` of sbmlsim: the app, a declaration
+ * with study data, its data and a run of it.
+ */
+const served = JSON.parse(
+  readFileSync(new URL('./fixtures/contract.json', import.meta.url), 'utf8'),
+) as Record<'app' | 'panel' | 'data' | 'run', Record<string, unknown>>
+
+describe('the payloads of the service', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** A client which reads every route from the fixture. */
+  function client(): PanelClient {
+    vi.stubGlobal('fetch', (url: string) => {
+      const path = url.split('?')[0] ?? ''
+      const body = path.endsWith('/app')
+        ? served.app
+        : path.endsWith('/simulate')
+          ? served.run
+          : path.endsWith('/data')
+            ? served.data
+            : served.panel
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
+    })
+    return new PanelClient('https://endpoint.example.org')
+  }
+
+  it('are read by the client as the contracts this library speaks', async () => {
+    // the client checks the version and the shape of every payload, so a field
+    // the service renamed or dropped is a failure of the read here
+    const reader = client()
+    const app = await reader.app('hctz')
+    const panel = await reader.panel('hctz', 'renal_urine')
+    const data = await reader.data('hctz', 'renal_urine')
+    const run = await reader.simulate('hctz', 'renal_urine', {})
+    expect(app.pages.length).toBeGreaterThan(0)
+    expect(panel.axes.length).toBeGreaterThan(0)
+    expect(panel.data.length).toBeGreaterThan(0)
+    expect(data.length).toBeGreaterThan(0)
+    expect(run.dims.length).toBe(1)
+  })
+
+  it('carry every field of the types of the contract and no other', () => {
+    // the keys the service writes are the keys the types name, at every level
+    // the renderer reads
+    const keys = (value: unknown): string[] => Object.keys(value as object).sort()
+    expect(keys(served.panel)).toEqual(keys(declaration))
+    expect(keys(served.panel.panel)).toEqual(keys(declaration.panel))
+    expect(keys(served.panel.simulation)).toEqual(keys(declaration.simulation))
+    expect(keys(served.panel.limits)).toEqual(keys(declaration.limits))
+    expect(keys((served.panel.axes as unknown[])[0])).toEqual(keys(declaration.axes[0]))
+    expect(keys((served.panel.curves as unknown[])[0])).toEqual(keys(declaration.curves[0]))
+    expect(keys((served.panel.data as unknown[])[0])).toEqual(keys(declaration.data[0]))
+    expect(keys(served.run)).toEqual(keys(answer))
+    expect(keys(served.run.provenance)).toEqual(keys(answer.provenance))
+    expect(keys(served.run.status)).toEqual(keys(answer.status))
+    expect(keys(served.data)).toEqual(keys(data))
+    expect(keys((served.data.series as unknown[])[0])).toEqual(keys(data.series[0]))
+    expect(keys(served.app)).toEqual(keys(app))
   })
 })

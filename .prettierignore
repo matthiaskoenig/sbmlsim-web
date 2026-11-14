@@ -4,3 +4,4 @@ package-lock.json
 .site
 test-results
 playwright-report
+src/fixtures
