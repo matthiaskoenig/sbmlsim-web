@@ -3,7 +3,7 @@
  * `<sbmlsim-app>`: the shell of the app of a model, in any HTML page.
  *
  * A model app is configuration and not code: the element reads the `app/1`
- * declaration of the model once, and draws its title, the navigation of its
+ * declaration of the model, once per variant a reader chooses, and draws its title, the navigation of its
  * pages, the switcher of its variants, the controls of the knobs the panels of
  * a page share, a grid of `<sbmlsim-panel>` elements of the page which is shown
  * and a provenance footer. That is all it does. It owns no simulation logic: it
@@ -49,7 +49,7 @@
  *
  * ## What happens to a page
  *
- * The declaration is read once for the life of the element, and a switch of the
+ * The declaration is read once per variant, and a switch of the
  * page, which is the attribute `page` (the id of a page, the first page for one
  * which is missing or unknown), only swaps which panels are in the grid. The
  * panels of the page which is shown are mounted with `auto`, so they start
@@ -104,6 +104,22 @@
  * stays chosen while the page changes. An app of one variant or none has no
  * switcher, and its panels simulate the variant their declaration names.
  *
+ * The declarations of the panels may differ by the variant, and so may what
+ * the app derives from them: the shell reads the app again in the variant a
+ * reader switches to (`switchTo`), draws no panel while it does, and then draws
+ * the controls, the scenarios and the heads of that variant and gives every
+ * panel the variant and the values of the shared knobs at once, a value kept
+ * where the knob of that variant takes it (`adopt`). The first variant is the
+ * one the app is read in without a variant, which the service answers with the
+ * default variant of the model.
+ *
+ * ## The scenarios of a page
+ *
+ * A page may name scenarios, states of its shared knobs such as example
+ * patients: a select of them above the shared controls sets every knob a
+ * scenario names in one state and shows the scenario the knobs are at, or the
+ * entry `custom`, which cannot be picked (`ScenarioControl.ce.vue`).
+ *
  * ## The footer
  *
  * The citation, the DOI and the licenses of the declaration, and the versions
@@ -135,7 +151,13 @@ import {
 } from 'vue'
 import type { PropType } from 'vue'
 
-import { DEFAULT_TIMEOUT, FAILURE_MESSAGES, PanelClient, failureKind } from './client'
+import {
+  DEFAULT_TIMEOUT,
+  FAILURE_MESSAGES,
+  PanelClient,
+  PanelRequestError,
+  failureKind,
+} from './client'
 import type { FailureKind } from './client'
 import type {
   AppDeclaration,
@@ -149,7 +171,7 @@ import type {
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
-import { keepControlKeys, ownValue, sameValue } from './knob'
+import { keepControlKeys, ownValue, sameValue, validValue } from './knob'
 import { placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -167,6 +189,8 @@ const SEPARATOR = ' · '
 const DOI_RESOLVER = 'https://doi.org/'
 /** What a doi may be written with in front of its number. */
 const DOI_PREFIX = /^https?:\/\/(?:dx\.)?doi\.org\//i
+/** What the line of a switch of the variant which failed says after the failure. */
+const SWITCH_MESSAGE = 'The panels of the variant shown cannot be drawn.'
 /** The label of the select of the scenarios of a page, which are examples of its knobs. */
 const SCENARIO_LABEL = 'Example'
 
@@ -198,6 +222,18 @@ const app = shallowRef<AppDeclaration | null>(null)
 const failure = ref<FailureKind | null>(null)
 /** The id of the variant the reader chose, empty where the app has none. */
 const chosen = ref('')
+/**
+ * The id of the variant the app which is drawn was read in: the variant its
+ * panels simulate and its controls, its scenarios and its heads are of. It is
+ * the chosen one once the app of that variant has been read.
+ */
+const shownVariant = ref('')
+/** Whether the app of the chosen variant is being read, or could not be, and the panels are not drawn. */
+const switching = ref(false)
+/** What went wrong reading the app of the chosen variant, `null` while nothing did. */
+const switchFailure = ref<FailureKind | null>(null)
+/** The apps of the variants which were read, by the id of the variant, for a reader who switches back. */
+const read = new Map<string, AppDeclaration>()
 /** The provenance of the latest answer of each panel of the page, by the id of the panel. */
 const answers = ref<Record<string, Provenance>>({})
 /** What the live region says, the page which was switched to; empty until a reader switches. */
@@ -205,6 +241,8 @@ const announced = ref('')
 
 /** The controller of the request of the app, so a superseded one is dropped. */
 let flight: AbortController | null = null
+/** The controller of the request of the app of a variant, so a superseded switch is dropped. */
+let switchFlight: AbortController | null = null
 
 /** The value of every knob the panels of the page share, by its id. */
 const shared = ref<Record<string, number>>({})
@@ -221,8 +259,14 @@ const variants = computed(() => {
   return all.length > 1 ? all : []
 })
 
-/** The variant the panels simulate, empty for the one their declaration names. */
-const variantOfPanels = computed<string>(() => (variants.value.length > 0 ? chosen.value : ''))
+/**
+ * The variant the panels simulate, empty for the one their declaration names:
+ * the variant of the app which is drawn, so a panel reads its declaration in
+ * the variant its controls are of, and never in one whose app is still read.
+ */
+const variantOfPanels = computed<string>(() =>
+  variants.value.length > 0 ? shownVariant.value : '',
+)
 
 /**
  * The knobs the panels of the page share, as the service states them in the
@@ -412,6 +456,11 @@ function announce(kind: FailureKind): void {
 /** Read the app of the model; its failure is the one line the element shows. */
 async function load(): Promise<void> {
   flight?.abort()
+  switchFlight?.abort()
+  switchFlight = null
+  read.clear()
+  switching.value = false
+  switchFailure.value = null
   const controller = new AbortController()
   flight = controller
   app.value = null
@@ -429,6 +478,7 @@ async function load(): Promise<void> {
     }
     app.value = declared
     chosen.value = declared.variants[0]?.id ?? ''
+    shownVariant.value = chosen.value
   } catch (error) {
     if (controller.signal.aborted && flight !== controller) {
       return
@@ -441,6 +491,100 @@ async function load(): Promise<void> {
   } finally {
     if (flight === controller) {
       flight = null
+    }
+  }
+}
+
+/**
+ * Draw the app of another variant: its pages, its controls, its scenarios and
+ * the heads of its panels, and its panels in that variant, all at once.
+ *
+ * A shared knob of the page keeps its value where the knob is a shared knob of
+ * the page in that variant too and the value is one it takes there; any other
+ * starts at its default. The panels get the variant and the values in one
+ * render, so each reads its declaration of that variant once and runs it at
+ * those values.
+ *
+ * @param declared the app of the variant
+ * @param variant the id of the variant
+ */
+function adopt(declared: AppDeclaration, variant: string): void {
+  const page = declared.pages.find((one) => one.id === current.value?.id) ?? declared.pages[0]
+  const knobs = page === undefined ? [] : (declared.shared[page.id] ?? [])
+  // built of entries, so every knob id is a property of its own, `__proto__` among them
+  shared.value = Object.fromEntries(
+    knobs.map((one) => {
+      const value = ownValue(shared.value, one.knob.id)
+      return [
+        one.knob.id,
+        value !== undefined && validValue(one.knob, value) ? value : one.knob.default,
+      ]
+    }),
+  )
+  app.value = declared
+  shownVariant.value = variant
+  switching.value = false
+  switchFailure.value = null
+}
+
+/**
+ * Switch the app to the variant a reader chose.
+ *
+ * The declarations of the panels may differ by the variant, and so may the
+ * knobs a page shares, its scenarios and the heads of its cards: the app is
+ * read again in that variant (`?variant=`), and while it is, its panels are not
+ * drawn and its controls take no movement, so no figure is drawn of the
+ * variant before under the switcher of the one after, nor of the declaration
+ * of one variant and the controls of another. A failure leaves it so, with a
+ * line which says what failed: the figures of the variant before are no
+ * figures of the variant the switcher shows. A reader who switches back to the
+ * variant which is drawn gets it back as it was, without a request.
+ *
+ * @param variant the id of the variant
+ */
+async function switchTo(variant: string): Promise<void> {
+  switchFlight?.abort()
+  switchFlight = null
+  switchFailure.value = null
+  if (variant === shownVariant.value) {
+    switching.value = false
+    return
+  }
+  switching.value = true
+  const known = read.get(variant)
+  if (known !== undefined) {
+    adopt(known, variant)
+    return
+  }
+  const controller = new AbortController()
+  switchFlight = controller
+  try {
+    const declared = await new PanelClient(props.endpoint, props.timeout).app(
+      props.model,
+      controller.signal,
+      variant,
+    )
+    if (switchFlight !== controller) {
+      return
+    }
+    if (declared.pages.length === 0) {
+      // an app without a page has nothing to show, which is a body which is no app
+      throw new PanelRequestError('body')
+    }
+    read.set(variant, declared)
+    adopt(declared, variant)
+  } catch (error) {
+    if (switchFlight !== controller) {
+      return
+    }
+    const kind = failureKind(error)
+    if (kind !== 'aborted') {
+      switchFailure.value = kind
+      announce(kind)
+    }
+  } finally {
+    if (switchFlight === controller) {
+      switchFlight = null
     }
   }
 }
@@ -509,6 +653,10 @@ watch(variantOfPanels, () => {
   answers.value = {}
 })
 
+watch(chosen, (variant) => {
+  void switchTo(variant)
+})
+
 watch(
   () => [props.endpoint, props.model],
   () => {
@@ -524,6 +672,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   flight?.abort()
+  switchFlight?.abort()
 })
 </script>
 
@@ -571,6 +720,7 @@ onBeforeUnmount(() => {
             :label="SCENARIO_LABEL"
             :scenarios="scenarios"
             :shown="scenarioShown"
+            :disabled="switching"
             @pick="pickScenario($event)"
           />
         </div>
@@ -580,10 +730,11 @@ onBeforeUnmount(() => {
           :axis="one.knob"
           :value="ownValue(shared, one.knob.id) ?? one.knob.default"
           :described-by="drivesId(one.knob)"
+          :disabled="switching"
           @input="moveShared(one.knob, $event)"
           @change="moveShared(one.knob, $event)"
         />
-        <ResetButton :idle="sharedAtDefaults" @reset="resetShared()" />
+        <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
         <!-- hidden, so a screen reader hears the text once, as the description of its
              control, and not again after the controls; aria-describedby reads it -->
         <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
@@ -593,10 +744,15 @@ onBeforeUnmount(() => {
       <!-- a region and no main: the page which embeds the shell has its own landmark;
            `values` is written as the attribute a page writes, and left off a panel
            which shares no knob -->
+      <p v-if="switchFailure !== null" class="error" role="alert">
+        {{ FAILURE_MESSAGES[switchFailure] }} {{ SWITCH_MESSAGE }}
+      </p>
       <section
         ref="grid"
         :key="current.id"
         class="grid"
+        :class="{ switching: switching }"
+        :aria-busy="switching ? 'true' : 'false'"
         :aria-label="current.title"
         @sbmlsim-result="collect"
       >
@@ -915,6 +1071,14 @@ onBeforeUnmount(() => {
   grid-row: 1 / -1;
   grid-template-rows: subgrid;
   row-gap: 8px;
+}
+
+/* the panels of a variant whose app is being read, or could not be, keep their
+ * room and are not drawn, so no figure of the variant before is shown under the
+ * switcher of the one after and nothing of the page moves; the copy of the head
+ * keeps the head row */
+.grid.switching > .cell > :not(.reserve) {
+  visibility: hidden;
 }
 
 /* read by a screen reader and drawn nowhere: the live region of a page switch */

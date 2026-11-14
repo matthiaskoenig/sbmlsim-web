@@ -241,9 +241,9 @@ type Route = () => Promise<unknown>
 
 /** The routes the stub serves and the calls it took. */
 const served: {
-  panel: Route
+  panel: (variant: string | null) => Promise<unknown>
   simulate: (body: SimulateRequest) => Promise<unknown>
-  data: Route
+  data: (variant: string | null) => Promise<unknown>
   stored: Route
 } = {
   panel: () => Promise.resolve(declaration()),
@@ -289,12 +289,12 @@ function simulations(): SimulateRequest[] {
 
 /** The declarations the element asked for; the route of a run ends in `/simulate`. */
 function declarations(): Call[] {
-  return calls.filter((one) => one.url.endsWith('/panels/panelA'))
+  return calls.filter((one) => (one.url.split('?')[0] ?? '').endsWith('/panels/panelA'))
 }
 
 /** The requests of the study data the element made. */
 function dataCalls(): Call[] {
-  return calls.filter((one) => one.url.endsWith('/data'))
+  return calls.filter((one) => (one.url.split('?')[0] ?? '').endsWith('/data'))
 }
 
 /** Get the shadow root of an element, which every test reads the panel out of. */
@@ -545,14 +545,17 @@ beforeEach(() => {
     const sent = typeof init?.body === 'string' ? init.body : ''
     const body = sent === '' ? null : (JSON.parse(sent) as SimulateRequest)
     calls.push({ url, body })
-    if (url.endsWith('/simulate')) {
+    // a route is read in a variant with the query `variant`
+    const [path = '', query = ''] = url.split('?')
+    const variant = new URLSearchParams(query).get('variant')
+    if (path.endsWith('/simulate')) {
       return served.simulate(body ?? {}).then(json)
     }
-    if (url.endsWith('/data')) {
-      return served.data().then(json)
+    if (path.endsWith('/data')) {
+      return served.data(variant).then(json)
     }
-    if (url.includes('/panels/')) {
-      return served.panel().then(json)
+    if (path.includes('/panels/')) {
+      return served.panel(variant).then(json)
     }
     return served.stored().then(json)
   })
@@ -1898,14 +1901,173 @@ describe('the variant of the model', () => {
     expect(simulations()[1]?.variant).toBe('variantA')
   })
 
-  it('runs the simulation again when it changes, without reading the declaration again', async () => {
+  it('reads its declaration and its study data in the variant it is given', async () => {
+    served.panel = () => Promise.resolve(withData())
+    await started({ variant: 'variant A' })
+    expect(declarations().map((one) => one.url)).toEqual([
+      '/api-root/api/models/modelA/panels/panelA?variant=variant%20A',
+    ])
+    expect(dataCalls().map((one) => one.url)).toEqual([
+      '/api-root/api/models/modelA/panels/panelA/data?variant=variant%20A',
+    ])
+  })
+
+  it('reads its declaration and its study data again when it changes, and runs that', async () => {
     vi.useFakeTimers()
+    served.panel = () => Promise.resolve(withData())
     const element = await started({ variant: 'variantA' })
     expect(simulations()).toHaveLength(1)
     element.setAttribute('variant', 'variantB')
     await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
     expect(simulations().map((one) => one.variant)).toEqual(['variantA', 'variantB'])
-    expect(declarations()).toHaveLength(1)
+    expect(declarations().map((one) => one.url.split('?')[1])).toEqual([
+      'variant=variantA',
+      'variant=variantB',
+    ])
+    expect(dataCalls().map((one) => one.url.split('?')[1])).toEqual([
+      'variant=variantA',
+      'variant=variantB',
+    ])
+    expect(figure(element)).toContain('class="curve"')
+  })
+
+  it('draws the declaration of the variant it is switched to, and nothing while it reads it', async () => {
+    // the declaration of variant B is another title and another label of a
+    // curve, as two builds of a model have them
+    let release: (() => void) | null = null
+    served.panel = (variant) => {
+      const declared = declaration()
+      if (variant !== 'variantB') {
+        return Promise.resolve(declared)
+      }
+      const other = {
+        ...declared,
+        panel: { ...declared.panel, title: 'Panel A of B' },
+        curves: declared.curves.map((one) => ({ ...one, label: `${one.label} of B` })),
+      }
+      return new Promise((resolve) => {
+        release = () => {
+          resolve(other)
+        }
+      })
+    }
+    const element = await started({ variant: 'variantA' })
+    expect(textOf(element, '.title')).toBe('Panel A')
+    element.setAttribute('variant', 'variantB')
+    await settled()
+    // the figure, the title and the controls of variant A are gone while the
+    // declaration of variant B is read, and no figure of either is drawn
+    expect(figure(element)).toBe('')
+    expect(textOf(element, '.title')).toBe('')
+    expect(shadow(element).querySelectorAll('.knob')).toHaveLength(0)
+    expect(release).not.toBeNull()
+    ;(release as unknown as () => void)()
+    await settled()
+    expect(textOf(element, '.title')).toBe('Panel A of B')
+    expect(figure(element)).toContain('curve A of B')
+  })
+
+  it('keeps the value of a knob of its own which the variant declares as well', async () => {
+    vi.useFakeTimers()
+    const element = await started({ variant: 'variantA' })
+    move(control(element, 'knobA'), '12.5', 'change')
+    await vi.advanceTimersByTimeAsync(500)
+    element.setAttribute('variant', 'variantB')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect((control(element, 'knobA') as HTMLSelectElement).value).toBe('12.5')
+    expect(simulations().at(-1)).toEqual({
+      values: { knobA: 12.5 },
+      grid: { knobB: 3 },
+      variant: 'variantB',
+    })
+    // a value the declaration of the variant does not take is its default there
+    served.panel = (variant) => {
+      const declared = declaration()
+      return Promise.resolve(
+        variant === 'variantC'
+          ? {
+              ...declared,
+              axes: declared.axes.map((one) =>
+                one.id === 'knobA' ? { ...one, choices: [{ label: 'only', value: 25 }] } : one,
+              ),
+            }
+          : declared,
+      )
+    }
+    element.setAttribute('variant', 'variantC')
+    await vi.advanceTimersByTimeAsync(500)
+    await nextTick()
+    expect(simulations().at(-1)?.values).toEqual({ knobA: 25 })
+  })
+
+  it('drops a declaration and study data of the variant before which arrive late', async () => {
+    const late: (() => void)[] = []
+    served.panel = (variant) => {
+      const declared = withData()
+      const answer =
+        variant === 'variantA'
+          ? declared
+          : { ...declared, panel: { ...declared.panel, title: 'Panel A of B' } }
+      return Promise.resolve(answer)
+    }
+    served.data = (variant) =>
+      new Promise((resolve) => {
+        late.push(() => {
+          resolve(studyData({ label: `Series of ${variant ?? ''}` }))
+        })
+      })
+    // the start waits for the study data, which arrives late, so it is not awaited
+    const element = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      variant: 'variantA',
+    })
+    void element.activate()
+    await settled()
+    element.setAttribute('variant', 'variantB')
+    await settled()
+    // the data of variant B arrives first, the one of variant A after it
+    late[1]?.()
+    await settled()
+    late[0]?.()
+    await settled()
+    expect(textOf(element, '.title')).toBe('Panel A of B')
+    expect(figure(element)).toContain('Series of variantB')
+    expect(figure(element)).not.toContain('Series of variantA')
+  })
+
+  it('drops a declaration of the variant before which arrives after the one of the variant after', async () => {
+    let late: (() => void) | null = null
+    served.panel = (variant) => {
+      const declared = declaration()
+      if (variant === 'variantA') {
+        // the stub answers whatever the signal says, as a response already on its way does
+        return new Promise((resolve) => {
+          late = () => {
+            resolve(declared)
+          }
+        })
+      }
+      return Promise.resolve({ ...declared, panel: { ...declared.panel, title: 'Panel A of B' } })
+    }
+    const element = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      variant: 'variantA',
+    })
+    void element.activate()
+    await settled()
+    element.setAttribute('variant', 'variantB')
+    await settled()
+    expect(textOf(element, '.title')).toBe('Panel A of B')
+    ;(late as unknown as () => void)()
+    await settled()
+    expect(textOf(element, '.title')).toBe('Panel A of B')
+    expect(simulations().map((one) => one.variant)).toEqual(['variantB'])
   })
 
   it('draws no figure of the variant before when the run of a switch fails', async () => {
@@ -1916,17 +2078,18 @@ describe('the variant of the model', () => {
     element.setAttribute('variant', 'variantB')
     await vi.advanceTimersByTimeAsync(500)
     await nextTick()
-    // the answer held is of variant A, which the attribute no longer names
+    // the answer of variant A is gone with its declaration, and the line says
+    // that the figure of the settings shown cannot be drawn
     expect(figure(element)).toBe('')
     expect(textOf(element, '.error')).toContain('cannot be drawn')
     expect(textOf(element, '.provenance')).toBe('')
-    // back on the variant of the answer, the figure is the state shown again
+    // back on variant A, it is read and run again
+    served.simulate = () => Promise.resolve(run())
     element.setAttribute('variant', 'variantA')
-    await nextTick()
+    await vi.advanceTimersByTimeAsync(500)
     await nextTick()
     expect(figure(element)).toContain('class="curve"')
-    // and a switch with the endpoint back draws the variant it names
-    served.simulate = () => Promise.resolve(run())
+    expect(textOf(element, '.error')).toBe('')
     element.setAttribute('variant', 'variantB')
     await vi.advanceTimersByTimeAsync(500)
     await nextTick()

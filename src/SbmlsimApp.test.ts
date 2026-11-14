@@ -157,13 +157,14 @@ function run(request: SimulateRequest): SimulateResponse {
  * service does: the ids more than one panel of a page declares, in the order
  * the first panel which declares one lists them.
  */
-function sharedOf(given: Given): AppDeclaration['shared'] {
+function sharedOf(given: Given, variant: string | null = null): AppDeclaration['shared'] {
   return Object.fromEntries(
     given.pages.map((page) => {
       const first = new Map<string, PanelAxis>()
       const declaring = new Map<string, string[]>()
       for (const id of page.panels) {
-        for (const knob of knobsOf[id] ?? panelDeclaration(id).axes) {
+        const own = variant === null ? undefined : variantKnobs[variant]?.[id]
+        for (const knob of own ?? knobsOf[id] ?? panelDeclaration(id).axes) {
           if (!first.has(knob.id)) {
             first.set(knob.id, knob)
           }
@@ -203,6 +204,15 @@ let subtitlesOf: Record<string, string> = {}
 /** The knobs of a panel by its id, for a panel which declares others than `knobA`. */
 let knobsOf: Record<string, PanelAxis[]> = {}
 
+/** The app of a variant by its id, for one which differs from `declared`; `null` for one the app does not name. */
+let variantApps: Record<string, Given | null> = {}
+
+/** The knobs of a panel by its id in a variant, for a variant whose panels declare others. */
+let variantKnobs: Record<string, Record<string, PanelAxis[]>> = {}
+
+/** A gate the app of a variant waits for before it answers, `null` for one which answers at once. */
+let appGate: Promise<void> | null = null
+
 /** Whether the simulations hang until they are stopped, with the signals they were given. */
 let hang: AbortSignal[] | null = null
 
@@ -214,9 +224,14 @@ function json(body: unknown): Response {
   return { ok: true, status: 200, json: () => Promise.resolve(body) } as unknown as Response
 }
 
-/** The requests of the app, which the shell makes once. */
+/** Get the path of a request, without the query which names its variant. */
+function pathOf(call: Call): string {
+  return call.url.split('?')[0] ?? ''
+}
+
+/** The requests of the app, which the shell makes once per variant it is read in. */
 function appCalls(): Call[] {
-  return calls.filter((one) => one.url.endsWith('/app'))
+  return calls.filter((one) => (one.url.split('?')[0] ?? '').endsWith('/app'))
 }
 
 /** The bodies of the simulations of the panels. */
@@ -272,6 +287,9 @@ function tabs(element: AppElement): HTMLButtonElement[] {
 beforeEach(() => {
   declared = app()
   knobsOf = {}
+  variantApps = {}
+  variantKnobs = {}
+  appGate = null
   subtitlesOf = {}
   calls = []
   hang = null
@@ -281,12 +299,22 @@ beforeEach(() => {
     if (declared === null) {
       return Promise.reject(new TypeError('Failed to fetch'))
     }
-    if (url.endsWith('/app')) {
-      return Promise.resolve(
-        json({ ...declared, shared: sharedOf(declared), heads: headsOf(declared) }),
-      )
+    // a route is read in a variant with the query `variant`
+    const [path = '', query = ''] = url.split('?')
+    const variant = new URLSearchParams(query).get('variant')
+    if (path.endsWith('/app')) {
+      const given =
+        variant !== null && Object.hasOwn(variantApps, variant)
+          ? (variantApps[variant] ?? null)
+          : declared
+      const answer =
+        given === null
+          ? ({ ok: false, status: 422 } as unknown as Response)
+          : json({ ...given, shared: sharedOf(given, variant), heads: headsOf(given) })
+      const gate = variant === null ? null : appGate
+      return gate === null ? Promise.resolve(answer) : gate.then(() => answer)
     }
-    if (url.endsWith('/simulate')) {
+    if (path.endsWith('/simulate')) {
       if (hang !== null && init?.signal) {
         hang.push(init.signal)
         return new Promise<never>((_resolve, reject) => {
@@ -297,8 +325,9 @@ beforeEach(() => {
       }
       return Promise.resolve(json(run(body ?? {})))
     }
-    const id = url.split('/panels/')[1] ?? 'panelA'
-    const declaredKnobs = knobsOf[id]
+    const id = path.split('/panels/')[1] ?? 'panelA'
+    const declaredKnobs =
+      (variant === null ? undefined : variantKnobs[variant]?.[id]) ?? knobsOf[id]
     const answer = panelDeclaration(id)
     return Promise.resolve(
       json(declaredKnobs === undefined ? answer : { ...answer, axes: declaredKnobs }),
@@ -371,14 +400,14 @@ describe('the shell of an app', () => {
     expect(left.isConnected).toBe(false)
     expect(appCalls()).toHaveLength(1)
     // the new panels asked for themselves
-    expect(calls.some((one) => one.url.endsWith('/panels/panelB'))).toBe(true)
-    expect(calls.some((one) => one.url.endsWith('/panels/panelC'))).toBe(true)
+    expect(calls.some((one) => pathOf(one).endsWith('/panels/panelB'))).toBe(true)
+    expect(calls.some((one) => pathOf(one).endsWith('/panels/panelC'))).toBe(true)
   })
 
   it('passes the chosen variant to every panel of the page', async () => {
     const element = await shell({ page: 'pageB' })
     expect(simulations().map((one) => one.variant)).toEqual(['variantA', 'variantA'])
-    const read = calls.filter((one) => one.url.endsWith('/panels/panelB')).length
+    const read = calls.filter((one) => pathOf(one).endsWith('/panels/panelB')).length
     const select = part(element, '.variant-select') as HTMLSelectElement
     expect([...select.options].map((one) => one.value)).toEqual(['variantA', 'variantB'])
     select.value = 'variantB'
@@ -387,8 +416,14 @@ describe('the shell of an app', () => {
     await settled()
     const after = simulations().slice(2)
     expect(after.map((one) => one.variant)).toEqual(['variantB', 'variantB'])
-    // the declarations are not read again for a variant, only the SBML changes
-    expect(calls.filter((one) => one.url.endsWith('/panels/panelB')).length).toBe(read)
+    // the app and the declarations are read again in the variant, which they may differ by
+    expect(appCalls().map((one) => one.url.split('?')[1])).toEqual([undefined, 'variant=variantB'])
+    expect(
+      calls
+        .filter((one) => pathOf(one).endsWith('/panels/panelB'))
+        .slice(read)
+        .map((one) => one.url.split('?')[1]),
+    ).toEqual(['variant=variantB'])
     // and the choice stays while the page changes
     tabs(element)[0]?.click()
     await settled()
@@ -789,15 +824,15 @@ describe('the knobs the panels of a page share', () => {
     expect(placed(element, 'panelB').getAttribute('values')).toBe('{"knobA":1}')
     expect(placed(element, 'panelC').getAttribute('values')).toBe('{"knobA":1}')
     // the shell reads no declaration of a panel, the panel reads its own on every visit
-    expect(calls.filter((one) => one.url.endsWith('/panels/panelB'))).toHaveLength(2)
+    expect(calls.filter((one) => pathOf(one).endsWith('/panels/panelB'))).toHaveLength(2)
   })
 
   it('reads which knobs a page shares from the app and no declaration of a panel', async () => {
     const element = await shell({ page: 'pageB' })
     expect(shellKnobs(element)).toEqual(['knob-knobA'])
     // the only request of the shell is the app; each panel reads itself once
-    expect(calls.filter((one) => one.url.endsWith('/panels/panelB'))).toHaveLength(1)
-    expect(calls.filter((one) => one.url.endsWith('/panels/panelC'))).toHaveLength(1)
+    expect(calls.filter((one) => pathOf(one).endsWith('/panels/panelB'))).toHaveLength(1)
+    expect(calls.filter((one) => pathOf(one).endsWith('/panels/panelC'))).toHaveLength(1)
     expect(calls.filter((one) => !one.url.includes('/panels/')).map((one) => one.url)).toEqual([
       '/api-root/api/models/modelA/app',
     ])
@@ -926,7 +961,7 @@ describe('the knobs the panels of a page share', () => {
     let refused = true
     const stub = globalThis.fetch
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
-      if (url.endsWith('/panels/panelC') && refused) {
+      if ((url.split('?')[0] ?? '').endsWith('/panels/panelC') && refused) {
         refused = false
         return Promise.resolve({ ok: false, status: 500 } as Response)
       }
@@ -1058,5 +1093,128 @@ describe('the scenarios of a page', () => {
     await settled()
     expect(select(element).value).toBe('two')
     expect([...select(element).options].map((one) => one.value)).toEqual(['one', 'two', 'half'])
+  })
+})
+
+describe('the variant of the app', () => {
+  /** The shared knob of page B in a variant, a range knob of other bounds and another label. */
+  function narrowed(max: number, label: string): PanelAxis {
+    return { ...rangeKnob('knobA'), label, max, default: max / 2 }
+  }
+
+  /** Switch the variant with the switcher, as a reader does. */
+  async function choose(element: AppElement, variant: string): Promise<void> {
+    const select = part(element, '.variant-select') as HTMLSelectElement
+    select.value = variant
+    select.dispatchEvent(new Event('change'))
+    await settled()
+  }
+
+  /** Get the attribute of a placed panel. */
+  function attributeOf(element: AppElement, id: string, name: string): string | null {
+    return part(element, `sbmlsim-panel[panel="${id}"]`).getAttribute(name)
+  }
+
+  it('draws the controls of the variant it is switched to, read in that variant', async () => {
+    variantKnobs = {
+      variantB: { panelB: [narrowed(2, 'knob of B')], panelC: [narrowed(2, 'knob of B')] },
+    }
+    const element = await shell({ page: 'pageB' })
+    expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob A [mg]')
+    await choose(element, 'variantB')
+    expect(appCalls().map((one) => one.url)).toEqual([
+      '/api-root/api/models/modelA/app',
+      '/api-root/api/models/modelA/app?variant=variantB',
+    ])
+    expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob of B [mg]')
+    expect((part(element, '#knob-knobA') as HTMLInputElement).max).toBe('2')
+    expect(attributeOf(element, 'panelB', 'variant')).toBe('variantB')
+    // and back, and to B again, whose app was read and is drawn without a request
+    await choose(element, 'variantA')
+    expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob A [mg]')
+    expect(appCalls()).toHaveLength(3)
+    await choose(element, 'variantB')
+    expect(part(element, '.knobs .knob-label').textContent.trim()).toBe('knob of B [mg]')
+    expect(appCalls()).toHaveLength(3)
+  })
+
+  it('keeps the value of a shared knob the variant takes, and starts any other at its default', async () => {
+    variantKnobs = {
+      variantB: { panelB: [narrowed(2, 'knob of B')], panelC: [narrowed(2, 'knob of B')] },
+      variantC: { panelB: [narrowed(0.4, 'knob of C')], panelC: [narrowed(0.4, 'knob of C')] },
+    }
+    declared = {
+      ...app(),
+      variants: [
+        { id: 'variantA', label: 'Variant A' },
+        { id: 'variantB', label: 'Variant B' },
+        { id: 'variantC', label: 'Variant C' },
+      ],
+    }
+    const element = await shell({ page: 'pageB' })
+    const slider = part(element, '#knob-knobA') as HTMLInputElement
+    slider.value = '0.6'
+    slider.dispatchEvent(new Event('change'))
+    await settled()
+    // 0.6 is a value of the knob of B, from 0 to 2
+    await choose(element, 'variantB')
+    expect(attributeOf(element, 'panelB', 'values')).toBe('{"knobA":0.6}')
+    expect(attributeOf(element, 'panelC', 'values')).toBe('{"knobA":0.6}')
+    // and none of the knob of C, from 0 to 0.4, which starts at its default
+    await choose(element, 'variantC')
+    expect(attributeOf(element, 'panelB', 'values')).toBe('{"knobA":0.2}')
+    expect((part(element, '#knob-knobA') as HTMLInputElement).value).toBe('0.2')
+  })
+
+  it('draws no panel while it reads the app of a variant, and gives every panel the variant with its values at once', async () => {
+    let open: (() => void) | null = null
+    appGate = new Promise((resolve) => {
+      open = () => {
+        resolve()
+      }
+    })
+    const element = await shell({ page: 'pageB' })
+    const before = calls.length
+    await choose(element, 'variantB')
+    const grid = part(element, '.grid')
+    expect(grid.classList.contains('switching')).toBe(true)
+    expect(grid.getAttribute('aria-busy')).toBe('true')
+    // the panels keep the variant they draw, and the controls take no movement
+    expect(attributeOf(element, 'panelB', 'variant')).toBe('variantA')
+    expect((part(element, '#knob-knobA') as HTMLInputElement).disabled).toBe(true)
+    expect(calls.slice(before).filter((one) => pathOf(one).includes('/panels/'))).toEqual([])
+    ;(open as unknown as () => void)()
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(grid.classList.contains('switching')).toBe(false)
+    expect(attributeOf(element, 'panelB', 'variant')).toBe('variantB')
+    expect((part(element, '#knob-knobA') as HTMLInputElement).disabled).toBe(false)
+    // one declaration and one run per panel, both of the variant
+    for (const id of ['panelB', 'panelC']) {
+      const asked = calls.slice(before).filter((one) => pathOf(one).includes(`/panels/${id}`))
+      expect(asked.map((one) => one.url.split('?')[1] ?? 'none')).toEqual([
+        'variant=variantB',
+        'none',
+      ])
+      expect(asked[1]?.body?.variant).toBe('variantB')
+    }
+  })
+
+  it('draws no panel of the variant before when the app of a variant cannot be read', async () => {
+    variantApps = { variantB: null }
+    const element = await shell({ page: 'pageB' })
+    await choose(element, 'variantB')
+    const line = part(element, '.error[role="alert"]')
+    expect(line.textContent.trim()).toBe(
+      `${FAILURE_MESSAGES.http} The panels of the variant shown cannot be drawn.`,
+    )
+    expect(part(element, '.grid').classList.contains('switching')).toBe(true)
+    expect(attributeOf(element, 'panelB', 'variant')).toBe('variantA')
+    // back on the variant which is drawn, it is drawn again as it was
+    const before = calls.length
+    await choose(element, 'variantA')
+    expect(element.shadowRoot.querySelector('.error')).toBeNull()
+    expect(part(element, '.grid').classList.contains('switching')).toBe(false)
+    expect(calls.slice(before)).toEqual([])
   })
 })

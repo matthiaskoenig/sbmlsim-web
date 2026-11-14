@@ -106,8 +106,10 @@
  * the attribute `variant` show (`stale`); where a knob or the variant stands
  * elsewhere, the panel draws no figure and its line says that the figure of the
  * settings shown cannot be drawn, so it never shows a state no control shows.
- * A change of `endpoint`, `model` or `panel` after the panel started starts it
- * again (`restart`), so it never draws an answer of another one either.
+ * A change of `endpoint`, `model`, `panel` or `variant` after the panel started
+ * starts it again (`restart`), so it never draws an answer of another one
+ * either, nor a figure of the declaration of one variant and the study data of
+ * another.
  * `freeze()` is the one stop of a panel, the one a shell makes of the panels of
  * a page it leaves.
  *
@@ -170,7 +172,15 @@ import type {
 import { interpolate } from './interpolate'
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
-import { carries, hostValues, keepControlKeys, knobsOf, ownValue, shortNumber } from './knob'
+import {
+  carries,
+  hostValues,
+  keepControlKeys,
+  knobsOf,
+  ownValue,
+  shortNumber,
+  validValue,
+} from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
 import { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
 import type {
@@ -407,9 +417,9 @@ const props = defineProps({
   panel: { type: String, default: '' },
   /**
    * The variant of the model to simulate, which an app switches between; empty
-   * is the one the panel declares. Only the SBML which is integrated depends
-   * on it, so the declaration and the study data are not read again, and a
-   * change of it runs the simulation again at the values of the knobs.
+   * is the one the panel declares. The declaration and the study data are read
+   * in it, since they may differ by the variant, and a change of it starts the
+   * panel again in the new variant (`restart`).
    */
   variant: { type: String, default: '' },
   /**
@@ -602,10 +612,22 @@ const drawnVariant = ref('')
  */
 const gridded = ref<string | null>(null)
 /**
+ * Whether the panel dropped a figure it drew when its variant was switched,
+ * and has drawn none of the new variant since.
+ *
+ * A switch of the variant starts the panel again (`restart`), so the figure
+ * of the variant before is gone and not held; a run of the new variant which
+ * fails then says that the figure of the settings shown cannot be drawn, as a
+ * panel which held a figure of another state says it, and not only that the
+ * endpoint failed.
+ */
+const dropped = ref(false)
+/**
  * The study data of the panel, `null` until it arrived.
  *
- * It is read once for the life of the element: it is the data of a study and
- * depends on no knob, so a panel which has it never asks for it again.
+ * It is read once per declaration: it is the data of a study and depends on
+ * no knob, so a panel which has it never asks for it again until it reads its
+ * declaration again, for another variant or another panel.
  */
 const study = shallowRef<PanelDataSeries[] | null>(null)
 /** Where the pointer is, `null` while it is not over the plot box. */
@@ -621,6 +643,12 @@ let client: PanelClient | null = null
 let started = false
 /** The sequence of the latest request; an answer of another one is dropped. */
 let sequence = 0
+/**
+ * The start of the panel the reads in flight belong to, counted up by
+ * `restart`: a declaration, study data or a stored answer which arrives for a
+ * start before is of another variant, model or panel and is dropped.
+ */
+let generation = 0
 /** The request in flight, aborted when it is superseded or when the panel is frozen. */
 let flight: AbortController | null = null
 /** The scheduled simulation, cleared when it is superseded. */
@@ -1351,6 +1379,9 @@ const drawFailed = computed<boolean>(() => grid.value !== null && svg.value === 
  */
 const stale = computed<boolean>(() => {
   const answer = grid.value
+  if (failure.value !== null && answer === null && dropped.value) {
+    return true
+  }
   if (failure.value === null || answer === null) {
     return false
   }
@@ -1817,6 +1848,7 @@ async function simulate(gridId: string | null): Promise<void> {
     drawnVariant.value = sentVariant
     fromStore.value = false
     failure.value = null
+    dropped.value = false
     host?.dispatchEvent(
       new CustomEvent('sbmlsim-result', {
         detail: { provenance: answer.provenance, spec_hash: answer.spec_hash },
@@ -1874,8 +1906,15 @@ async function loadData(declared: PanelDeclaration): Promise<void> {
   if (talking === null || props.data === 'off' || dataOf(declared).length === 0) {
     return
   }
+  const own = generation
   try {
-    study.value = await attempt(() => talking.data(props.model, props.panel))
+    const series = await attempt(() =>
+      talking.data(props.model, props.panel, undefined, props.variant),
+    )
+    // the data of a declaration the panel no longer draws is no data of its figure
+    if (own === generation) {
+      study.value = series
+    }
   } catch {
     // a panel whose study data cannot be read is a panel of its curves alone
   }
@@ -1886,18 +1925,27 @@ async function loadData(declared: PanelDeclaration): Promise<void> {
  *
  * @returns when the first figure was drawn or the failure was resolved
  */
-async function load(): Promise<void> {
+async function load(kept: Record<string, number> = {}): Promise<void> {
   const talking = client
   if (talking === null) {
     return
   }
+  const own = generation
   try {
     const controller = new AbortController()
     flight = controller
-    const declared = await attempt(() => talking.panel(props.model, props.panel, controller.signal))
+    const declared = await attempt(() =>
+      talking.panel(props.model, props.panel, controller.signal, props.variant),
+    )
+    if (own !== generation) {
+      return
+    }
     flight = null
     declaration.value = declared
-    knobValues.value = withHost(knobsOf(declared), (one) => one.default)
+    knobValues.value = withHost(knobsOf(declared), (one) => {
+      const value = ownValue(kept, one.id)
+      return value !== undefined && validValue(one, value) ? value : one.default
+    })
     logY.value = initialLog(declared)
     await Promise.all([simulate(firstGridded(declared)), loadData(declared)])
   } catch (error) {
@@ -1918,8 +1966,12 @@ async function loadStored(): Promise<void> {
   if (talking === null || props.fallback === '') {
     return
   }
+  const own = generation
   try {
     const answer = await talking.stored(props.fallback)
+    if (own !== generation) {
+      return
+    }
     stored.value = answer
     drawStored(answer)
   } catch {
@@ -2194,18 +2246,32 @@ async function activate(): Promise<void> {
 /**
  * Start the panel again for other attributes of what it runs.
  *
- * The endpoint, the model and the panel are what a declaration, a run and the
- * study data are of, so an answer of the ones before is no figure of these:
- * everything read of them is dropped and read again. A panel which was not
- * started yet reads them when it is; a frozen panel reads them when it is
- * activated again.
+ * The endpoint, the model, the panel and the variant are what a declaration, a
+ * run and the study data are of, so an answer of the ones before is no figure
+ * of these: everything read of them is dropped and read again, and a read of
+ * the start before which arrives late is dropped as well (`generation`). The
+ * declaration of a panel may differ by the variant - its titles, its knobs, its
+ * study data, its derived values - so a switch of the variant reads it again
+ * like a switch of the panel does, and no figure is ever drawn with the
+ * declaration of one variant and the data or the knobs of another. Such a
+ * switch keeps the value of every knob of the panel's own which the new
+ * declaration declares and takes, and says, should its first run fail, that
+ * the figure of the settings shown cannot be drawn (`dropped`); the stored
+ * answer of the `fallback`, which is of the declared variant, is read again
+ * only for that variant. A panel which was not started yet reads them when it
+ * is; a frozen panel reads them when it is activated again.
+ *
+ * @param variant whether it is a switch of the variant alone
  */
-function restart(): void {
+function restart(variant = false): void {
   if (!started) {
     return
   }
+  const kept = variant ? { ...knobValues.value } : {}
+  dropped.value = variant && (dropped.value || (grid.value !== null && !fromStore.value))
   stopWork()
   sequence += 1
+  generation += 1
   pending.value = false
   declaration.value = null
   grid.value = null
@@ -2223,7 +2289,7 @@ function restart(): void {
     return
   }
   client = new PanelClient(props.endpoint, props.timeout)
-  void Promise.all([loadStored(), load()])
+  void Promise.all([variant && props.variant !== '' ? Promise.resolve() : loadStored(), load(kept)])
 }
 
 /**
@@ -2321,16 +2387,14 @@ watch(
 )
 
 /*
- * The curves of the other variant are another simulation of the same knobs.
- * It goes through `schedule`, so a shell which switches every panel of its
- * page at once and a reader who switches twice in a row pay one run each.
+ * The declaration of a panel may differ by the variant, so another variant
+ * starts the panel again: its declaration and its study data are read for
+ * that variant and its first run is of them (`restart`).
  */
 watch(
   () => props.variant,
   () => {
-    if (declaration.value !== null && !frozen.value) {
-      schedule(gridded.value)
-    }
+    restart(true)
   },
 )
 

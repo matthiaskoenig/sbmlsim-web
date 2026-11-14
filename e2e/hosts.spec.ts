@@ -263,6 +263,37 @@ test.describe('the app shell', () => {
     return app
   }
 
+  /**
+   * Give the HCTZ app a second variant, which the service does not know.
+   *
+   * The wire is what is under test, so the declaration names two variants and
+   * the service, which knows the one, answers what is read in the other as it
+   * answers the first: the app, a declaration and the study data in `impaired`
+   * are the ones without a variant, so the shell and the panels read them in
+   * the variant as they read a variant which differs.
+   */
+  async function twoVariants(page: Page): Promise<void> {
+    await page.route(
+      (url) => url.pathname === '/api/models/hctz/app',
+      async (route) => {
+        const response = await route.fetch({ url: route.request().url().replace(/\?.*$/, '') })
+        const body = (await response.json()) as Record<string, unknown>
+        body.variants = [
+          { id: 'default', label: 'Default' },
+          { id: 'impaired', label: 'Impaired' },
+        ]
+        await route.fulfill({ response, json: body })
+      },
+    )
+    await page.route(
+      (url) =>
+        url.pathname.startsWith('/api/models/hctz/panels/') && url.searchParams.has('variant'),
+      async (route) => {
+        await route.continue({ url: route.request().url().replace(/\?.*$/, '') })
+      },
+    )
+  }
+
   test('draws the navigation, the panels of a page and the footer from the declaration', async ({
     page,
   }) => {
@@ -683,15 +714,7 @@ test.describe('the app shell', () => {
   })
 
   test('draws no figure of the variant before when the run of a switch fails', async ({ page }) => {
-    await page.route('**/api/models/hctz/app', async (route) => {
-      const response = await route.fetch()
-      const body = (await response.json()) as Record<string, unknown>
-      body.variants = [
-        { id: 'default', label: 'Default' },
-        { id: 'impaired', label: 'Impaired' },
-      ]
-      await route.fulfill({ response, json: body })
-    })
+    await twoVariants(page)
     // the service knows one variant: the plasma panel cannot run the other,
     // the urine panel is answered without it
     await page.route('**/simulate', async (route) => {
@@ -783,15 +806,7 @@ test.describe('the app shell', () => {
     // the HCTZ project has one SBML file, so the app declares one variant; the
     // wire is what is under test here, so the declaration is given two and the
     // service, which knows only the one, answers the simulations without it
-    await page.route('**/api/models/hctz/app', async (route) => {
-      const response = await route.fetch()
-      const body = (await response.json()) as Record<string, unknown>
-      body.variants = [
-        { id: 'default', label: 'Default' },
-        { id: 'impaired', label: 'Impaired' },
-      ]
-      await route.fulfill({ response, json: body })
-    })
+    await twoVariants(page)
     const sent: (string | undefined)[] = []
     await page.route('**/simulate', async (route) => {
       const request = route.request().postDataJSON() as Record<string, unknown>
@@ -1152,5 +1167,44 @@ test.describe('the page of a patient', () => {
     await app.locator('#scenario').selectOption({ label: 'healthy, 25 mg' })
     await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(heavy[0])
     expect(await axesOf(app)).toEqual(axes)
+  })
+
+  test('switches the declaration on screen with the variant', async ({ page }) => {
+    const app = await openPage(page, 'hctz_variants', 'patient')
+    const titles = app.locator('sbmlsim-panel .title')
+    await expect(titles).toHaveText([
+      'Plasma concentration of a patient',
+      'Urinary excretion of a patient',
+    ])
+    // a clearance below both references, so the two derive other renal functions
+    await app.locator('#scenario').selectOption({ label: 'moderate impairment, 25 mg' })
+    await expect(app.locator('#knob-crcl')).toHaveValue('45')
+    await expect(app.locator('sbmlsim-panel').nth(0)).toHaveAttribute(
+      'values',
+      '{"crcl":45,"dose":25}',
+    )
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe('')
+    const first = await curvesOf(app)
+    await app.locator('.variant-select').selectOption({ label: 'reference 90 ml/min' })
+    await expect(titles).toHaveText([
+      'Plasma concentration of a patient (reference 90 ml/min)',
+      'Urinary excretion of a patient (reference 90 ml/min)',
+    ])
+    // the heads of the cards are the ones of that variant, and the knobs keep
+    // the values which are values of the knobs of that variant
+    await expect(app.locator('.reserve-title')).toHaveText([
+      'Plasma concentration of a patient (reference 90 ml/min)',
+      'Urinary excretion of a patient (reference 90 ml/min)',
+    ])
+    await expect(app.locator('#knob-crcl')).toHaveValue('45')
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe('')
+    await expect.poll(async () => (await curvesOf(app))[0]).not.toBe(first[0])
+    // and back, to the declaration and the curves of the first variant
+    await app.locator('.variant-select').selectOption({ label: 'reference 110 ml/min' })
+    await expect(titles).toHaveText([
+      'Plasma concentration of a patient',
+      'Urinary excretion of a patient',
+    ])
+    await expect.poll(async () => (await curvesOf(app))[0]).toBe(first[0])
   })
 })
