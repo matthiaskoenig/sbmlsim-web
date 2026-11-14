@@ -708,6 +708,10 @@ let reading = 0
  * controls do not show, for good, as a deck which passes over a slide leaves it.
  */
 let owed: string | null | undefined = undefined
+/** The read of the study data in flight, which a run does not stop and a freeze does. */
+let dataFlight: AbortController | null = null
+/** Whether a freeze stopped the read of the study data, which `activate()` reads again. */
+let dataOwed = false
 /**
  * What a run of the declaration which is read waits for before its answer is
  * drawn: its study data where that data holds the value axis (`framedBy`),
@@ -2113,9 +2117,11 @@ function schedule(gridId: string | null): void {
  * asked for, the overlay is a help on top of them, and a panel which cannot
  * draw it is a panel which draws its curves.
  *
- * The request carries no signal of its own. It is one request per element and
- * it bounds itself with the timeout of the client, so there is nothing a later
- * movement of a knob could supersede.
+ * It is one request per declaration, which no movement of a knob supersedes,
+ * so a run does not stop it; a freeze, a start for another variant, model or
+ * panel and the removal of the element do (`stopData`), so a request the
+ * service sheds is not sent again behind them, and a freeze owes the read to
+ * the next `activate()` (`dataOwed`).
  *
  * @param declared the declaration of the panel
  * @returns when the data arrived or failed to
@@ -2126,9 +2132,11 @@ async function loadData(declared: PanelDeclaration): Promise<void> {
     return
   }
   const own = generation
+  const controller = new AbortController()
+  dataFlight = controller
   try {
     const series = await attempt(() =>
-      talking.data(props.model, props.panel, undefined, props.variant),
+      talking.data(props.model, props.panel, controller.signal, props.variant),
     )
     // the data of a declaration the panel no longer draws is no data of its figure
     if (own === generation) {
@@ -2136,7 +2144,23 @@ async function loadData(declared: PanelDeclaration): Promise<void> {
     }
   } catch {
     // a panel whose study data cannot be read is a panel of its curves alone
+  } finally {
+    if (dataFlight === controller) {
+      dataFlight = null
+    }
   }
+}
+
+/**
+ * Stop the read of the study data in flight.
+ *
+ * @returns whether a read was stopped
+ */
+function stopData(): boolean {
+  const stopped = dataFlight !== null
+  dataFlight?.abort()
+  dataFlight = null
+  return stopped
 }
 
 /**
@@ -2610,9 +2634,16 @@ async function activate(): Promise<void> {
   if (started) {
     await nextTick()
     observe()
-    if (due !== undefined) {
-      await resume(due)
+    const declared = declaration.value
+    let data: Promise<void> = Promise.resolve()
+    if (dataOwed && declared !== null) {
+      // the data a freeze stopped is read again, and a first figure the data
+      // holds the axis of waits for it as it did before the freeze
+      dataOwed = false
+      data = loadData(declared)
+      framing = framedBy(declared) ? data : Promise.resolve()
     }
+    await Promise.all([due === undefined ? Promise.resolve() : resume(due), data])
     return
   }
   started = true
@@ -2677,6 +2708,8 @@ function restart(variant = false): void {
   heldDeclaration.value = variant ? (declaration.value ?? heldDeclaration.value) : null
   dropped.value = variant && (dropped.value || (grid.value !== null && !fromStore.value))
   stopWork()
+  stopData()
+  dataOwed = false
   sequence += 1
   generation += 1
   pending.value = false
@@ -2710,6 +2743,9 @@ function restart(variant = false): void {
 function freeze(): void {
   if (started && (flight !== null || timer !== null)) {
     owed = gridded.value
+  }
+  if (stopData()) {
+    dataOwed = true
   }
   stopWork()
   sequence += 1
@@ -2823,6 +2859,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopWork()
+  stopData()
   unobserve()
 })
 
@@ -2967,7 +3004,10 @@ defineExpose({ activate, freeze, reset })
         ></div>
         <!-- eslint-enable vue/no-v-html -->
         <p v-else-if="errorMessage === ''" class="pending">Loading the panel</p>
-        <p v-if="svg !== '' && !stale" :id="SUMMARY_ID" class="visually-hidden">
+        <!-- hidden: a screen reader reads it as the description of the slider,
+             which an element with `hidden` still is, and not a second time as
+             text after it -->
+        <p v-if="svg !== '' && !stale" :id="SUMMARY_ID" hidden>
           {{ figureSummary }}
         </p>
       </div>
@@ -3278,19 +3318,6 @@ defineExpose({ activate, freeze, reset })
   margin: 0;
   color: var(--_fg-soft);
   font-size: var(--_font-size-small);
-}
-
-/* the text a screen reader is given and a sighted reader sees as the figure */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  border: 0;
-  white-space: nowrap;
 }
 
 .error {

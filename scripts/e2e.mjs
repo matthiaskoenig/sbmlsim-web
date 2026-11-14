@@ -5,7 +5,7 @@
  * checkout is `SBMLSIM_REPO` (`../sbmlsim` without), and the pages are served
  * by it (`--static`), so the tests need that checkout, `uv` and Chrome. Where
  * the checkout is not there at its default place, a run on a machine of a
- * developer is skipped and says so; under continuous integration (`CI`) that
+ * developer is skipped and says so; under continuous integration (`CI=true`) that
  * is a failure, since the job of the end to end tests checks sbmlsim out and a
  * suite which skips there tests nothing, unless `SBMLSIM_E2E_OPTIONAL=1` says
  * that a job may run without it. A `SBMLSIM_REPO` which is set and wrong
@@ -28,7 +28,9 @@ if (!existsSync(join(repo, 'pyproject.toml'))) {
     process.exit(1)
   }
   const reason = `no sbmlsim checkout at ${repo} (set SBMLSIM_REPO)`
-  if (process.env.CI !== undefined && process.env.SBMLSIM_E2E_OPTIONAL !== '1') {
+  // `CI=true` (GitHub Actions and most others) or `CI=1`; `CI=false` is no CI
+  const ci = ['true', '1'].includes((process.env.CI ?? '').toLowerCase())
+  if (ci && process.env.SBMLSIM_E2E_OPTIONAL !== '1') {
     console.error(`e2e failed: ${reason}, which continuous integration needs`)
     process.exit(1)
   }

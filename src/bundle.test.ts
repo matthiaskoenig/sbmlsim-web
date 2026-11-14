@@ -102,6 +102,8 @@ describe('the bundle a page loads', () => {
     for (const name of ['sbmlsim-web.js', 'sbmlsim-web.umd.cjs', 'sbmlsim-web.iife.js']) {
       expect(built(name)).toContain('light-dark(')
       expect(built(name)).not.toContain('lightningcss')
+      // and the light table for a browser which does not know it
+      expect(built(name)).toMatch(/@supports not \(color: ?light-dark\(/)
     }
   })
 })

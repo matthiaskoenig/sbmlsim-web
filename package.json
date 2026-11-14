@@ -24,7 +24,8 @@
   "author": "Matthias König",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "!dist/types/*.ce.vue.d.ts"
   ],
   "main": "./dist/sbmlsim-web.umd.cjs",
   "module": "./dist/sbmlsim-web.js",

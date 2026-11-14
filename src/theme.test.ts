@@ -106,6 +106,19 @@ describe('the colours of the default theme', () => {
     expect(named.dark).toContain('color-scheme: dark;')
   })
 
+  it('give a browser without light-dark() the light table, so its figure keeps its curves', () => {
+    // a colour of `light-dark()` is invalid there, and an invalid stroke is none
+    const at = css.indexOf('@supports not (color: light-dark(rgb(0 0 0), rgb(255 255 255))) {')
+    expect(at).toBeGreaterThan(css.indexOf(':host {'))
+    const block = css.slice(at, css.indexOf("\n:host([theme='light'])", at))
+    for (const one of [...SURFACES, ...TEXT, ...LINES, ...RAMP]) {
+      const [light] = pair(one)
+      expect(block, one).toContain(`--_${one}: var(--sbmlsim-${one}, ${light});`)
+      expect(block, one).toContain(`--sbmlsim-${one}: ${light};`)
+    }
+    expect(block.slice(block.indexOf('{'))).not.toContain('light-dark(')
+  })
+
   it('give a figure out of its panel the light ramp as its fallback', () => {
     // a figure carries the value of its token as the fallback of `var()`, which
     // is what an SVG copied out of the panel is drawn with

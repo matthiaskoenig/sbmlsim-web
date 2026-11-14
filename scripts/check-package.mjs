@@ -3,9 +3,11 @@
  *
  * Every entry point `package.json` names - `main`, `module`, `types`, `unpkg`,
  * `jsdelivr` and every target of `exports` - exists and is in the files `npm
- * pack` ships, and the types a consumer reads import nothing of vue, which the
- * bundles inline and the package does not depend on: a consumer installs no
- * vue for the types and gets no second one beside its own.
+ * pack` ships, and no type file the package ships imports anything of vue,
+ * which the bundles inline and the package does not depend on: a consumer
+ * installs no vue for the types and gets no second one beside its own. The
+ * declarations `vue-tsc` writes for the components themselves import vue and
+ * are reached from no entry point, so `files` leaves them out of the package.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -36,6 +38,15 @@ for (const entry of entries) {
     problems.push(`${entry} is named by package.json and was not built`)
   } else if (!packed.includes(path)) {
     problems.push(`${entry} is named by package.json and is not packed`)
+  }
+}
+// every type file which is shipped, whether an entry point reaches it or not
+for (const file of packed.filter((one) => one.endsWith('.d.ts'))) {
+  const text = readFileSync(join(root, file), 'utf8')
+  for (const [, module] of text.matchAll(/(?:from|import\()\s*['"]([^'"]+)['"]/g)) {
+    if (module === 'vue' || module.startsWith('vue/') || module.startsWith('@vue/')) {
+      problems.push(`${file} is packed and imports ${module}`)
+    }
   }
 }
 if (Object.keys(pkg.dependencies ?? {}).includes('vue')) {

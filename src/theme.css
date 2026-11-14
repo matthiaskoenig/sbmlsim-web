@@ -177,6 +177,61 @@
 }
 
 /*
+ * A browser below the floor of the package, which does not know `light-dark()`
+ * (Chrome and Edge before 123, Firefox before 120, Safari before 17.5), would
+ * take every colour above for invalid: the text would inherit the colour of
+ * the page and the curves, the swatches and the markers would not be drawn at
+ * all. It gets the light table instead, whatever the scheme of the page, so
+ * its figure is the figure of a light page; `theme="dark"` still gives it the
+ * dark one.
+ */
+@supports not (color: light-dark(rgb(0 0 0), rgb(255 255 255))) {
+  :root {
+    --sbmlsim-bg: rgb(255 255 255);
+    --sbmlsim-bg-soft: rgb(246 247 249);
+    --sbmlsim-bg-card: rgb(255 255 255);
+    --sbmlsim-fg: rgb(27 31 36);
+    --sbmlsim-fg-soft: rgb(91 100 114);
+    --sbmlsim-line: rgb(227 230 234);
+    --sbmlsim-accent: rgb(59 91 219);
+    --sbmlsim-error: rgb(196 61 0);
+    --sbmlsim-training: rgb(47 158 68);
+    --sbmlsim-validation: rgb(28 126 214);
+    --sbmlsim-outlier: rgb(232 89 12);
+    --sbmlsim-excluded: rgb(134 142 150);
+    --sbmlsim-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+    --sbmlsim-ramp-1: rgb(68 1 84);
+    --sbmlsim-ramp-2: rgb(72 40 120);
+    --sbmlsim-ramp-3: rgb(62 73 137);
+    --sbmlsim-ramp-4: rgb(49 103 142);
+    --sbmlsim-ramp-5: rgb(38 130 142);
+    --sbmlsim-ramp-6: rgb(30 156 137);
+  }
+
+  :host {
+    --_bg: var(--sbmlsim-bg, rgb(255 255 255));
+    --_bg-soft: var(--sbmlsim-bg-soft, rgb(246 247 249));
+    --_bg-card: var(--sbmlsim-bg-card, rgb(255 255 255));
+    --_fg: var(--sbmlsim-fg, rgb(27 31 36));
+    --_fg-soft: var(--sbmlsim-fg-soft, rgb(91 100 114));
+    --_line: var(--sbmlsim-line, rgb(227 230 234));
+    --_accent: var(--sbmlsim-accent, rgb(59 91 219));
+    --_error: var(--sbmlsim-error, rgb(196 61 0));
+    --_training: var(--sbmlsim-training, rgb(47 158 68));
+    --_validation: var(--sbmlsim-validation, rgb(28 126 214));
+    --_outlier: var(--sbmlsim-outlier, rgb(232 89 12));
+    --_excluded: var(--sbmlsim-excluded, rgb(134 142 150));
+    --_shadow: var(--sbmlsim-shadow, 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%));
+    --_ramp-1: var(--sbmlsim-ramp-1, rgb(68 1 84));
+    --_ramp-2: var(--sbmlsim-ramp-2, rgb(72 40 120));
+    --_ramp-3: var(--sbmlsim-ramp-3, rgb(62 73 137));
+    --_ramp-4: var(--sbmlsim-ramp-4, rgb(49 103 142));
+    --_ramp-5: var(--sbmlsim-ramp-5, rgb(38 130 142));
+    --_ramp-6: var(--sbmlsim-ramp-6, rgb(30 156 137));
+  }
+}
+
+/*
  * The two schemes a host asks for by name, whatever the page says and whatever
  * an ancestor sets: these are the public tokens and the scheme on the host,
  * because `theme="light"` and `theme="dark"` are the one explicit opt-in of the

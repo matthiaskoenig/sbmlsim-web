@@ -89,6 +89,13 @@ export const BUSY_ATTEMPTS = 6
 /** The seconds a shed request waits for its next try where the answer names none. */
 const BUSY_WAIT = 2
 
+/**
+ * The fewest seconds a shed request waits for its next try: an answer which
+ * asks for no wait, `Retry-After: 0` or a date which is past, is no reason to
+ * send the requests of a page back to back into a service which sheds them.
+ */
+const LEAST_BUSY_WAIT = 0.5
+
 /** The most seconds a shed request waits for its next try, whatever the answer asks for. */
 const MOST_BUSY_WAIT = 10
 
@@ -736,7 +743,7 @@ class Shed {
     const text = (header ?? '').trim()
     const seconds = /^\d+$/.test(text) ? Number(text) : (Date.parse(text) - Date.now()) / 1000
     this.seconds = Number.isFinite(seconds)
-      ? Math.min(Math.max(seconds, 0), MOST_BUSY_WAIT)
+      ? Math.min(Math.max(seconds, LEAST_BUSY_WAIT), MOST_BUSY_WAIT)
       : BUSY_WAIT
   }
 }

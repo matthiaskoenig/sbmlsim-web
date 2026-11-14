@@ -37,6 +37,8 @@ interface Call {
   url: string
   /** The body of a POST, `null` for a GET. */
   body: SimulateRequest | null
+  /** The signal it was sent with, which the element aborts when it stops it. */
+  signal: AbortSignal | null
 }
 
 /** The range knob of the declaration, the one a grid runs over by default. */
@@ -543,7 +545,7 @@ beforeEach(() => {
     const url = String(input)
     const sent = typeof init?.body === 'string' ? init.body : ''
     const body = sent === '' ? null : (JSON.parse(sent) as SimulateRequest)
-    calls.push({ url, body })
+    calls.push({ url, body, signal: init?.signal ?? null })
     // a route is read in a variant with the query `variant`
     const [path = '', query = ''] = url.split('?')
     const variant = new URLSearchParams(query).get('variant')
@@ -866,12 +868,11 @@ describe('the layout and the theme', () => {
     // container, because a declaration beats what an element inherits
     const inside = await started({}, container)
     expect(getComputedStyle(part(inside, '.panel')).color).toBe('rgb(1 2 3)')
-    // the browser resolves the pair of the table against the scheme of the
-    // page, which happy-dom does not, so the token is read before it is resolved
+    // a browser resolves the pair of the table against the scheme of the page;
+    // happy-dom knows no `light-dark()` and so takes the light table a browser
+    // below the floor gets, and either way the token is the one of the design
     const outside = await started()
-    expect(getComputedStyle(outside).getPropertyValue('--_fg')).toContain(
-      'light-dark(rgb(27 31 36), rgb(230 233 238))',
-    )
+    expect(getComputedStyle(outside).getPropertyValue('--_fg')).toContain('rgb(27 31 36)')
   })
 
   it('keeps a rule of the page which matches the element out of the panel', async () => {
@@ -1393,7 +1394,7 @@ describe('a failure never reaches the page', () => {
     vi.useFakeTimers()
     globalThis.fetch = vi.fn((input: unknown, init?: RequestInit) => {
       const url = String(input)
-      calls.push({ url, body: null })
+      calls.push({ url, body: null, signal: init?.signal ?? null })
       return url.includes('/panels/') ? hangs(init) : served.stored().then(json)
     })
     const element = await mount({
@@ -1549,15 +1550,38 @@ describe('freeze and activate', () => {
     expect(dataCalls()).toHaveLength(1)
     expect(simulations()).toHaveLength(1)
     element.freeze()
+    // the freeze stops the read of the data as well, which the panel owes
+    expect(dataCalls()[0]?.signal?.aborted).toBe(true)
     data.release()
     await activated
     await settled()
     expect(figure(element)).toBe('')
     await element.activate()
     await settled()
-    expect(dataCalls()).toHaveLength(1)
+    expect(dataCalls()).toHaveLength(2)
     expect(simulations()).toHaveLength(2)
     expect(figure(element)).toContain('class="points" data-series="seriesA"')
+  })
+
+  it('stops the read of the study data of the variant before a switch', async () => {
+    // a read the service sheds is sent again after a while, which must not go
+    // on for a declaration the panel no longer draws
+    served.panel = () => Promise.resolve(withData())
+    const data = held(() => studyData())
+    served.data = data.route
+    const element = await mount({
+      endpoint: '/api-root',
+      model: 'modelA',
+      panel: 'panelA',
+      variant: 'variantA',
+    })
+    void element.activate()
+    await settled()
+    expect(dataCalls()).toHaveLength(1)
+    element.setAttribute('variant', 'variantB')
+    await settled()
+    expect(dataCalls()[0]?.signal?.aborted).toBe(true)
+    data.release()
   })
 
   it('runs the release a freeze dropped and the values a host set while it was frozen', async () => {
@@ -1770,6 +1794,8 @@ describe('the readout at the cursor', () => {
     const summary = part(element, `#${plotted.getAttribute('aria-describedby') ?? ''}`)
     expect(summary.textContent).toMatch(/curve A: highest [\d.]+ uM at 2 h, [\d.]+ uM at 2 h\./)
     expect(summary.textContent).toContain('arrow keys')
+    // it is read as the description of the slider and not again as text after it
+    expect(summary.hasAttribute('hidden')).toBe(true)
     plotted.dispatchEvent(new FocusEvent('blur'))
     await nextTick()
     expect(shadow(element).querySelector('.readout')).toBeNull()

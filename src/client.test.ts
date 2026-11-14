@@ -450,6 +450,29 @@ describe('the client of an endpoint', () => {
     expect(sent).toBe(1)
   })
 
+  it('waits for its next try also where the endpoint asks for no wait', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let sent = 0
+    serve(() => {
+      sent += 1
+      return Promise.resolve(
+        sent < 3 ? shed(sent === 1 ? '0' : 'Thu, 01 Jan 1970 00:00:00 GMT') : json(run()),
+      )
+    })
+    const call = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT).simulate('modelA', 'panelA', {})
+    await vi.advanceTimersByTimeAsync(400)
+    // no try back to back, neither after a wait of none nor after a past date
+    expect(sent).toBe(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sent).toBe(2)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(sent).toBe(2)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sent).toBe(3)
+    expect((await call).spec_hash).toBe('a'.repeat(64))
+  })
+
   it('stops the wait for the next try when its caller stops the request', async () => {
     vi.useFakeTimers()
     let sent = 0

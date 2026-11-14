@@ -1,10 +1,16 @@
 name: ci
 
 on:
+  # branches only: a tag runs this workflow once, through the publish workflow,
+  # which calls it for the commit of the tag before it publishes
   push:
+    branches: ['**']
   pull_request:
-  # the publish workflow runs this one for the commit of a tag before it publishes
   workflow_call:
+
+# the jobs read the repositories and write nothing
+permissions:
+  contents: read
 
 env:
   # The release of sbmlsim the end to end tests run against: its service
