@@ -21,7 +21,7 @@ sbmlsim-web needs an endpoint of **sbmlsim >= 0.24.0**, the first release whose 
 **Install.** A page loads one script, from a CDN or from the package:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-panel
   endpoint="https://models.example.org"
   model="MODEL"
@@ -38,7 +38,7 @@ npm install sbmlsim-web
 import 'sbmlsim-web' // registers <sbmlsim-panel> and <sbmlsim-app>
 ```
 
-The script is pinned to a release (`@0.1.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.1.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
+The script is pinned to a release (`@0.1.1`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.1.1` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
 
 **The endpoint.** A page of another origin than the service is answered only when the service allows its origin, once per origin of the pages which embed it:
 
@@ -53,7 +53,7 @@ A page served by the service itself (`--static DIR`, `endpoint=""`) is one origi
 ```toml
 # zensical.toml
 [project]
-extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.0/dist/sbmlsim-web.iife.js"]
+extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"]
 # optional: the panels take the background of the palette as their surface
 extra_css = ["sbmlsim.css"]
 ```
@@ -82,7 +82,7 @@ The palettes of the theme declare their colour scheme (`slate` is dark), and a p
     data-prevent-swipe
   ></sbmlsim-panel>
 </section>
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
 <script>
   const deck = new Reveal()
   const start = (slide) => {

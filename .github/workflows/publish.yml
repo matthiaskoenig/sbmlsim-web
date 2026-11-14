@@ -3,8 +3,9 @@ name: publish
 # A tag `vX.Y.Z` of a commit publishes that commit to npm, after the checks of
 # continuous integration passed for it, the end to end tests included. The
 # package is published with the provenance of npm, which ties it to this
-# workflow and this commit; the token of npm is the secret NPM_TOKEN (with
-# trusted publishing configured on npm for this workflow, the token can go).
+# workflow and this commit, through the trusted publishing of npm: npm accepts
+# the OIDC token of this workflow (`id-token: write`) for the package, so no
+# token of npm is stored anywhere (npm 11.5.1 or newer).
 on:
   push:
     tags:
@@ -39,8 +40,13 @@ jobs:
             exit 1
           fi
           test -f "release-notes/${version}.md" || { echo "release-notes/${version}.md is missing"; exit 1; }
+      - name: Check that npm publishes with trusted publishing
+        run: |
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) { console.error(`npm ${process.argv[1]} has no trusted publishing, 11.5.1 or newer has`); process.exit(1); }
+          ' "$(npm --version)"
       - run: npm ci
       - run: npm run build
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
