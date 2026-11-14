@@ -29,16 +29,18 @@ import type {
  *
  * `aborted` is the one which is no failure: it is what a request which was
  * superseded or stopped answers with, and the element which stopped it drops
- * it instead of showing it. `internal` is never thrown by the client; it is
- * the kind of a failure of the renderer itself.
+ * it instead of showing it. `busy` is a request the endpoint shed as long as
+ * the client retried it (`BUSY_ATTEMPTS`). `internal` is never thrown by the
+ * client; it is the kind of a failure of the renderer itself.
  */
 export type FailureKind =
-  'network' | 'timeout' | 'http' | 'contract' | 'body' | 'aborted' | 'internal'
+  'network' | 'timeout' | 'busy' | 'http' | 'contract' | 'body' | 'aborted' | 'internal'
 
 /** The one line a reader is shown per kind; none of them names a url or a host. */
 export const FAILURE_MESSAGES: Readonly<Record<FailureKind, string>> = {
   network: 'The simulation endpoint could not be reached.',
   timeout: 'The simulation endpoint did not answer in time.',
+  busy: 'The simulation endpoint is busy; move a control to try again.',
   http: 'The simulation endpoint refused the request.',
   contract: 'The simulation endpoint speaks another version of the panel contract.',
   body: 'The answer of the simulation endpoint could not be read.',
@@ -70,6 +72,25 @@ export const DEFAULT_TIMEOUT = 8000
 
 /** The smallest timeout which is taken as one; below it the default is used. */
 const LEAST_TIMEOUT = 1
+
+/**
+ * How often a request is sent which the endpoint sheds.
+ *
+ * An endpoint which holds as many requests of a model as it may answers one
+ * more at once with a 503 and a `Retry-After` (sbmlsim 0.24.0, "One model
+ * never stalls the others" of its `docs/serve.md`), which asks the client to
+ * send it again: a page of several panels, or several pages, can ask for more
+ * than that at once. The client sends it again after the time the answer asks
+ * for, with a jitter of up to half of it so the panels of a page do not come
+ * back together, and gives up after this many tries.
+ */
+export const BUSY_ATTEMPTS = 6
+
+/** The seconds a shed request waits for its next try where the answer names none. */
+const BUSY_WAIT = 2
+
+/** The most seconds a shed request waits for its next try, whatever the answer asks for. */
+const MOST_BUSY_WAIT = 10
 
 /**
  * Get the kind of an error which was caught anywhere in the element.
@@ -601,7 +622,37 @@ export class PanelClient {
   }
 
   /**
-   * Fetch one url and read its body as the payload of a contract.
+   * Fetch one url and read its body as the payload of a contract, sending it
+   * again while the endpoint sheds it (`BUSY_ATTEMPTS`).
+   *
+   * @param url the url
+   * @param contract the version the answer has to carry
+   * @param signal a signal which stops the request and the wait for its next try
+   * @param body the body of a POST, none for a GET
+   * @returns the parsed body
+   * @throws PanelRequestError as `fetchOnce`, and `busy` for a request which
+   *   was shed every time it was sent
+   */
+  private async fetchJson(
+    url: string,
+    contract: string,
+    signal: AbortSignal | undefined,
+    body?: SimulateRequest,
+  ): Promise<unknown> {
+    for (let attempt = 1; ; attempt += 1) {
+      const answer = await this.fetchOnce(url, contract, signal, body)
+      if (!(answer instanceof Shed)) {
+        return answer
+      }
+      if (attempt >= BUSY_ATTEMPTS) {
+        throw new PanelRequestError('busy')
+      }
+      await pause(answer.seconds * (1 + Math.random() / 2), signal)
+    }
+  }
+
+  /**
+   * Fetch one url once and read its body as the payload of a contract.
    *
    * The request carries no credential: a page of another origin may not send
    * one to the service anyway, and a panel is public data.
@@ -610,14 +661,14 @@ export class PanelClient {
    * @param contract the version the answer has to carry
    * @param signal a signal which stops the request
    * @param body the body of a POST, none for a GET
-   * @returns the parsed body
+   * @returns the parsed body, or `Shed` for a 503 which asks to be retried
    * @throws PanelRequestError of the kind `timeout` for a request which was
    *   not answered within `timeoutMs`, `aborted` for one the caller stopped,
    *   `network` for one which never reached the endpoint, `http` for a status
    *   which is no success, `contract` for a payload of another version and
    *   `body` for one which cannot be read
    */
-  private async fetchJson(
+  private async fetchOnce(
     url: string,
     contract: string,
     signal: AbortSignal | undefined,
@@ -644,6 +695,9 @@ export class PanelClient {
         signal: controller.signal,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
+      if (answer.status === 503 && answer.headers.has('retry-after')) {
+        return new Shed(answer.headers.get('retry-after'))
+      }
       if (!answer.ok) {
         throw new PanelRequestError('http')
       }
@@ -687,4 +741,50 @@ export class PanelClient {
     }
     return new PanelRequestError('network', error)
   }
+}
+
+/** A request the endpoint shed, with the seconds it asked the client to wait. */
+class Shed {
+  /** The seconds before the next try, at most `MOST_BUSY_WAIT`. */
+  readonly seconds: number
+
+  /**
+   * Read the `Retry-After` of a 503.
+   *
+   * @param header the header, seconds or an HTTP date; one which is neither is
+   *   `BUSY_WAIT`
+   */
+  constructor(header: string | null) {
+    const text = (header ?? '').trim()
+    const seconds = /^\d+$/.test(text) ? Number(text) : (Date.parse(text) - Date.now()) / 1000
+    this.seconds = Number.isFinite(seconds)
+      ? Math.min(Math.max(seconds, 0), MOST_BUSY_WAIT)
+      : BUSY_WAIT
+  }
+}
+
+/**
+ * Wait, unless the caller stops the request first.
+ *
+ * @param seconds how long
+ * @param signal the signal of the request
+ * @returns when the time is up
+ * @throws PanelRequestError of the kind `aborted` when the signal stops it
+ */
+function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new PanelRequestError('aborted'))
+      return
+    }
+    const stop = (): void => {
+      clearTimeout(timer)
+      reject(new PanelRequestError('aborted'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', stop)
+      resolve()
+    }, seconds * 1000)
+    signal?.addEventListener('abort', stop, { once: true })
+  })
 }

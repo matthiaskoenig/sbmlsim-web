@@ -1,18 +1,42 @@
 import { expect, test } from '@playwright/test'
-import type { Locator, Page } from '@playwright/test'
+import type { Locator, Page, Request } from '@playwright/test'
 
 /** The pages of the three hosts, as the endpoint serves them. */
 const HOSTS = ['plain.html', 'slides.html', 'docs.html']
 
-/** The simulation requests of a page, which the tests count. */
-function countSimulations(page: Page): { count: () => number } {
+/**
+ * Count the requests of a page which match, as the page asked for them.
+ *
+ * An endpoint which holds as many requests of a model as it may sheds one more
+ * with a 503, and the client sends it again (`BUSY_ATTEMPTS` of the client):
+ * a request which was shed is one the page asked for once, so it is not
+ * counted, whatever the load of the endpoint is while the tests run.
+ *
+ * @param page the page
+ * @param matches whether a request is one of those which are counted
+ * @returns the count so far
+ */
+function countAsked(page: Page, matches: (request: Request) => boolean): { count: () => number } {
   let n = 0
   page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().endsWith('/simulate')) {
+    if (matches(request)) {
       n += 1
     }
   })
+  page.on('response', (response) => {
+    if (response.status() === 503 && matches(response.request())) {
+      n -= 1
+    }
+  })
   return { count: () => n }
+}
+
+/** The simulation requests of a page, which the tests count. */
+function countSimulations(page: Page): { count: () => number } {
+  return countAsked(
+    page,
+    (request) => request.method() === 'POST' && request.url().endsWith('/simulate'),
+  )
 }
 
 /** The geometry of every curve of the figure, which changes when a curve does. */
@@ -277,6 +301,12 @@ test.describe('the app shell', () => {
     page.on('request', (request) => {
       if (request.url().endsWith(ends)) {
         urls.push(request.url())
+      }
+    })
+    // a request the endpoint shed is sent again and was asked for once (`countAsked`)
+    page.on('response', (response) => {
+      if (response.status() === 503 && response.url().endsWith(ends)) {
+        urls.splice(urls.indexOf(response.url()), 1)
       }
     })
     return { urls: () => urls }
@@ -1643,13 +1673,10 @@ test.describe('the page of a patient', () => {
     page,
   }) => {
     // the runs of the patient page, not of the page the demo opens on first
-    let runs = 0
-    page.on('request', (request) => {
-      if (request.method() === 'POST' && request.url().includes('/panels/patient_')) {
-        runs += 1
-      }
-    })
-    const simulations = { count: (): number => runs }
+    const simulations = countAsked(
+      page,
+      (request) => request.method() === 'POST' && request.url().includes('/panels/patient_'),
+    )
     const app = await openPage(page, 'hctz', 'patient')
     await expect.poll(simulations.count).toBe(2)
     const scenario = app.locator('#scenario')

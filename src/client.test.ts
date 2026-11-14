@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { DEFAULT_TIMEOUT, FAILURE_MESSAGES, PanelClient, PanelRequestError } from './client'
+import {
+  BUSY_ATTEMPTS,
+  DEFAULT_TIMEOUT,
+  FAILURE_MESSAGES,
+  PanelClient,
+  PanelRequestError,
+} from './client'
 import type { FailureKind } from './client'
 import type { PanelDeclaration, SimulateResponse } from './contract'
 
@@ -79,6 +85,7 @@ async function kindOf(call: Promise<unknown>): Promise<FailureKind | 'none'> {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -382,6 +389,77 @@ describe('the client of an endpoint', () => {
     const call = client.panel('modelA', 'panelA', controller.signal)
     controller.abort()
     expect(await kindOf(call)).toBe('aborted')
+  })
+
+  /** The 503 of an endpoint which sheds a request and asks for it again. */
+  function shed(retryAfter: string | null = '2'): Response {
+    const headers = new Headers(retryAfter === null ? {} : { 'retry-after': retryAfter })
+    return {
+      ok: false,
+      status: 503,
+      headers,
+      json: () => Promise.resolve({}),
+    } as unknown as Response
+  }
+
+  it('sends a request the endpoint shed again after the time it asks for', async () => {
+    vi.useFakeTimers()
+    // the jitter, which spreads the panels of a page, at its least
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let sent = 0
+    serve(() => {
+      sent += 1
+      return Promise.resolve(sent < 3 ? shed('2') : json(run()))
+    })
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    const call = client.simulate('modelA', 'panelA', {})
+    await vi.advanceTimersByTimeAsync(1900)
+    // the first try and nothing before the time the endpoint asked for
+    expect(sent).toBe(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sent).toBe(2)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(sent).toBe(3)
+    expect((await call).spec_hash).toBe('a'.repeat(64))
+  })
+
+  it('gives a request up which the endpoint sheds every time, and a 503 which asks for nothing at once', async () => {
+    vi.useFakeTimers()
+    let sent = 0
+    serve(() => {
+      sent += 1
+      return Promise.resolve(shed('3600'))
+    })
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    const call = kindOf(client.simulate('modelA', 'panelA', {}))
+    // the wait is bounded whatever the endpoint asks for
+    await vi.advanceTimersByTimeAsync(BUSY_ATTEMPTS * 15_000)
+    expect(await call).toBe('busy')
+    expect(sent).toBe(BUSY_ATTEMPTS)
+    sent = 0
+    serve(() => {
+      sent += 1
+      return Promise.resolve(shed(null))
+    })
+    expect(await kindOf(client.simulate('modelA', 'panelA', {}))).toBe('http')
+    expect(sent).toBe(1)
+  })
+
+  it('stops the wait for the next try when its caller stops the request', async () => {
+    vi.useFakeTimers()
+    let sent = 0
+    serve(() => {
+      sent += 1
+      return Promise.resolve(shed('2'))
+    })
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    const controller = new AbortController()
+    const call = kindOf(client.simulate('modelA', 'panelA', {}, controller.signal))
+    await vi.advanceTimersByTimeAsync(100)
+    controller.abort()
+    expect(await call).toBe('aborted')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(sent).toBe(1)
   })
 
   it('takes the default timeout for one which is no positive number', () => {
