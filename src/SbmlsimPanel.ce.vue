@@ -2533,13 +2533,25 @@ defineExpose({ activate, freeze, reset })
           @input="onInput(axis, $event)"
           @change="onChange(axis, $event)"
         />
+        <!-- disabled with the knobs while no declaration is read, the first one or
+             the one of a variant a reader switched to: a toggle made then would be
+             undone by the declaration, which sets the axis it declares -->
         <div class="options">
           <div class="control-line">
             <label class="toggle">
-              <input type="checkbox" :checked="logY" :disabled="frozen" @change="onLog($event)" />
+              <input
+                type="checkbox"
+                :checked="logY"
+                :disabled="frozen || declaration === null"
+                @change="onLog($event)"
+              />
               <span>logarithmic y</span>
             </label>
-            <ResetButton :disabled="frozen" :idle="!resettable" @reset="reset()" />
+            <ResetButton
+              :disabled="frozen || declaration === null"
+              :idle="!resettable"
+              @reset="reset()"
+            />
           </div>
         </div>
       </div>

@@ -1120,11 +1120,11 @@ onBeforeUnmount(() => {
 
 /* the controls of the knobs the panels of the page share, on a card as the
  * panels are, a row of controls (`control.css`) as the controls of a panel
- * are, so the Reset sits on the line of the selects; a control fills a phone
- * and is no wider than a reader reads a select at on a wide page. The padding
- * under the last line is the card's less the gap of a line, which that line
- * carries */
+ * are, so the Reset sits on the line of the selects. The padding under the
+ * last line is the card's less the gap of a line, which that line carries. The
+ * card is the container its lines are placed by (`.scenario ~ .knobs-reset`) */
 .knobs {
+  container: knobs / inline-size;
   padding: 12px 16px calc(12px - var(--_line-gap));
   border: 1px solid var(--_line);
   border-radius: var(--_radius);
@@ -1132,16 +1132,14 @@ onBeforeUnmount(() => {
   box-shadow: var(--_shadow);
 }
 
-/* columns of at least 200px, which hold the label of an example, and at most
- * 20rem, which a control fills: a control fills a phone and stays at 20rem on a
- * wide page, and its Reset follows it at a column gap or takes a line of its
- * own, but never width from a control of its line */
+/* as many columns as fit at 200px, which holds the label of an example, and
+ * which share the width of the card: the columns are counted at their minimum,
+ * so the card is filled from its left to its right edge at every width and a
+ * control fills a phone. A Reset takes a column of its own, beside the last
+ * control of its line or on a line of its own, but never width from a control
+ * of its line */
 .knobs.control-row {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 20rem));
-}
-
-.knobs .knob {
-  max-width: 20rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
 }
 
 /* the select of the scenarios takes a line of its own, above the knobs it
@@ -1152,6 +1150,18 @@ onBeforeUnmount(() => {
 
 .knobs > .scenario + * {
   grid-column-start: 1;
+}
+
+/* where the card holds two columns (2 x 200px and the gap of 16px between
+ * them), the Reset takes the second column of the line of the examples, beside
+ * their select and level with it, as it follows the last control of a line
+ * without examples, on a line which has the room and uses it otherwise for
+ * nothing; in one column it follows the knobs on a line of its own */
+@container knobs (min-width: 416px) {
+  .knobs > .scenario ~ .knobs-reset {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
 }
 
 /*

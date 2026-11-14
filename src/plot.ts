@@ -26,6 +26,9 @@
  * - the lines of a dimension get a legend up to `LEGEND_LIMIT` of them and a
  *   colour bar above it (`COLORBAR_FROM = 11` of `sbmlsim.plot.points`), whose
  *   tick labels are every point up to `MAX_TICKS` and every k-th above it,
+ * - a figure of one curve and no study data draws no legend, since its one
+ *   entry is the quantity its y label names already (`loneCurve`); a figure of
+ *   two or more curves, or with study data it draws or may draw, keeps it,
  * - a legend sits beside the plot or below it, packed into rows, whichever of
  *   the two leaves the larger plot box, so a figure which grows never loses
  *   plot at a width where the two trade places; it is laid out over the
@@ -2560,6 +2563,26 @@ function fitBox(
 }
 
 /**
+ * Get whether a figure is of one curve and no study data, which draws no legend.
+ *
+ * Its one entry would name the curve its y label names already, so the label
+ * is the whole legend of it. Study data the figure draws, and study data it may
+ * draw in another state of its knobs (`PlotSpec.declaredLegends`), keep the
+ * legend, so the entry of the curve does not come and go with the series and
+ * the plot box of such a figure is the one it has with its legend.
+ *
+ * @param spec the figure
+ * @returns whether the figure draws no legend for its curves
+ */
+function loneCurve(spec: PlotSpec): boolean {
+  return (
+    spec.series.length === 1 &&
+    (spec.points ?? []).length === 0 &&
+    (spec.declaredLegends ?? []).every((labels) => labels.length === 0)
+  )
+}
+
+/**
  * Lay a figure out, whatever was laid out before it.
  *
  * @param spec the figure
@@ -2583,7 +2606,7 @@ function layoutFor(spec: PlotSpec): Layout {
 
   const shapes = markerShapes(declared)
   const curveEntries: Entry[] = []
-  if (!hasColourbar) {
+  if (!hasColourbar && !loneCurve(spec)) {
     const unit = sharedUnit(series)
     for (const [index, one] of series.entries()) {
       curveEntries.push({

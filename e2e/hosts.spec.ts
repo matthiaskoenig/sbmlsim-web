@@ -241,6 +241,33 @@ test.describe('the legend', () => {
       }
     })
   }
+
+  for (const width of [WIDE, 390]) {
+    test(`is left out for one curve without study data, which the y label names, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto('/demo/app.html')
+      await page.evaluate(() => document.querySelector('sbmlsim-app')?.setAttribute('page', 'dose'))
+      const app = page.locator('sbmlsim-app')
+      const panels = app.locator('sbmlsim-panel')
+      await expect(panels.nth(1).locator('svg path.curve')).toBeVisible()
+      // the two panels of the page draw one curve each and no study data
+      for (const index of [0, 1]) {
+        const figure = panels.nth(index).locator('svg')
+        await expect(figure.locator('.legend-entry')).toHaveCount(0)
+        await expect(figure.locator('.axis.y .axis-label')).toHaveText(
+          index === 0 ? 'plasma concentration [uM]' : 'amount excreted [umol]',
+        )
+      }
+      // a panel of two curves, and one of a curve with study data, keep theirs
+      await page.evaluate(() =>
+        document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
+      )
+      await expect(panels.nth(0).locator('svg .legend-entry')).toHaveCount(2)
+      await expect(panels.nth(1).locator('svg .legend-entry').first()).toHaveText('urine')
+    })
+  }
 })
 
 test.describe('the app shell', () => {
@@ -477,10 +504,11 @@ test.describe('the app shell', () => {
       await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
       const shell = await row(app, '.knobs .reset')
       const [example, stops, dose] = shell.selects
-      // the Reset is centred on the line of the selects of its row, the dose's,
-      // or on a line of its own under it where the row has no column left for it
-      if (width >= 1280) {
-        expect(Math.abs(shell.reset - (dose?.centre ?? Number.NaN))).toBeLessThan(0.5)
+      // the Reset is centred on the line of the select of the examples, beside
+      // it, where the card holds two columns, and on a line of its own under the
+      // knobs where it holds one
+      if (width >= 768) {
+        expect(Math.abs(shell.reset - (example?.centre ?? Number.NaN))).toBeLessThan(0.5)
       } else {
         expect(shell.reset).toBeGreaterThan((dose?.centre ?? 0) + 12)
       }
@@ -672,6 +700,71 @@ test.describe('the app shell', () => {
     })
   }
 
+  for (const width of [390, 560, 640, 768, 1280]) {
+    test(`fills the card of the shared controls with as many columns as fit, and puts the Reset beside the examples, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/demo/app.html')
+      await page.evaluate(() =>
+        document.querySelector('sbmlsim-app')?.setAttribute('page', 'patient'),
+      )
+      const app = page.locator('sbmlsim-app')
+      await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(2)
+      const layout = await app.evaluate((element) => {
+        const root = element.shadowRoot
+        const bar = root?.querySelector('.knobs')
+        const style = bar === null || bar === undefined ? null : getComputedStyle(bar)
+        const box = (selector: string): DOMRect | undefined =>
+          root?.querySelector(selector)?.getBoundingClientRect()
+        const left =
+          (bar?.getBoundingClientRect().left ?? 0) +
+          (bar?.clientLeft ?? 0) +
+          Number.parseFloat(style?.paddingLeft ?? '0')
+        return {
+          inner:
+            (bar?.clientWidth ?? 0) -
+            Number.parseFloat(style?.paddingLeft ?? '0') -
+            Number.parseFloat(style?.paddingRight ?? '0'),
+          left,
+          columns: (style?.gridTemplateColumns ?? '').split(' ').map(Number.parseFloat),
+          gap: Number.parseFloat(style?.columnGap ?? '0'),
+          scenario: box('.knobs > .scenario select'),
+          knobs: [...(root?.querySelectorAll('.knobs > .knob:not(.scenario) select') ?? [])].map(
+            (one) => one.getBoundingClientRect(),
+          ),
+          reset: box('.knobs-reset button'),
+        }
+      })
+      // the columns are counted at their minimum, 200px, and share the card
+      const count = Math.max(1, Math.floor((layout.inner + layout.gap) / (200 + layout.gap)))
+      expect(layout.columns).toHaveLength(count)
+      const track = (layout.inner - (count - 1) * layout.gap) / count
+      for (const column of layout.columns) {
+        expect(column).toBeCloseTo(track, 0)
+      }
+      // a control is as wide as its column
+      for (const one of [layout.scenario, ...layout.knobs]) {
+        expect(one?.width ?? 0).toBeCloseTo(track, 0)
+      }
+      const reset = layout.reset
+      const scenario = layout.scenario
+      if (reset === undefined || scenario === undefined) {
+        throw new Error('no Reset or no examples')
+      }
+      const centre = (one: DOMRect): number => (one.top + one.bottom) / 2
+      if (count >= 2) {
+        // beside the select of the examples, at the start of the second column
+        expect(Math.abs(centre(reset) - centre(scenario))).toBeLessThan(1)
+        expect(reset.left).toBeCloseTo(layout.left + track + layout.gap, 0)
+      } else {
+        // on a line of its own, under the knobs
+        const last = layout.knobs.at(-1)
+        expect(reset.top).toBeGreaterThan(last?.bottom ?? Number.POSITIVE_INFINITY)
+      }
+    })
+  }
+
   for (const width of [390, 1024, 1280]) {
     test(`fits a card to its panel and a shared control to the page at ${String(width)} px`, async ({
       page,
@@ -712,8 +805,10 @@ test.describe('the app shell', () => {
       for (const left of sizes.cells) {
         expect(left).toBeCloseTo(0, 0)
       }
-      // a control fills a phone and stays at 20rem on a wide page
-      expect(sizes.knob).toBeCloseTo(Math.min(sizes.inner, 320), 0)
+      // a control fills its column, of which the card holds as many as fit at
+      // 200px and which share its width
+      const count = Math.max(1, Math.floor((sizes.inner + 16) / 216))
+      expect(sizes.knob).toBeCloseTo((sizes.inner - (count - 1) * 16) / count, 0)
     })
   }
 

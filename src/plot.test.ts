@@ -170,7 +170,7 @@ function chromeLike(text: string, size: number): number {
 }
 
 /**
- * The figure of a small spec, byte for byte.
+ * The figure of a small spec of one curve, byte for byte, which draws no legend.
  *
  * It is the pin of every caller which hands the renderer nothing but what it
  * draws: a spec without `yLimits` and without `declaredLegends` draws these
@@ -181,7 +181,18 @@ function chromeLike(text: string, size: number): number {
  * when the renderer changes its geometry on purpose, which the figure of the
  * change then has to show.
  */
-const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="69" y="107" text-anchor="start" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="119" y="107" text-anchor="start" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="170" y="107" text-anchor="start" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="221" y="107" text-anchor="start" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="70.03" x2="64" y2="70.03"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="70" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="43.97" x2="64" y2="43.97"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="44" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="18" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 70.03 L173.45 43.97 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="116.74" y1="143" x2="134.74" y2="143"/><text x="140.74" y="143" dominant-baseline="central">Curve 1</text></g></g></svg>`
+const PINNED = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-118"><rect x="64" y="14" width="168" height="104"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="118" x2="232" y2="118"/><g class="tick"><line x1="71.64" y1="118" x2="71.64" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="69" y="125" text-anchor="start" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="118" x2="122.55" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="119" y="125" text-anchor="start" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="118" x2="173.45" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="170" y="125" text-anchor="start" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="118" x2="224.36" y2="122"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="221" y="125" text-anchor="start" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="149" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="118"/><g class="tick"><line x1="60" y1="113.27" x2="64" y2="113.27"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="113" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="81.76" x2="64" y2="81.76"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="82" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="50.24" x2="64" y2="50.24"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="50" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="18.73" x2="64" y2="18.73"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="19" text-anchor="end" dominant-baseline="central">4</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="66" transform="rotate(-90 8 66)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-118)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 113.27 L122.55 81.76 L173.45 50.24 L224.36 18.73"/></g></svg>`
+
+/**
+ * The figure of the same spec of two curves, byte for byte, which keeps its
+ * legend.
+ *
+ * A figure of one curve and no study data draws no legend (`PINNED`), and
+ * every other figure is laid out and drawn as it was before that rule: these
+ * are the bytes the renderer drew for this spec before it, so a figure which
+ * keeps its legend keeps its frame and the room its legend reserves.
+ */
+const PINNED_TWO = `<svg xmlns="http://www.w3.org/2000/svg" class="sbmlsim-plot" width="240" height="160" viewBox="0 0 240 160" role="img" style="font-family:var(--sbmlsim-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif);font-size:var(--sbmlsim-font-size, 12px)"><title>value [mM] over time [h]</title><defs><clipPath id="sbmlsim-plot-clip-64-14-232-100"><rect x="64" y="14" width="168" height="86"/></clipPath></defs><rect class="background" x="0" y="0" width="240" height="160" style="fill:var(--sbmlsim-figure-bg, transparent)"/><g class="axis x" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="100" x2="232" y2="100"/><g class="tick"><line x1="71.64" y1="100" x2="71.64" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="69" y="107" text-anchor="start" dominant-baseline="hanging">0</text></g><g class="tick"><line x1="122.55" y1="100" x2="122.55" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="119" y="107" text-anchor="start" dominant-baseline="hanging">1</text></g><g class="tick"><line x1="173.45" y1="100" x2="173.45" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="170" y="107" text-anchor="start" dominant-baseline="hanging">2</text></g><g class="tick"><line x1="224.36" y1="100" x2="224.36" y2="104"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="221" y="107" text-anchor="start" dominant-baseline="hanging">3</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="148" y="131" text-anchor="middle">time [h]</text></g><g class="axis y" style="stroke:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke-width:var(--sbmlsim-axis-width, 1px);fill:none;font-size:var(--sbmlsim-font-size-small, 11px)"><line class="axis-line" x1="64" y1="14" x2="64" y2="100"/><g class="tick"><line x1="60" y1="96.09" x2="64" y2="96.09"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="96" text-anchor="end" dominant-baseline="central">1</text></g><g class="tick"><line x1="60" y1="76.55" x2="64" y2="76.55"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="77" text-anchor="end" dominant-baseline="central">2</text></g><g class="tick"><line x1="60" y1="57" x2="64" y2="57"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="57" text-anchor="end" dominant-baseline="central">3</text></g><g class="tick"><line x1="60" y1="37.45" x2="64" y2="37.45"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="37" text-anchor="end" dominant-baseline="central">4</text></g><g class="tick"><line x1="60" y1="17.91" x2="64" y2="17.91"/><text style="fill:var(--sbmlsim-fg-soft, rgb(91 100 114));stroke:none" x="57" y="18" text-anchor="end" dominant-baseline="central">5</text></g><text class="axis-label" style="fill:var(--sbmlsim-fg, rgb(27 31 36));stroke:none;font-size:var(--sbmlsim-font-size, 12px)" x="8" y="57" transform="rotate(-90 8 57)" text-anchor="middle" dominant-baseline="hanging">value [mM]</text></g><g class="data" clip-path="url(#sbmlsim-plot-clip-64-14-232-100)"><path class="curve" data-series="curve1" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 96.09 L122.55 76.55 L173.45 57 L224.36 37.45"/><path class="curve" data-series="curve2" style="stroke:var(--sbmlsim-ramp-6, rgb(155 217 60));stroke-width:var(--sbmlsim-curve-width, 1.8px);fill:none" d="M71.64 76.55 L122.55 57 L173.45 37.45 L224.36 17.91"/></g><g class="legend below" style="fill:var(--sbmlsim-fg, rgb(27 31 36));font-size:var(--sbmlsim-font-size-small, 11px)"><g class="legend-entry" data-series="curve1"><line class="swatch" style="stroke:var(--sbmlsim-ramp-1, rgb(68 1 84));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="79.48" y1="143" x2="97.48" y2="143"/><text x="103.48" y="143" dominant-baseline="central">Curve 1</text></g><g class="legend-entry" data-series="curve2"><line class="swatch" style="stroke:var(--sbmlsim-ramp-6, rgb(155 217 60));stroke-width:var(--sbmlsim-curve-width, 1.8px)" x1="154" y1="143" x2="172" y2="143"/><text x="178" y="143" dominant-baseline="central">Curve 2</text></g></g></svg>`
 
 /** The spec `PINNED` was drawn from. */
 function pinned(): PlotSpec {
@@ -201,6 +212,32 @@ describe('plotSvg', () => {
     expect(plotSvg(pinned())).toBe(PINNED)
     // the table is the measure of a spec which carries none
     expect(plotSvg({ ...pinned(), measure: tableMeasure })).toBe(PINNED)
+    expect(plotSvg({ ...pinned(), series: [series(1), series(2)] })).toBe(PINNED_TWO)
+  })
+
+  it('draws no legend for one curve and no study data, whose y label names it', () => {
+    const svg = plotSvg(pinned())
+    expect(svg).not.toContain('class="legend')
+    expect(texts(svg)).toContain('value [mM]')
+    expect(texts(svg)).not.toContain('Curve 1')
+  })
+
+  it('keeps the legend of one curve with study data, drawn or declared', () => {
+    const point = { id: 'study', label: 'Study', curve: 'curve1', x: [1], y: [2] }
+    const drawn = plotSvg({ ...pinned(), points: [point] })
+    expect(texts(drawn)).toEqual(expect.arrayContaining(['Curve 1', 'Study']))
+    // the study data of another state of the knobs keeps the entry of the curve
+    // and the room of its own, so the box does not move when it arrives
+    const declared = { ...pinned(), declaredLegends: [['Study']] }
+    expect(texts(plotSvg(declared))).toContain('Curve 1')
+    expect(plotGeometry(declared).box).toEqual(plotGeometry({ ...declared, points: [point] }).box)
+    // a declaration of no series at all is no study data
+    expect(plotSvg({ ...pinned(), declaredLegends: [[]] })).toBe(PINNED)
+  })
+
+  it('keeps the legend of two curves', () => {
+    const svg = plotSvg({ ...pinned(), series: [series(1), series(2)] })
+    expect(texts(svg)).toEqual(expect.arrayContaining(['Curve 1', 'Curve 2']))
   })
 
   it('draws one path per series', () => {
@@ -1631,7 +1668,13 @@ describe('a row of the band below the plot', () => {
     // a row is centred on the plot as the label of the x axis is: the width it
     // is centred by ends where its last label ends, so a row of one entry has
     // its swatch and its label at the same distance from the two ends of the plot
-    const figure = spec(1, { width: 390, series: [{ ...series(1), label: 'urine' }] })
+    // a curve with study data of another state of the knobs, so its legend is
+    // drawn with the one entry of the curve
+    const figure = spec(1, {
+      width: 390,
+      series: [{ ...series(1), label: 'urine' }],
+      declaredLegends: [['study']],
+    })
     const svg = plotSvg(figure)
     expect(svg).toContain('class="legend below"')
     const start = Number(/<line class="swatch" [^>]*\sx1="([^"]*)"/.exec(svg)?.[1])
@@ -1759,7 +1802,7 @@ describe('the measure of the text', () => {
     // label which one line holds in the table
     const label = 'time after the first dose [h]'
     const lines = (measure: TextMeasure): string[] => {
-      const svg = plotSvg({ ...spec(1, { xLabel: label, width: 260, height: 200 }), measure })
+      const svg = plotSvg({ ...spec(2, { xLabel: label, width: 260, height: 200 }), measure })
       const axis = (svg.split('<g class="axis ')[1] ?? '').split('<g class="data"')[0] ?? ''
       return [...axis.matchAll(/<text class="axis-label"[^>]*>([^<]*)<\/text>/g)].map(
         (one) => one[1] ?? '',

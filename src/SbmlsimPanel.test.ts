@@ -1940,10 +1940,22 @@ describe('the variant of the model', () => {
     const held = part(element, '.provenance.held')
     expect(held.textContent.trim()).toBe(foot)
     expect(held.getAttribute('aria-hidden')).toBe('true')
+    // the options are disabled with the knobs: a toggle of the axis made now
+    // would be undone by the declaration the panel reads
+    const disabled = (): boolean[] =>
+      [
+        ...shadow(element).querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+          '.knob select, .knob input, .options input, .options button',
+        ),
+      ].map((one) => one.disabled)
+    expect(shadow(element).querySelectorAll('.options input, .options button')).toHaveLength(2)
+    expect(disabled().every(Boolean)).toBe(true)
     ;(release as unknown as () => void)()
     await settled()
     expect(shadow(element).querySelector('.provenance.held')).toBeNull()
     expect(textOf(element, '.provenance')).not.toBe('')
+    const options = shadow(element).querySelector<HTMLInputElement>('.options input')
+    expect(options?.disabled).toBe(false)
   })
 
   it('shows the head it is given until it has read its declaration', async () => {
