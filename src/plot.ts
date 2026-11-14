@@ -246,6 +246,15 @@ const MAX_TICKS = 12
 /** The decimals a coordinate of the output carries. */
 const COORD_DECIMALS = 2
 
+/** The most decimals of a plain tick label; an axis which needs more is exponential. */
+const PLAIN_DECIMALS = 6
+
+/** The digits after the point of the mantissa of an exponential tick label at least. */
+const EXPONENTIAL_DIGITS = 2
+
+/** The most digits a tick label grows to, past which a double has none to tell apart. */
+const MOST_DIGITS = 16
+
 /** The anchors of the colour ramp: viridis over its first 85 %, as rgb. */
 const RAMP = [
   'rgb(68 1 84)',
@@ -654,24 +663,67 @@ function coord(value: number): string {
  * Write a number of a label.
  *
  * @param value the number
- * @param decimals the decimals it carries, at most six
+ * @param digits the decimals it carries in the plain form, or the digits after
+ *   the point of its mantissa in the exponential form
  * @param exponential whether it is written in the exponential form, which is
  *   decided for a whole axis and not for one of its ticks
- * @returns it without trailing zeros, in the exponential form of three
- *   significant digits where that is asked for; 0 is `0` in either form
+ * @returns it without trailing zeros; 0 is `0` in either form
  */
-function formatNumber(value: number, decimals: number, exponential: boolean): string {
+function formatNumber(value: number, digits: number, exponential: boolean): string {
   if (!Number.isFinite(value)) {
     return '0'
   }
   if (value === 0) {
     return '0'
   }
-  const text = exponential
-    ? value.toExponential(2)
-    : value.toFixed(clamp(Math.round(decimals), 0, 6))
+  const kept = clamp(Math.round(digits), 0, MOST_DIGITS)
+  const text = exponential ? value.toExponential(kept) : value.toFixed(kept)
   const short = text.replace(/(\.\d*?)0+(?=$|e)/, '$1').replace(/\.(?=$|e)/, '')
   return short === '-0' ? '0' : short
+}
+
+/**
+ * Write the tick labels of an axis.
+ *
+ * The labels carry the precision the axis needs and no more: the decimals of
+ * its step in the plain form (`tickDecimals`) and two digits after the point of
+ * the mantissa in the exponential form, each grown by one digit at a time
+ * until no two neighbouring ticks of different values read the same. An axis
+ * over 123456 to 123466 is no six labels `1.23e+5` but `1.23456e+5` to
+ * `1.23466e+5`, and one over 0.001 to 0.001001 no three `0.001` and three
+ * `0.001001` but its ticks in the exponential form, which a plain label would
+ * need more than `PLAIN_DECIMALS` decimals for. The notation still belongs to
+ * the axis (`exponentialTicks`), so its labels never mix the two forms.
+ *
+ * @param ticks the ticks of the axis, in their order
+ * @returns the label of each tick, in the same order
+ */
+function tickLabels(ticks: number[]): string[] {
+  const decimals = tickDecimals(ticks)
+  const exponential = exponentialTicks(ticks) || decimals > PLAIN_DECIMALS
+  let digits = exponential ? EXPONENTIAL_DIGITS : decimals
+  let labels = ticks.map((value) => formatNumber(value, digits, exponential))
+  while (digits < MOST_DIGITS && !distinctLabels(ticks, labels)) {
+    digits += 1
+    labels = ticks.map((value) => formatNumber(value, digits, exponential))
+  }
+  return labels
+}
+
+/**
+ * Get whether neighbouring ticks of different values have different labels.
+ *
+ * @param ticks the ticks of an axis, in their order
+ * @param labels their labels
+ * @returns whether no two neighbours of different values read the same
+ */
+function distinctLabels(ticks: number[], labels: string[]): boolean {
+  for (let index = 1; index < ticks.length; index += 1) {
+    if (ticks[index] !== ticks[index - 1] && labels[index] === labels[index - 1]) {
+      return false
+    }
+  }
+  return true
 }
 
 /**
@@ -1337,7 +1389,8 @@ function exponentialTicks(ticks: number[]): boolean {
  *
  * @param ticks the ticks of the axis
  * @returns the decimals of the smallest step between two of them and of the
- *   smallest of them, at most six
+ *   smallest of them, which `tickLabels` writes in the exponential form where
+ *   they are more than `PLAIN_DECIMALS`
  */
 function tickDecimals(ticks: number[]): number {
   let step = Number.POSITIVE_INFINITY
@@ -1362,7 +1415,7 @@ function tickDecimals(ticks: number[]): number {
     Math.ceil(-Math.log10(step)),
     Number.isFinite(smallest) ? Math.ceil(-Math.log10(smallest)) : 0,
   )
-  return clamp(needed, 0, 6)
+  return clamp(needed, 0, MOST_DIGITS)
 }
 
 /**
@@ -1706,8 +1759,7 @@ function axisGroup(
   room: number,
   type: Lettering,
 ): string {
-  const decimals = tickDecimals(axis.ticks)
-  const exponential = exponentialTicks(axis.ticks)
+  const labels = tickLabels(axis.ticks)
   const line = horizontal
     ? tag('line', {
         class: 'axis-line',
@@ -1724,8 +1776,9 @@ function axisGroup(
         y2: coord(box.y1),
       })
   const ticks = axis.ticks
-    .filter((value) => axis.drawable(value))
-    .map((value) => {
+    .map((value, index) => ({ value, label: labels[index] ?? '' }))
+    .filter(({ value }) => axis.drawable(value))
+    .map(({ value, label }) => {
       const at = axis.position(value)
       const mark = horizontal
         ? tag('line', {
@@ -1742,7 +1795,6 @@ function axisGroup(
           })
       // every tick label is anchored on a whole pixel (`labelStart`): an x label
       // at the start it is centred from, a y label at its end and its middle
-      const label = formatNumber(value, decimals, exponential)
       const written = horizontal
         ? text(label, {
             style: `fill:${token('fg-soft')};stroke:none`,
@@ -2279,12 +2331,12 @@ function labelStart(at: number, width: number): number {
  *   at least `TICK_GAP` apart
  */
 function tickLabelsClear(axis: Axis, type: Lettering): boolean {
-  const decimals = tickDecimals(axis.ticks)
-  const exponential = exponentialTicks(axis.ticks)
+  const labels = tickLabels(axis.ticks)
   const spans = axis.ticks
-    .filter((value) => axis.drawable(value))
-    .map((value) => {
-      const width = type.measure(formatNumber(value, decimals, exponential), type.small)
+    .map((value, index) => ({ value, label: labels[index] ?? '' }))
+    .filter(({ value }) => axis.drawable(value))
+    .map(({ value, label }) => {
+      const width = type.measure(label, type.small)
       const from = labelStart(axis.position(value), width)
       return { from, to: from + width }
     })
@@ -2323,17 +2375,16 @@ function tickReach(
   type: Lettering,
 ): { from: number; to: number } {
   const axis = xAxisOf(xs, from, to, ticks)
-  const decimals = tickDecimals(axis.ticks)
-  const exponential = exponentialTicks(axis.ticks)
+  const labels = tickLabels(axis.ticks)
   const span = axis.limits.high - axis.limits.low
   let least = Number.NEGATIVE_INFINITY
   let most = Number.POSITIVE_INFINITY
-  for (const value of axis.ticks) {
+  for (const [index, value] of axis.ticks.entries()) {
     if (!axis.drawable(value)) {
       continue
     }
     // half the label and the half pixel a label snapped to a whole pixel moves by
-    const half = type.measure(formatNumber(value, decimals, exponential), type.small) / 2 + SNAP
+    const half = type.measure(labels[index] ?? '', type.small) / 2 + SNAP
     // the share of `axisOf`, so the solved end puts the tick where it is drawn
     const share = span > 0 ? (value - axis.limits.low) / span : 0.5
     if (share > 0) {
@@ -2371,11 +2422,8 @@ function yTickClear(
   type: Lettering,
 ): number {
   const axis = axisOf(ys, log, 1, 0, count)
-  const decimals = tickDecimals(axis.ticks)
-  const exponential = exponentialTicks(axis.ticks)
-  const labels = axis.ticks
-    .filter((value) => axis.drawable(value))
-    .map((value) => formatNumber(value, decimals, exponential))
+  const written = tickLabels(axis.ticks)
+  const labels = written.filter((_, index) => axis.drawable(axis.ticks[index] ?? Number.NaN))
   return PAD + lines * type.axisLine + LABEL_GAP + widest(labels, type) + LABEL_GAP + TICK
 }
 

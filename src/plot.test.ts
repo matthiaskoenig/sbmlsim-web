@@ -1577,6 +1577,9 @@ describe('the room the y tick labels keep', () => {
     [0, 150000],
     [-170000, 0],
     [0, 1440],
+    // a small span against a large value, whose labels grow digits to stay apart
+    [123456, 123466],
+    [0.001, 0.001001],
   ]
 
   /** A font a third wider than the table. */
@@ -2566,4 +2569,98 @@ describe('the box solved for the ticks it draws', () => {
     expect(lastTickEnd(svg, tableMeasure, LARGE.small)).toBeLessThanOrEqual(220 - PAD + 0.01)
     expect(marginFits(figure).map((fit) => fit.candidate)).toEqual([false, true])
   })
+})
+
+describe('the precision of the tick labels', () => {
+  /** The labels of the ticks of an axis group, `x` or `y`, in their order. */
+  function axisTicks(svg: string, which: 'x' | 'y'): string[] {
+    const after = svg.split(`<g class="axis ${which}"`)[1] ?? ''
+    const axis = after.split(which === 'x' ? '<g class="axis y"' : '<g class="data"')[0] ?? ''
+    return tickTexts(axis).map((one) => one.label)
+  }
+
+  /** A figure whose y values rise linearly over 51 points from `low` by `span`. */
+  function rising(low: number, span: number, more: Partial<PlotSpec> = {}): PlotSpec {
+    const x = Array.from({ length: 51 }, (_, index) => index)
+    const values = x.map((at) => low + (span * at) / 50)
+    return spec(1, { x, series: [{ ...series(1, values), label: 'amount' }], ...more })
+  }
+
+  it('writes a small span against a large value with the digits which tell its ticks apart', () => {
+    expect(axisTicks(plotSvg(rising(123456, 10, { width: 600, height: 360 })), 'y')).toEqual([
+      '1.23456e+5',
+      '1.23458e+5',
+      '1.2346e+5',
+      '1.23462e+5',
+      '1.23464e+5',
+      '1.23466e+5',
+    ])
+    const small = axisTicks(plotSvg(rising(0.001, 1e-6, { width: 600, height: 360 })), 'y')
+    expect(new Set(small).size).toBe(small.length)
+    expect(small.every((label) => label.includes('e-3'))).toBe(true)
+  })
+
+  it('keeps the labels of an axis which tells its ticks apart as they were', () => {
+    expect(axisTicks(plotSvg(rising(0, 150000, { width: 600, height: 360 })), 'y')).toEqual([
+      '0',
+      '2e+4',
+      '4e+4',
+      '6e+4',
+      '8e+4',
+      '1e+5',
+      '1.2e+5',
+      '1.4e+5',
+    ])
+  })
+
+  /** Lower ends of the sweep, of both signs and over the magnitudes of a model. */
+  const LOWS = [
+    -3.7e8, -123456, -1, -1e-6, 1e-6, 0.001, 1, 5, 1000, 25000, 99999, 123456, 1e6, 3.7e8,
+  ]
+  /** Spans of the sweep, as a share of the magnitude of the lower end. */
+  const SHARES = [1e-9, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 0.1, 1, 10]
+
+  it(
+    'gives no two neighbouring ticks of a sweep over magnitudes and spans the same label',
+    () => {
+      const failures: string[] = []
+      for (const low of LOWS) {
+        for (const share of SHARES) {
+          for (const height of [160, 360]) {
+            for (const logY of low > 0 ? [false, true] : [false]) {
+              const span = Math.abs(low) * share
+              const svg = plotSvg(rising(low, span, { width: 600, height, logY }))
+              const labels = axisTicks(svg, 'y')
+              for (let index = 1; index < labels.length; index += 1) {
+                if (labels[index] === labels[index - 1]) {
+                  failures.push(
+                    `${String(low)}+${String(span)} ${String(height)} ${labels.join(' ')}`,
+                  )
+                  break
+                }
+              }
+              const xs = axisTicks(
+                plotSvg(
+                  rising(1, 1, {
+                    x: rising(low, span).series[0]?.values ?? [],
+                    width: 600,
+                    height,
+                  }),
+                ),
+                'x',
+              )
+              for (let index = 1; index < xs.length; index += 1) {
+                if (xs[index] === xs[index - 1]) {
+                  failures.push(`x ${String(low)}+${String(span)} ${xs.join(' ')}`)
+                  break
+                }
+              }
+            }
+          }
+        }
+      }
+      expect(failures).toEqual([])
+    },
+    SWEEP_TIMEOUT * 10,
+  )
 })
