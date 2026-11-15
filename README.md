@@ -23,7 +23,7 @@ sbmlsim-web needs an endpoint of **sbmlsim >= 0.24.0**, the first release whose 
 **Install.** A page loads one script, from a CDN or from the package:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-panel
   endpoint="https://models.example.org"
   model="MODEL"
@@ -40,7 +40,7 @@ npm install sbmlsim-web
 import 'sbmlsim-web' // registers <sbmlsim-panel> and <sbmlsim-app>
 ```
 
-The script is pinned to a release (`@0.1.1`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.1.1` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
+The script is pinned to a release (`@0.2.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.2.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
 
 **The endpoint.** A page of another origin than the service is answered only when the service allows its origin, once per origin of the pages which embed it:
 
@@ -55,7 +55,7 @@ A page served by the service itself (`--static DIR`, `endpoint=""`) is one origi
 ```toml
 # zensical.toml
 [project]
-extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"]
+extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"]
 # optional: the panels take the background of the palette as their surface
 extra_css = ["sbmlsim.css"]
 ```
@@ -84,7 +84,7 @@ The palettes of the theme declare their colour scheme (`slate` is dark), and a p
     data-prevent-swipe
   ></sbmlsim-panel>
 </section>
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
 <script>
   const deck = new Reveal()
   const start = (slide) => {
@@ -210,13 +210,13 @@ A panel dispatches `sbmlsim-result` with the `provenance` and the `spec_hash` of
 An `endpoint` which starts with `local:` is no server: it is answered by a function of the page itself, which the page registers under that exact name with `registerEndpoint(endpoint, fetcher)`. This is how a static page (GitHub Pages, a course, a file share) runs the panels of a model without a service: the function answers the routes of `python -m sbmlsim.serve` inside the page, e.g. on a simulator which runs in Web Workers in the browser of the reader ([sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function, `createPanelEndpoint` of its `js/panels.mjs`, which answers the routes from a bundle the service exports).
 
 ```html
-<script src="sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
 <script type="module">
-  import { createPanelEndpoint } from './sbmlsim-core/panels.mjs'
+  import { createPanelEndpoint } from 'https://cdn.jsdelivr.net/npm/sbmlsim-core@0.1.0/panels.mjs'
   sbmlsimWeb.registerEndpoint(
     'local:glimepiride',
-    createPanelEndpoint({ bundle: new URL('./bundle/glimepiride/bundle.json', import.meta.url) }),
+    createPanelEndpoint({ bundle: new URL('./bundle/glimepiride/bundle.json', location.href) }),
   )
 </script>
 ```
@@ -230,7 +230,7 @@ registerEndpoint('local:demo', async (url, init) => {
 })
 ```
 
-`registerEndpoint` is in the releases after 0.1.1, so the script of the elements is one of them, pinned as on any page (here a copy next to the page). The function has the signature of `fetch` (`EndpointFetch`, `(url: string, init: RequestInit) => Promise<Response>`). The client calls it with the url of the route, the endpoint joined with the path of the route (`local:demo/api/models/MODEL/panels/PANEL/simulate`, with `?variant=` where a route is read in a variant), and with the `init` it would give `fetch`: the method, the headers, the body of a POST as JSON text and the signal which stops the request. Its `Response` is read exactly as one of the network: a status which is no success is an `http` failure, a 503 with a `Retry-After` is sent again after that time, the body is parsed as JSON, its `contract` is checked and its shape is guarded, and the request is bounded by the `timeout` of the element. A rejection of the function is a `network` failure, and a function which does not listen to its signal is stopped all the same, by its timeout or by the element which superseded the request.
+`registerEndpoint` is in the releases from 0.2.0 on, and both scripts are pinned to a release, as on any page; the npm package `sbmlsim-core` starts the workers of its pool from a module of the page's origin, so it runs from the CDN as well, and only the bundle (`bundle.json` and the compiled model) is a file of the site. The function has the signature of `fetch` (`EndpointFetch`, `(url: string, init: RequestInit) => Promise<Response>`). The client calls it with the url of the route, the endpoint joined with the path of the route (`local:demo/api/models/MODEL/panels/PANEL/simulate`, with `?variant=` where a route is read in a variant), and with the `init` it would give `fetch`: the method, the headers, the body of a POST as JSON text and the signal which stops the request. Its `Response` is read exactly as one of the network: a status which is no success is an `http` failure, a 503 with a `Retry-After` is sent again after that time, the body is parsed as JSON, its `contract` is checked and its shape is guarded, and the request is bounded by the `timeout` of the element. A rejection of the function is a `network` failure, and a function which does not listen to its signal is stopped all the same, by its timeout or by the element which superseded the request.
 
 An element may connect before its endpoint is registered, which is what a page does whose module script registers it: the requests of the element wait for the registration, within their timeout and their signal, and are sent to the function as soon as it is there. A second registration of a name replaces the first for the requests sent after it, a trailing slash is no part of the name (`local:demo/` is `local:demo`), and registering a name which does not start with `local:` throws a `TypeError`, so a url of the network is never answered by the page. The `fallback` of a panel is a file of its own and is always fetched over the network.
 

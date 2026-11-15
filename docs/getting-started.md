@@ -12,10 +12,10 @@
     A page loads one script from a CDN, which registers both elements; the script is pinned to a release, so a page does not change under its readers when a new one is published:
 
     ```html
-    <script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
     ```
 
-    `https://unpkg.com/sbmlsim-web@0.1.1` serves the same file. It is an IIFE bundle which defines the global `sbmlsimWeb` with every export of the package (`sbmlsimWeb.registerEndpoint`, `sbmlsimWeb.register`, ...), a `.js` file which a static server serves as a script.
+    `https://unpkg.com/sbmlsim-web@0.2.0` serves the same file. It is an IIFE bundle which defines the global `sbmlsimWeb` with every export of the package (`sbmlsimWeb.registerEndpoint`, `sbmlsimWeb.register`, ...), a `.js` file which a static server serves as a script.
 
 === "npm"
 
@@ -36,7 +36,7 @@ Importing the package registers both elements under their tags. The registration
 One tag draws one panel of a model. `endpoint` is the service, `model` and `panel` the ids it serves, and `auto` starts the element when it is connected:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-panel
   endpoint="https://models.example.org"
   model="hctz"
@@ -63,7 +63,7 @@ Without `auto` nothing is fetched and nothing is drawn before the page calls `ac
 One tag draws the app of a model, with its pages, its variants and its shared knobs, which the model declares:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.1.1/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-app endpoint="https://models.example.org" model="hctz"></sbmlsim-app>
 ```
 
