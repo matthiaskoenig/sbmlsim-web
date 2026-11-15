@@ -3,7 +3,7 @@
  "model": "glimepiride",
  "title": "Glimepiride PBPK model",
  "sbmlsim": "0.24.0",
- "created": "2026-11-15T14:33:45Z",
+ "created": "2026-11-15T15:28:59Z",
  "answers": {
   "": {
    "app": {
