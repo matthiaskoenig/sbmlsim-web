@@ -5,7 +5,21 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', '.site/**', 'test-results/**', 'playwright-report/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      '.site/**',
+      'site/**',
+      '.cache/**',
+      'docs/assets/sbmlsim-web/**',
+      // the files an example takes from its sources as they are (scripts/glimepiride.sh)
+      'docs/examples/*/sbmlsim-core/**',
+      'docs/examples/*/bundle/**',
+      'test-results/**',
+      'playwright-report/**',
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,

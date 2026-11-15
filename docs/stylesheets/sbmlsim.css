@@ -1,0 +1,15 @@
+/*
+ * The elements in the colours and the type of the palette of the site.
+ *
+ * A panel and an app paint the surface of their scheme, which the palette of
+ * the site declares (`slate` is dark), so they take the background of the page
+ * of either palette and sit in it without a box of their own, and the text of
+ * the theme is their type. Every other token keeps the value of the design
+ * (`theme.css`), whose colours meet the contrast WCAG asks of them on these
+ * surfaces, which the accent of an indigo palette does not as text.
+ */
+sbmlsim-panel,
+sbmlsim-app {
+  --sbmlsim-bg: var(--md-default-bg-color);
+  --sbmlsim-font: var(--md-text-font-family);
+}

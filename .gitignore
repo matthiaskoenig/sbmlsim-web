@@ -6,3 +6,7 @@ coverage/
 .site/
 test-results/
 playwright-report/
+# the documentation site and the bundle its pages load (scripts/docs.mjs)
+site/
+.cache/
+docs/assets/sbmlsim-web/

@@ -10,10 +10,13 @@
  *
  * The library speaks the three versioned contracts of an sbmlsim endpoint
  * (`panel/1`, `paneldata/1`, `app/1`) and nothing else: see `./contract`.
- * `PanelClient` is the one place which calls `fetch`, `interpolate` reads a
- * position between the points of a grid which was fetched once, `plotSvg`
- * draws the figure as one inline SVG string in the tokens of `./theme.css`,
- * which a host loads to get the design system and overrides token by token.
+ * `PanelClient` is the one place which calls `fetch`, or the function a page
+ * registered for an endpoint `local:<name>` (`registerEndpoint`), which
+ * answers the routes inside the page, e.g. on a simulator in a Web Worker;
+ * `interpolate` reads a position between the points of a grid which was
+ * fetched once, `plotSvg` draws the figure as one inline SVG string in the
+ * tokens of `./theme.css`, which a host loads to get the design system and
+ * overrides token by token.
  */
 
 import { defineCustomElement } from 'vue'
@@ -58,11 +61,13 @@ export type {
 export {
   DEFAULT_TIMEOUT,
   FAILURE_MESSAGES,
+  LOCAL_PREFIX,
   PanelClient,
   PanelRequestError,
   failureKind,
+  registerEndpoint,
 } from './client'
-export type { FailureKind } from './client'
+export type { EndpointFetch, FailureKind } from './client'
 export { interpolate } from './interpolate'
 export { canvasMeasure, fontOf } from './measure'
 export type { FigureFont } from './measure'

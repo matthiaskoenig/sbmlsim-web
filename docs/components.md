@@ -1,0 +1,144 @@
+# Components
+
+The package registers two custom elements when it is imported: `<sbmlsim-panel>`, one panel of a model, and `<sbmlsim-app>`, the app of a model, which places panels itself. Both have a shadow root, so the styles of the page cannot reach into them and theirs cannot leak into the page; the `--sbmlsim-*` tokens are the one hook from outside ([Embedding](embedding.md#theming)).
+
+## `<sbmlsim-panel>`
+
+```html
+<sbmlsim-panel
+  endpoint="https://models.example.org"
+  model="hctz"
+  panel="renal_plasma"
+  fallback="./renal_plasma.json"
+  auto
+></sbmlsim-panel>
+```
+
+### Attributes
+
+| attribute       | default | what it is                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | empty   | the endpoint the panel talks to, e.g. `https://models.example.org`; empty is the origin of the page (a page the service serves itself), and one which starts with `local:` is answered by a function of the page ([Endpoints](endpoints.md))                                                                                                                                                               |
+| `model`         | empty   | the id of the model, as the endpoint serves it                                                                                                                                                                                                                                                                                                                                                             |
+| `panel`         | empty   | the id of the panel of that model                                                                                                                                                                                                                                                                                                                                                                          |
+| `variant`       | empty   | the variant of the model to simulate, empty for the one the panel declares; the panel reads its declaration and its study data in that variant, and a change starts it again in the new variant, holding the figure of the variant before, dimmed, until the first figure of the new one is drawn                                                                                                          |
+| `values`        | none    | the knobs the page owns, a JSON object of knob id to number, e.g. `{"dose": 25}`: the panel sets them, draws no control of them and follows a change of the attribute as it follows a release of its own control; an id the panel does not declare is ignored, and text which is no such object, or a value which is no finite number, is one `console.warn` and leaves the panel as if it had no `values` |
+| `head`          | none    | the head the panel shows until it has read its declaration, a JSON object of its `title` and its `subtitle`, e.g. `{"title": "Plasma", "subtitle": ""}`; the shell of an app sets it, so a card shows its head at once                                                                                                                                                                                     |
+| `layout`        | `auto`  | where the controls go: `auto` (beside the figure above 560 px of width and under it below), `sidebar`, `stacked` or `toolbar`                                                                                                                                                                                                                                                                              |
+| `theme`         | `auto`  | which values of the tokens are used: `auto` (the colour scheme of the page), `light` or `dark`                                                                                                                                                                                                                                                                                                             |
+| `hover`         | `on`    | `on` draws the crosshair and the readout at the pointer, `off` leaves them out (the keyboard readout stays)                                                                                                                                                                                                                                                                                                |
+| `data`          | `on`    | `on` draws the study data of the panel under its curves, `off` asks for none of it                                                                                                                                                                                                                                                                                                                         |
+| `fallback`      | empty   | the url of a stored answer of a run (`panel/1`), drawn when the endpoint does not answer; it has to be an answer of that panel at the knob values its declaration states, and it is always fetched over the network                                                                                                                                                                                        |
+| `timeout`       | `8000`  | the milliseconds one request is given before it is stopped                                                                                                                                                                                                                                                                                                                                                 |
+| `heading-level` | `2`     | the level the title of the panel is drawn at; a page writes the level below its own heading here                                                                                                                                                                                                                                                                                                           |
+| `auto`          | absent  | a boolean attribute: the element calls `activate()` itself when it is connected; it counts by its presence (`auto="false"` starts it as well) and is read when the element is connected, and an element which is removed and connected again starts again                                                                                                                                                  |
+
+A change of `endpoint`, `model` or `panel` after the panel started starts it again with what they name.
+
+### Methods
+
+| method       | returns         | what it does                                                                                                                                                                                                                                                                                                                     |
+| ------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `activate()` | `Promise<void>` | starts the panel: reads its declaration, its study data and its fallback and runs its first simulation; on a frozen panel it lifts the freeze and does what the freeze dropped, so a deck which passed over a slide finds its panel drawn; it resolves when the first figure is drawn or the failure is shown, and never rejects |
+| `freeze()`   | `void`          | stops every pending request and freezes the knobs; it drops no work for good                                                                                                                                                                                                                                                     |
+| `reset()`    | `void`          | puts every knob back to the value its declaration states and the y axis back to the scale its curves declare; a knob the page owns (`values`) keeps the value of the page                                                                                                                                                        |
+
+### Events
+
+| event            | `detail`                    | when                                                                                                                        |
+| ---------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `sbmlsim-result` | `{ provenance, spec_hash }` | a simulation succeeded and its figure is drawn; never for a failure and never for a stored fallback, which is no simulation |
+| `sbmlsim-error`  | `{ kind, message }`         | a request failed; `kind` is a failure kind (below) and `message` the one line the panel shows                               |
+
+Both bubble and are composed, so they reach the page out of the shadow root of a panel which an app placed.
+
+### Parts
+
+The panel exposes three parts for `::part()`: `panel` (the whole panel, whose head, body and foot an app lays out as subgrids of its rows), `figure` (the figure) and `foot` (the provenance line).
+
+### What it does
+
+- **A request grids over at most one knob.** The first run grids over the first `range` knob at its declared `steps`, with every other knob at its default, and every movement of that knob is read out of the grid without a request. Releasing another knob runs one simulation which grids over that knob instead, at the value the others now have. An `input` event interpolates and redraws, a `change` event schedules a run, and a scheduled run which is superseded is cancelled.
+- **A range knob may name stops.** A range knob whose `choices` name values inside its bounds draws a select of those stops above its slider; picking one moves the slider there, and a value which is no stop shows `custom`.
+- **The readout is a view of the drawn grid.** A pointer over the figure draws a crosshair at the nearest time of the grid and a box with the value of every curve there. The figure is also a slider for the keyboard (`role="slider"`): the arrow keys move the readout one point, Page Up and Page Down a tenth of the axis, Home and End to its ends, and a screen reader hears the values of every curve.
+- **The study data is one fetch per declaration.** It arrives in the unit of the curve it sits under; a series of another unit or under a curve the panel does not draw is left out with one `console.warn`, and a series which declares the state of the knobs it was measured under (`at`) is drawn only at that state.
+- **Nothing rejects into the page.** Every failure is caught inside the element and shown as one line which names no url and no host; a request the endpoint shed (a 503 with a `Retry-After`) is sent again after the time it names, at most six times, while the panel shows that it loads. A failure is no freeze: the next move of a knob runs again.
+
+## `<sbmlsim-app>`
+
+```html
+<sbmlsim-app endpoint="https://models.example.org" model="hctz" page="renal"></sbmlsim-app>
+```
+
+### Attributes
+
+| attribute       | default | what it is                                                                                                                        |
+| --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | empty   | the endpoint the app and its panels talk to; empty is the origin of the page, `local:<name>` a function of the page               |
+| `model`         | empty   | the id of the model, as the endpoint serves it                                                                                    |
+| `page`          | empty   | the id of the page which is shown, the first page without or for an unknown id; the shell sets it when a reader switches the page |
+| `theme`         | `auto`  | `auto` (the colour scheme of the page), `light` or `dark`, passed to every panel                                                  |
+| `timeout`       | `8000`  | the milliseconds one request is given, passed to every panel                                                                      |
+| `heading-level` | `1`     | the level the title of the app is drawn at; its panels are drawn one level below it                                               |
+
+The shell has no methods: it starts itself when it is connected and is driven by its attributes alone.
+
+### Events
+
+| event           | `detail`            | when                                                                                                        |
+| --------------- | ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `sbmlsim-page`  | `{ page }`          | a reader switched the page; not when the page sets the attribute itself                                     |
+| `sbmlsim-error` | `{ kind, message }` | the app could not be read (an endpoint which is down, a model without an app, a payload of another version) |
+
+The events of its panels (`sbmlsim-result`, `sbmlsim-error`) bubble out of the shell as well. `sbmlsim-page` lets a deployment give its pages addresses and answer the back button by setting `page` again:
+
+```js
+const app = document.querySelector('sbmlsim-app')
+app.addEventListener('sbmlsim-page', (event) => {
+  history.pushState(null, '', `#${event.detail.page}`)
+})
+addEventListener('popstate', () => app.setAttribute('page', location.hash.slice(1)))
+```
+
+### What it does
+
+- **It draws the app of the model.** The title and the subtitle, the navigation of the pages (none for an app of one page), the switcher of the variants (none for fewer than two), the grid of the panels of the page, as many columns as fit panels of at least 480 px, and the provenance footer: the citation, the DOI and the licenses of the app and the versions which simulated what is shown.
+- **A knob the panels of a page share is one control.** It is drawn once above the grid and every panel which declares it follows it (through its `values`), so every plot of the page is of the state the controls show.
+- **A page may name scenarios.** A page with `scenarios` draws a select labelled `Example` which sets every knob a scenario names in one state.
+- **A page change swaps the panels.** The panels of the page which is left are frozen and removed, the ones of the page which is shown start themselves.
+- **It follows the variant.** A switch of the variant reads the app again in it and passes it to every panel as its `variant`, holding the figures of the variant before, dimmed, until the new ones are drawn.
+- **A failure leaves one line**, in the voice of the panel, and no navigation, grid or footer.
+
+## Failure kinds
+
+The `kind` of `sbmlsim-error` is a short machine string, and the message is a fixed line per kind (`FAILURE_MESSAGES`), so nothing a server, a browser or a stack trace writes reaches the page:
+
+| kind       | what went wrong                                                          |
+| ---------- | ------------------------------------------------------------------------ |
+| `network`  | the endpoint could not be reached (or the function of the page rejected) |
+| `timeout`  | the endpoint did not answer within `timeout`                             |
+| `busy`     | the endpoint shed the request every time it was sent                     |
+| `http`     | the endpoint answered a status which is no success                       |
+| `contract` | the payload is of another contract version                               |
+| `body`     | the answer could not be read as the payload of its route                 |
+| `internal` | the element itself could not draw what it got                            |
+
+A request which was stopped (`aborted`), superseded by a newer one or stopped by `freeze()`, is no failure and dispatches nothing.
+
+## The exports of the package
+
+The module, and the global `sbmlsimWeb` of the IIFE bundle, export:
+
+| export                                                                                           | what it is                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register(tagName?, appTagName?)`                                                                | registers the elements under other tags (`sbmlsim-panel` and `sbmlsim-app` without); the shells place their panels under `tagName`; answers whether it registered anything |
+| `registerEndpoint(endpoint, fetcher)`                                                            | registers the function which answers an endpoint `local:<name>` inside the page ([Endpoints](endpoints.md#an-endpoint-inside-the-page))                                    |
+| `PANEL_TAG`, `APP_TAG`                                                                           | the default tags                                                                                                                                                           |
+| `SbmlsimPanelElement`, `SbmlsimAppElement`                                                       | the classes of the elements                                                                                                                                                |
+| `PanelClient`                                                                                    | the client of an endpoint, the one place which calls `fetch` or a registered function, with `app`, `panel`, `data`, `simulate` and `stored`                                |
+| `PanelRequestError`, `failureKind`, `FAILURE_MESSAGES`, `DEFAULT_TIMEOUT`, `LOCAL_PREFIX`        | the failures of a request, their lines, the default timeout and the prefix `local:`                                                                                        |
+| `CONTRACTS`, `checkContract`, `ContractError`                                                    | the versions of the contracts and their check                                                                                                                              |
+| `interpolate(grid, at)`                                                                          | reads a position between the points of a grid, multilinear and clamped                                                                                                     |
+| `plotSvg(spec)`, `plotGeometry(spec)`, `seriesColour`, `tableMeasure`, `canvasMeasure`, `fontOf` | the renderer of a figure as one inline SVG string and its geometry                                                                                                         |
+
+The types of every payload (`PanelDeclaration`, `SimulateResponse`, `AppDeclaration`, ...), `EndpointFetch` and the element types `SbmlsimPanelHTMLElement` and `SbmlsimAppHTMLElement` are exported for TypeScript.

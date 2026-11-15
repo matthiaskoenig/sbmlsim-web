@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Glimepiride app</title>
+    <link rel="icon" href="data:," />
+    <meta
+      name="description"
+      content="The whole-body PBPK model of glimepiride as an app of interactive panels, simulated in the browser on sbmlsim-core."
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --page-bg: #ffffff;
+        --page-fg: #1f2328;
+        --page-muted: #59636e;
+        --page-rule: #d1d9e0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page-bg: #0d1117;
+          --page-fg: #e6edf3;
+          --page-muted: #9198a1;
+          --page-rule: #30363d;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--page-bg);
+        color: var(--page-fg);
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+      }
+      main {
+        box-sizing: border-box;
+        /* the width of the app shell, whose own padding of 16px the footer takes as its margin */
+        max-width: 1216px;
+        margin: 0 auto;
+        padding: 8px 0 32px;
+      }
+      sbmlsim-app {
+        --sbmlsim-bg: var(--page-bg);
+      }
+      footer {
+        margin: 16px 16px 0;
+        padding-top: 16px;
+        border-top: 1px solid var(--page-rule);
+        color: var(--page-muted);
+        font-size: 0.85rem;
+        line-height: 1.5;
+      }
+      footer p {
+        margin: 0 0 8px;
+      }
+      a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
+      <footer>
+        <p>
+          Every simulation runs in this browser, on
+          <a href="https://matthiaskoenig.github.io/sbmlsim-core/">sbmlsim-core</a> in a pool of Web
+          Workers; the panels are drawn by
+          <a href="https://matthiaskoenig.github.io/sbmlsim-web/">sbmlsim-web</a>. The page is
+          static files and talks to no simulation server. <a href="./">How the example is built</a>.
+        </p>
+        <p>
+          A research proof-of-principle, provided as is and without warranty of any kind. It is not
+          fit for any clinical application and does not diagnose, treat or inform dosing decisions;
+          always consult qualified healthcare professionals.
+        </p>
+      </footer>
+    </main>
+    <script src="../../assets/sbmlsim-web/sbmlsim-web.iife.js"></script>
+    <script type="module" src="register.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,67 @@
+name: docs
+
+# The documentation site (zensical.toml, docs/) is built for every push to main
+# and every pull request to it, so a pull request shows that it builds, and it
+# is published to https://matthiaskoenig.github.io/sbmlsim-web/ from main only.
+# The pages load the elements from the bundle of the commit they are built
+# from (scripts/docs.mjs), so the site documents the library it ships with.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # a newer run supersedes the running one; a cancelled deployment leaves the
+  # published site as it was, the newer run deploys
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # uvx runs Zensical at the release scripts/zensical.mjs pins
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: '3.14'
+      - run: npm ci
+      - run: npm run build
+      # copies the IIFE bundle into docs/assets/sbmlsim-web/ and builds site/
+      - name: Build the documentation
+        run: node scripts/docs.mjs build
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    # only main publishes; a pull request builds the site and deploys nothing
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write # deploy to GitHub Pages
+      id-token: write # verify the deployment originates from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

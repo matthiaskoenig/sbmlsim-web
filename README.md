@@ -2,13 +2,15 @@
 
 The renderer of the interactive panels of an SBML model: Vue 3 components which draw a panel - its knobs, its curves and the study data under them - in any HTML page, a documentation site, a slide deck or a course.
 
-A model declares its panels in its own SBML and an [sbmlsim](https://github.com/matthiaskoenig/sbmlsim) endpoint (`python -m sbmlsim.serve`) serves that declaration and runs its simulations. This library talks to such an endpoint and to nothing else, through three versioned JSON contracts:
+A model declares its panels in its own SBML and an [sbmlsim](https://github.com/matthiaskoenig/sbmlsim) endpoint (`python -m sbmlsim.serve`) serves that declaration and runs its simulations. This library talks to such an endpoint, or to a function of the page which answers its routes ([An endpoint inside the page](#an-endpoint-inside-the-page)), and to nothing else, through three versioned JSON contracts:
 
 | contract      | what it carries                                                 |
 | ------------- | --------------------------------------------------------------- |
 | `panel/1`     | the declaration of a panel and the answer of a simulation of it |
 | `paneldata/1` | the study data drawn under its curves                           |
 | `app/1`       | the pages of the panels of a model                              |
+
+The documentation is at **https://matthiaskoenig.github.io/sbmlsim-web/**.
 
 `src/contract.ts` is the only place which knows the shape of a payload. The ids of the models, panels, knobs, curves and series are data which come from those payloads, so no model and no entity of a model is built into this library, and `checkContract` refuses a payload of a version it does not speak.
 
@@ -203,6 +205,35 @@ It draws the title and the subtitle, the navigation of the pages (none for an ap
 
 A panel dispatches `sbmlsim-result` with the `provenance` and the `spec_hash` of every successful simulation, never of a failure and never of a stored fallback. The shell dispatches `sbmlsim-page` with `detail.page`, the id of the page, when a reader switches the page (not when a page sets the attribute itself), which lets a deployment give its pages addresses and answer the back button by setting `page` again, and it announces the switch to a screen reader in a polite live region. `register(tagName, appTagName)` gives either element another tag, and the shells place their panels under `tagName`.
 
+## An endpoint inside the page
+
+An `endpoint` which starts with `local:` is no server: it is answered by a function of the page itself, which the page registers under that exact name with `registerEndpoint(endpoint, fetcher)`. This is how a static page (GitHub Pages, a course, a file share) runs the panels of a model without a service: the function answers the routes of `python -m sbmlsim.serve` inside the page, e.g. on a simulator which runs in Web Workers in the browser of the reader ([sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function, `createPanelEndpoint` of its `js/panels.mjs`, which answers the routes from a bundle the service exports).
+
+```html
+<script src="sbmlsim-web.iife.js"></script>
+<sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
+<script type="module">
+  import { createPanelEndpoint } from './sbmlsim-core/panels.mjs'
+  sbmlsimWeb.registerEndpoint(
+    'local:glimepiride',
+    createPanelEndpoint({ bundle: new URL('./bundle/glimepiride/bundle.json', import.meta.url) }),
+  )
+</script>
+```
+
+```js
+import { registerEndpoint } from 'sbmlsim-web'
+
+registerEndpoint('local:demo', async (url, init) => {
+  // url: 'local:demo/api/models/MODEL/panels/PANEL', init: { method, headers, body, signal, ... }
+  return Response.json(answerOf(url, init))
+})
+```
+
+`registerEndpoint` is in the releases after 0.1.1, so the script of the elements is one of them, pinned as on any page (here a copy next to the page). The function has the signature of `fetch` (`EndpointFetch`, `(url: string, init: RequestInit) => Promise<Response>`). The client calls it with the url of the route, the endpoint joined with the path of the route (`local:demo/api/models/MODEL/panels/PANEL/simulate`, with `?variant=` where a route is read in a variant), and with the `init` it would give `fetch`: the method, the headers, the body of a POST as JSON text and the signal which stops the request. Its `Response` is read exactly as one of the network: a status which is no success is an `http` failure, a 503 with a `Retry-After` is sent again after that time, the body is parsed as JSON, its `contract` is checked and its shape is guarded, and the request is bounded by the `timeout` of the element. A rejection of the function is a `network` failure, and a function which does not listen to its signal is stopped all the same, by its timeout or by the element which superseded the request.
+
+An element may connect before its endpoint is registered, which is what a page does whose module script registers it: the requests of the element wait for the registration, within their timeout and their signal, and are sent to the function as soon as it is there. A second registration of a name replaces the first for the requests sent after it, a trailing slash is no part of the name (`local:demo/` is `local:demo`), and registering a name which does not start with `local:` throws a `TypeError`, so a url of the network is never answered by the page. The `fallback` of a panel is a file of its own and is always fetched over the network.
+
 ## The renderer
 
 `plotSvg(spec)` draws a figure as one inline SVG string: the axes with their ticks and their units, one path per curve, the study data as markers with error bars under them, whose shape is the position of a series among the ones of its curve, so two studies under one curve share its colour and are told apart by their markers, and a legend of up to ten curves or, above them, a colour bar, which is where sbmlsim draws one. It is pure - a string in, a string out, no dom, no canvas and no plotting library - so the same figure is built in a page, in a test and in a worker, and it stays crisp under the transform of a slide. The one thing it cannot know is how wide its text is drawn, since that is the font the page resolves: every width it lays out with - a tick label, the lines of an axis label, a legend entry, the rows of a legend and their centring, the column beside the plot - is asked of the `measure` of its spec, a function `(text, size) => pixels`. The element passes one built on canvas `measureText` in the font it draws its figure in (`canvasMeasure` of `fontOf` the panel), and lays its figure out once more when a font which was still loading has arrived; a spec without a measure is measured with the advance widths of Arial (`tableMeasure`), so a figure without a dom is still one exact figure. The sizes the text is drawn in are an input as well (`fontSizes`, the label and the small size): every width is measured at the size of its text and every line, row and margin is as tall as its font, so a page which sets `--sbmlsim-font-size` and `--sbmlsim-font-size-small` gets a figure laid out for them; the element passes the sizes those tokens resolve to. A logarithmic axis follows the rule of sbmlsim (at most six decades below the largest value), so a web figure and a matplotlib figure of the same data have the same limits. `plotGeometry(spec)` gives the layout that figure was drawn from - its plot box and the pixel of a value on either axis - so a caller which draws a crosshair, a readout or a marker of its own over a figure places it on the figure which is there and not on one it had to guess at. A figure takes the limits of its value axis from what it draws, or from the `yLimits` of its spec, which is what a caller passes which draws one of several lines of one answer at a time: a line then moves inside a frame which holds still instead of redrawing itself inside a frame which follows it, and the rule of the decades applies to that frame. A panel which declares the ends of its axes (`y_min`, `y_max`, `x_max`) gets them as `yEnds` and `xEnd`, which are no frame but the ends of the axis exactly: the axis runs from the one to the other with its ticks inside, so two states of the knobs are drawn against one axis, a curve or a point beyond them is cut at the plot box and drawn over no margin, legend or label, and study data beyond `xEnd` is no point of the figure; where one end is declared the other is derived as without, and on a logarithmic axis the ends are the ends of its decades, a declared end which is not positive being none there. A legend sits beside the plot or below it, packed into the rows of the figure, whichever of the two leaves the larger plot box: that is a column on a figure which is wide and short and a band of rows on the figure of a panel, and comparing the two is what keeps a figure which grows from ending up with a smaller plot than it had. A colour bar keeps its column either way. A figure of one curve and no study data, drawn or declared, has no legend, since its one entry would name the quantity its y label names; a figure of two or more curves, or with study data, keeps its legend and lays it out as before. What a panel may draw is decided by its declaration and not by the study data it has received: the legends it reserves are the labels and the states of its declared series, so a panel of one curve with study data holds its legend from its first figure whether the run or the data answers first, and the data only decides which points are drawn. A panel whose value axis holds its study data, one which does not fix both ends of the axis, draws its first figure once the data has arrived or failed to, so the axis is laid out once; a panel whose axis is fixed draws its curves as soon as they run. The legend is laid out over the legends of `declaredLegends`, each the labels a state of the caller draws together in the order it declares them: the band keeps the rows of the legend which needs the most and the column the width of the widest label of any, and the figure draws the legend it has, so a figure keeps its plot box whichever of them is drawn and keeps the room of the largest legend one state draws, not of every series at once. A legend below the plot spans the plot box and centres its rows on it, as the label of the x axis above it is centred, so the plot, its label and its legend read as one block. The label of an axis wraps at its words onto two lines of the length of that axis rather than being cut, and the margins of a figure are grown by what its tick labels need beyond them, an x axis asks for fewer ticks where its measured labels would run into each other, always keeping its first and its last, every tick label starts on a whole pixel, at most half a pixel from where its tick centres it, so equal glyphs are drawn in one tint where a browser antialiases text by subpixels, and a layout which could draw its last tick alone, a number without a second one to read a scale from, is no candidate where the other layout draws both, so the label of the last tick stays inside the figure instead of being cut at its edge; that is `_fit_margins` of sbmlsim, so the two renderers answer a narrow figure the same way.
@@ -219,11 +250,15 @@ npm run typecheck  # the whole project, the tests included
 npm run build      # dist/sbmlsim-web.js (ESM), .umd.cjs (UMD), .iife.js (IIFE), dist/types, checked against package.json
 npm run e2e        # the demo pages in Chrome against a live endpoint, see below
 npm run format     # write what prettier wants
+npm run docs       # the build and the documentation site into site/ (Zensical through uvx)
+npm run docs:serve # the build and a preview of the documentation site
 ```
 
 Vue is bundled into every build, so a host page needs nothing else: it reads `dist/sbmlsim-web.js` with a `<script type="module">` or through a bundler, `dist/sbmlsim-web.umd.cjs` is the same library for a `require`, and `dist/sbmlsim-web.iife.js` is the one for a page which wants the `sbmlsimWeb` global from a plain `<script src>`, which a static server serves as a script where it serves a `.cjs` file as a download.
 
 Vue is no dependency of the package but a development dependency of the build: every bundle inlines it, and the published types import nothing of it (`scripts/check-package.mjs` checks both after every build, together with every entry point `package.json` names), so a consumer installs no Vue for the elements and a page which runs a Vue of its own gets no second copy of it in its dependencies. The elements are custom elements with shadow roots, which share nothing with a Vue app of the page, so the price is the copy of Vue a page with a Vue of its own loads beside it.
+
+The documentation site is `docs/` with `zensical.toml`: `scripts/docs.mjs` copies `dist/sbmlsim-web.iife.js` into the ignored `docs/assets/sbmlsim-web/`, which every page loads, and builds the site with Zensical (`uvx --from zensical==0.1.0`) into the ignored `site/`, which the workflow `docs` publishes to GitHub Pages from `main`. An example goes into `docs/examples/` as a page with its assets in a folder of its name.
 
 A release is a tag `vX.Y.Z` of the version of `package.json` with its notes in `release-notes/X.Y.Z.md`: the workflow `publish` runs the checks of `ci` for the commit of the tag, the end to end tests included, and publishes the package to npm with its provenance.
 

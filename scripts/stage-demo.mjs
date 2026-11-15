@@ -17,8 +17,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** The release of Zensical the documentation page is built with. */
-const ZENSICAL = 'zensical==0.1.0'
+import { ZENSICAL } from './zensical.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const site = join(root, '.site')
