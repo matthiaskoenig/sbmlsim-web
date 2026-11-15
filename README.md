@@ -2,7 +2,7 @@
 
 The renderer of the interactive panels of an SBML model: Vue 3 components which draw a panel - its knobs, its curves and the study data under them - in any HTML page, a documentation site, a slide deck or a course.
 
-A model declares its panels in its own SBML and an [sbmlsim](https://github.com/matthiaskoenig/sbmlsim) endpoint (`python -m sbmlsim.serve`) serves that declaration and runs its simulations. This library talks to such an endpoint and to nothing else, through three versioned JSON contracts:
+A model declares its panels in its own SBML and an [sbmlsim](https://github.com/matthiaskoenig/sbmlsim) endpoint (`python -m sbmlsim.serve`) serves that declaration and runs its simulations. This library talks to such an endpoint, or to a function of the page which answers its routes ([An endpoint inside the page](#an-endpoint-inside-the-page)), and to nothing else, through three versioned JSON contracts:
 
 | contract      | what it carries                                                 |
 | ------------- | --------------------------------------------------------------- |
@@ -202,6 +202,35 @@ It draws the title and the subtitle, the navigation of the pages (none for an ap
 **A failure leaves one line.** An app which cannot be read - an endpoint which is down, a model without an app, a payload of another version - shows one line in the voice of the panel, which names no url, no host and no status, and no navigation, grid or footer; `sbmlsim-error` is dispatched as a panel does.
 
 A panel dispatches `sbmlsim-result` with the `provenance` and the `spec_hash` of every successful simulation, never of a failure and never of a stored fallback. The shell dispatches `sbmlsim-page` with `detail.page`, the id of the page, when a reader switches the page (not when a page sets the attribute itself), which lets a deployment give its pages addresses and answer the back button by setting `page` again, and it announces the switch to a screen reader in a polite live region. `register(tagName, appTagName)` gives either element another tag, and the shells place their panels under `tagName`.
+
+## An endpoint inside the page
+
+An `endpoint` which starts with `local:` is no server: it is answered by a function of the page itself, which the page registers under that exact name with `registerEndpoint(endpoint, fetcher)`. This is how a static page (GitHub Pages, a course, a file share) runs the panels of a model without a service: the function answers the routes of `python -m sbmlsim.serve` inside the page, e.g. on a simulator which runs in Web Workers in the browser of the reader ([sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function, `createPanelEndpoint` of its `js/panels.mjs`, which answers the routes from a bundle the service exports).
+
+```html
+<script src="sbmlsim-web.iife.js"></script>
+<sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
+<script type="module">
+  import { createPanelEndpoint } from './sbmlsim-core/panels.mjs'
+  sbmlsimWeb.registerEndpoint(
+    'local:glimepiride',
+    createPanelEndpoint({ bundle: new URL('./bundle/glimepiride/bundle.json', import.meta.url) }),
+  )
+</script>
+```
+
+```js
+import { registerEndpoint } from 'sbmlsim-web'
+
+registerEndpoint('local:demo', async (url, init) => {
+  // url: 'local:demo/api/models/MODEL/panels/PANEL', init: { method, headers, body, signal, ... }
+  return Response.json(answerOf(url, init))
+})
+```
+
+`registerEndpoint` is in the releases after 0.1.1, so the script of the elements is one of them, pinned as on any page (here a copy next to the page). The function has the signature of `fetch` (`EndpointFetch`, `(url: string, init: RequestInit) => Promise<Response>`). The client calls it with the url of the route, the endpoint joined with the path of the route (`local:demo/api/models/MODEL/panels/PANEL/simulate`, with `?variant=` where a route is read in a variant), and with the `init` it would give `fetch`: the method, the headers, the body of a POST as JSON text and the signal which stops the request. Its `Response` is read exactly as one of the network: a status which is no success is an `http` failure, a 503 with a `Retry-After` is sent again after that time, the body is parsed as JSON, its `contract` is checked and its shape is guarded, and the request is bounded by the `timeout` of the element. A rejection of the function is a `network` failure, and a function which does not listen to its signal is stopped all the same, by its timeout or by the element which superseded the request.
+
+An element may connect before its endpoint is registered, which is what a page does whose module script registers it: the requests of the element wait for the registration, within their timeout and their signal, and are sent to the function as soon as it is there. A second registration of a name replaces the first for the requests sent after it, a trailing slash is no part of the name (`local:demo/` is `local:demo`), and registering a name which does not start with `local:` throws a `TypeError`, so a url of the network is never answered by the page. The `fallback` of a panel is a file of its own and is always fetched over the network.
 
 ## The renderer
 

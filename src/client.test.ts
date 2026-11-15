@@ -6,8 +6,9 @@ import {
   FAILURE_MESSAGES,
   PanelClient,
   PanelRequestError,
+  registerEndpoint,
 } from './client'
-import type { FailureKind } from './client'
+import type { EndpointFetch, FailureKind } from './client'
 import type { PanelDeclaration, SimulateResponse } from './contract'
 
 // Every id below is a neutral one: a model, a panel, a knob, a curve and a
@@ -501,5 +502,223 @@ describe('the client of an endpoint', () => {
       expect(message).not.toMatch(/https?:|\/\/|localhost|\d{1,3}(\.\d{1,3}){3}/)
       expect(message.endsWith('.')).toBe(true)
     }
+  })
+})
+
+describe('an endpoint inside the page', () => {
+  // The registry of the endpoints of the page is one per page, which is one
+  // per test file here: every test registers a name of its own.
+
+  /** Build the answer of a function of the page, a real `Response` as a fetch gives. */
+  function answer(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json', ...headers },
+    })
+  }
+
+  /** A function of the page which never answers, whatever its signal says. */
+  function deaf(): Promise<Response> {
+    return new Promise(() => undefined)
+  }
+
+  /** Make the network fail the test where it is asked, which a local endpoint never is. */
+  function noNetwork(): ReturnType<typeof vi.fn> {
+    const network = vi.fn(() => Promise.reject(new Error('the network was asked')))
+    globalThis.fetch = network
+    return network
+  }
+
+  it('hands the function of the page the url and the init it would hand fetch', async () => {
+    const network = noNetwork()
+    const seen: { url: string; init: RequestInit }[] = []
+    registerEndpoint('local:hands', (url, init) => {
+      seen.push({ url, init })
+      return Promise.resolve(answer(url.endsWith('/simulate') ? run() : declaration()))
+    })
+    const client = new PanelClient('local:hands/', DEFAULT_TIMEOUT)
+    expect((await client.panel('model a', 'panelA', undefined, 'male')).panel.id).toBe('panelA')
+    const ran = await client.simulate('modelA', 'panelA', { values: { knobA: 2 } })
+    expect(ran.spec_hash).toBe('a'.repeat(64))
+    expect(network).not.toHaveBeenCalled()
+    expect(seen.map((one) => one.url)).toEqual([
+      'local:hands/api/models/model%20a/panels/panelA?variant=male',
+      'local:hands/api/models/modelA/panels/panelA/simulate',
+    ])
+    const [get, post] = seen.map((one) => one.init)
+    expect(get?.method).toBe('GET')
+    expect(get?.body).toBeUndefined()
+    expect(get?.headers).toEqual({ accept: 'application/json' })
+    expect(get?.signal).toBeInstanceOf(AbortSignal)
+    expect(post?.method).toBe('POST')
+    expect(post?.body).toBe(JSON.stringify({ values: { knobA: 2 } }))
+    expect(post?.headers).toEqual({
+      accept: 'application/json',
+      'content-type': 'application/json',
+    })
+  })
+
+  it('reads the app and the study data off the function of the page', async () => {
+    noNetwork()
+    const app = {
+      contract: 'app/1',
+      title: 'App',
+      subtitle: '',
+      citation: '',
+      doi: '',
+      licenses: [],
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA'], scenarios: [] }],
+      variants: [],
+      shared: { pageA: [] },
+      heads: { pageA: [{ id: 'panelA', title: 'Panel A', subtitle: '' }] },
+      variant: 'male',
+    }
+    registerEndpoint('local:reads', (url) =>
+      Promise.resolve(answer(url.includes('/app') ? app : { contract: 'paneldata/1', series: [] })),
+    )
+    const client = new PanelClient('local:reads', DEFAULT_TIMEOUT)
+    expect((await client.app('modelA')).variant).toBe('male')
+    expect(await client.data('modelA', 'panelA')).toEqual([])
+  })
+
+  it('waits for the registration of its endpoint, which a page may make after the elements started', async () => {
+    noNetwork()
+    const client = new PanelClient('local:late', DEFAULT_TIMEOUT)
+    const call = client.panel('modelA', 'panelA')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const late = vi.fn<EndpointFetch>(() => Promise.resolve(answer(declaration())))
+    registerEndpoint('local:late', late)
+    expect((await call).panel.id).toBe('panelA')
+    expect(late).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for its registration no longer than its timeout and its signal allow', async () => {
+    noNetwork()
+    expect(await kindOf(new PanelClient('local:never', 5).panel('modelA', 'panelA'))).toBe(
+      'timeout',
+    )
+    const controller = new AbortController()
+    const call = kindOf(
+      new PanelClient('local:stopped', DEFAULT_TIMEOUT).panel(
+        'modelA',
+        'panelA',
+        controller.signal,
+      ),
+    )
+    controller.abort()
+    expect(await call).toBe('aborted')
+    // a request which stopped waiting is not sent when the endpoint comes after all
+    const after = vi.fn<EndpointFetch>(() => Promise.resolve(answer(declaration())))
+    registerEndpoint('local:stopped', after)
+    registerEndpoint('local:never', after)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(after).not.toHaveBeenCalled()
+  })
+
+  it('stops a function of the page which does not listen to its signal', async () => {
+    registerEndpoint('local:deaf', deaf)
+    expect(await kindOf(new PanelClient('local:deaf', 5).panel('modelA', 'panelA'))).toBe('timeout')
+    const controller = new AbortController()
+    const call = kindOf(
+      new PanelClient('local:deaf', DEFAULT_TIMEOUT).panel('modelA', 'panelA', controller.signal),
+    )
+    controller.abort()
+    expect(await call).toBe('aborted')
+    // and one its caller stopped before it was sent at once
+    expect(
+      await kindOf(
+        new PanelClient('local:deaf', DEFAULT_TIMEOUT).panel(
+          'modelA',
+          'panelA',
+          AbortSignal.abort(),
+        ),
+      ),
+    ).toBe('aborted')
+  })
+
+  it('fails with the kinds a request of the network fails with', async () => {
+    noNetwork()
+    let reply: () => Promise<Response> = () => Promise.resolve(answer(declaration()))
+    registerEndpoint('local:kinds', () => reply())
+    const client = new PanelClient('local:kinds', DEFAULT_TIMEOUT)
+
+    reply = () => Promise.reject(new Error('the worker died'))
+    expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('network')
+
+    registerEndpoint('local:throws', () => {
+      throw new Error('thrown before a promise')
+    })
+    expect(
+      await kindOf(new PanelClient('local:throws', DEFAULT_TIMEOUT).panel('modelA', 'panelA')),
+    ).toBe('network')
+
+    reply = () => Promise.resolve(answer({ detail: 'no such panel' }, 404))
+    expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('http')
+
+    reply = () => Promise.resolve(answer({ detail: 'no such knob' }, 422))
+    expect(await kindOf(client.simulate('modelA', 'panelA', { values: { knobZ: 1 } }))).toBe('http')
+
+    reply = () => Promise.resolve(answer(declaration('panel/2')))
+    expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('contract')
+
+    reply = () => Promise.resolve(new Response('no json', { status: 200 }))
+    expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('body')
+
+    reply = () => Promise.resolve(answer({ contract: 'panel/1', x: [0], dims: [] }))
+    expect(await kindOf(client.simulate('modelA', 'panelA', {}))).toBe('body')
+  })
+
+  it('sends a request the function of the page shed again after the time it asks for', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let sent = 0
+    registerEndpoint('local:busy', () => {
+      sent += 1
+      return Promise.resolve(
+        sent < 2 ? answer({ detail: 'busy' }, 503, { 'retry-after': '2' }) : answer(run()),
+      )
+    })
+    const call = new PanelClient('local:busy', DEFAULT_TIMEOUT).simulate('modelA', 'panelA', {})
+    await vi.advanceTimersByTimeAsync(1900)
+    expect(sent).toBe(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(sent).toBe(2)
+    expect((await call).spec_hash).toBe('a'.repeat(64))
+  })
+
+  it('takes a second registration of an endpoint for the requests after it', async () => {
+    noNetwork()
+    registerEndpoint('local:again', () => Promise.resolve(answer(declaration('panel/2'))))
+    const client = new PanelClient('local:again', DEFAULT_TIMEOUT)
+    expect(await kindOf(client.panel('modelA', 'panelA'))).toBe('contract')
+    registerEndpoint('local:again/', () => Promise.resolve(answer(declaration())))
+    expect((await client.panel('modelA', 'panelA')).panel.id).toBe('panelA')
+  })
+
+  it('reads a stored answer off the network also for an endpoint of the page', async () => {
+    const seen: string[] = []
+    serve((url) => {
+      seen.push(url)
+      return Promise.resolve(json(run()))
+    })
+    registerEndpoint('local:stored', deaf)
+    await new PanelClient('local:stored', DEFAULT_TIMEOUT).stored('./stored.json')
+    expect(seen).toEqual(['./stored.json'])
+  })
+
+  it('registers endpoints of the page and nothing else', () => {
+    const fetcher: EndpointFetch = () => Promise.resolve(answer(declaration()))
+    expect(() => {
+      registerEndpoint(ENDPOINT, fetcher)
+    }).toThrow(TypeError)
+    expect(() => {
+      registerEndpoint('', fetcher)
+    }).toThrow(TypeError)
+    expect(() => {
+      registerEndpoint('LOCAL:upper', fetcher)
+    }).toThrow(TypeError)
+    expect(() => {
+      registerEndpoint('local:nofunction', 'fetch' as unknown as EndpointFetch)
+    }).toThrow(TypeError)
   })
 })

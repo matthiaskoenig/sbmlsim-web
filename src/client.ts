@@ -12,6 +12,15 @@
  * `FAILURE_MESSAGES` is the one line a reader is shown per kind. It is a fixed
  * table rather than the message of the error which was caught, so that nothing
  * a server, a browser or a stack trace writes can leak into a page.
+ *
+ * An endpoint which starts with `local:` (`LOCAL_PREFIX`) is no server but a
+ * function of the page itself, which the page registers with
+ * `registerEndpoint`: a page which simulates in the browser of its reader, in
+ * a Web Worker, answers the routes of the service with a function which has the
+ * signature of `fetch` (`EndpointFetch`), and the client hands it every request
+ * it would hand `fetch` and reads its answer as one of the network, so the
+ * elements cannot tell the two apart and every failure is the failure of the
+ * same kind.
  */
 
 import { CONTRACTS, ContractError, checkContract } from './contract'
@@ -100,6 +109,155 @@ const LEAST_BUSY_WAIT = 0.5
 const MOST_BUSY_WAIT = 10
 
 /**
+ * The prefix of an endpoint which a function of the page answers.
+ *
+ * `local:` is no scheme a browser fetches, so an endpoint which starts with it
+ * can never be a url of the network by mistake, and the rest of it is a name of
+ * the page's choosing, e.g. `local:glimepiride`.
+ */
+export const LOCAL_PREFIX = 'local:'
+
+/**
+ * A function which answers the requests of an endpoint inside the page.
+ *
+ * It has the signature of `fetch`: it is called with the url of the route,
+ * which is the endpoint joined with the path of the route (e.g.
+ * `local:glimepiride/api/models/glimepiride/panels/plasma?variant=male`), and
+ * with the `init` the client gives `fetch` for it (the method, the headers, the
+ * body of a POST as JSON text and the signal which stops it), and it answers a
+ * `Response`, which the client reads exactly as one of the network: its status,
+ * a 503 with a `Retry-After` sent again, its body as JSON of the contract of the
+ * route. A rejection is a `network` failure, unless the signal stopped it.
+ */
+export type EndpointFetch = (url: string, init: RequestInit) => Promise<Response>
+
+/** The functions the page registered, by their endpoint without a trailing slash. */
+const registered = new Map<string, EndpointFetch>()
+
+/** The requests which wait for the registration of their endpoint, by that endpoint. */
+const waiting = new Map<string, Set<(fetcher: EndpointFetch) => void>>()
+
+/**
+ * Get an endpoint as it is compared, without its trailing slashes.
+ *
+ * @param endpoint the endpoint as it was written
+ * @returns the endpoint the routes are joined to
+ */
+function trimmed(endpoint: string): string {
+  return endpoint.replace(/\/+$/, '')
+}
+
+/**
+ * Get whether an endpoint is answered by a function of the page.
+ *
+ * @param endpoint the endpoint
+ * @returns whether it starts with `LOCAL_PREFIX`
+ */
+function isLocal(endpoint: string): boolean {
+  return endpoint.startsWith(LOCAL_PREFIX)
+}
+
+/**
+ * Register the function which answers an endpoint inside the page.
+ *
+ * Every element whose `endpoint` is this string sends its requests to the
+ * function instead of the network, the ones which are already on the page
+ * included: a client of an endpoint which is not registered yet waits for the
+ * registration, within the timeout and the signal of its request, so a page may
+ * register from a module script which runs after the elements connected. A
+ * second registration of an endpoint replaces the first for the requests sent
+ * after it. A trailing slash is no part of the name, as it is no part of any
+ * endpoint (`local:x/` is `local:x`).
+ *
+ * @param endpoint the endpoint, which starts with `local:`, e.g. `local:glimepiride`
+ * @param fetcher the function which answers its routes
+ * @throws TypeError for an endpoint which does not start with `local:`, which
+ *   is a url of the network and never answered by the page, and for a fetcher
+ *   which is no function
+ */
+export function registerEndpoint(endpoint: string, fetcher: EndpointFetch): void {
+  if (typeof endpoint !== 'string' || !isLocal(endpoint)) {
+    throw new TypeError(`an endpoint of the page starts with '${LOCAL_PREFIX}'`)
+  }
+  if (typeof fetcher !== 'function') {
+    throw new TypeError('the fetcher of an endpoint is a function with the signature of fetch')
+  }
+  const name = trimmed(endpoint)
+  registered.set(name, fetcher)
+  const waiters = waiting.get(name)
+  waiting.delete(name)
+  for (const resume of waiters ?? []) {
+    resume(fetcher)
+  }
+}
+
+/**
+ * Get the function which answers an endpoint of the page, once it is registered.
+ *
+ * @param endpoint the endpoint, without a trailing slash
+ * @param signal the signal of the request, which stops the wait
+ * @returns the function, at once when it is registered already
+ * @throws the reason of the signal, an `AbortError` as `fetch` throws it, when
+ *   the signal stops the wait first
+ */
+function registration(endpoint: string, signal: AbortSignal): Promise<EndpointFetch> {
+  const now = registered.get(endpoint)
+  if (now !== undefined) {
+    return Promise.resolve(now)
+  }
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason as Error)
+      return
+    }
+    const waiters = waiting.get(endpoint) ?? new Set<(fetcher: EndpointFetch) => void>()
+    waiting.set(endpoint, waiters)
+    const resume = (fetcher: EndpointFetch): void => {
+      signal.removeEventListener('abort', stop)
+      resolve(fetcher)
+    }
+    const stop = (): void => {
+      waiters.delete(resume)
+      if (waiters.size === 0 && waiting.get(endpoint) === waiters) {
+        waiting.delete(endpoint)
+      }
+      reject(signal.reason as Error)
+    }
+    waiters.add(resume)
+    signal.addEventListener('abort', stop, { once: true })
+  })
+}
+
+/**
+ * Wait for a promise unless a signal stops the wait first.
+ *
+ * `fetch` rejects when its signal stops it, a function of the page may not: it
+ * may run its work to the end whatever the signal says. The request is
+ * therefore stopped here, so its timeout and its caller stop it alike for both.
+ *
+ * @param pending what is waited for
+ * @param signal the signal of the request
+ * @returns what it resolves to
+ * @throws what it rejects with, or the reason of the signal when that comes first
+ */
+function untilStopped<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  let stop = (): void => undefined
+  const stopped = new Promise<never>((_resolve, reject) => {
+    stop = (): void => {
+      reject(signal.reason as Error)
+    }
+    if (signal.aborted) {
+      stop()
+    } else {
+      signal.addEventListener('abort', stop, { once: true })
+    }
+  })
+  return Promise.race([pending, stopped]).finally(() => {
+    signal.removeEventListener('abort', stop)
+  })
+}
+
+/**
  * Get the kind of an error which was caught anywhere in the element.
  *
  * @param error the error
@@ -120,7 +278,7 @@ export function failureKind(error: unknown): FailureKind {
  * @returns the url of the request
  */
 function join(endpoint: string, path: string): string {
-  return `${endpoint.replace(/\/+$/, '')}${path}`
+  return `${trimmed(endpoint)}${path}`
 }
 
 /**
@@ -446,12 +604,13 @@ export class PanelClient {
    * @param endpoint the origin and path the routes hang under, e.g.
    *   `https://models.example.org`; an empty one makes every request relative
    *   to the page, which is what the service does when it serves the page
-   *   itself
+   *   itself, and one which starts with `local:` is answered by the function
+   *   the page registered under it (`registerEndpoint`)
    * @param timeoutMs the milliseconds one request is given, `DEFAULT_TIMEOUT`
    *   for a value which is no positive number
    */
   constructor(endpoint: string, timeoutMs: number = DEFAULT_TIMEOUT) {
-    this.endpoint = endpoint.replace(/\/+$/, '')
+    this.endpoint = trimmed(endpoint)
     this.timeoutMs =
       Number.isFinite(timeoutMs) && timeoutMs >= LEAST_TIMEOUT ? timeoutMs : DEFAULT_TIMEOUT
   }
@@ -603,7 +762,13 @@ export class PanelClient {
     signal: AbortSignal | undefined,
     body?: SimulateRequest,
   ): Promise<unknown> {
-    return this.fetchJson(join(this.endpoint, path), contract, signal, body)
+    return this.fetchJson(
+      join(this.endpoint, path),
+      contract,
+      signal,
+      body,
+      isLocal(this.endpoint) ? this.endpoint : null,
+    )
   }
 
   /**
@@ -614,6 +779,8 @@ export class PanelClient {
    * @param contract the version the answer has to carry
    * @param signal a signal which stops the request and the wait for its next try
    * @param body the body of a POST, none for a GET
+   * @param local the endpoint of the page which answers the url, `null` for
+   *   a url of the network
    * @returns the parsed body
    * @throws PanelRequestError as `fetchOnce`, and `busy` for a request which
    *   was shed every time it was sent
@@ -623,9 +790,10 @@ export class PanelClient {
     contract: string,
     signal: AbortSignal | undefined,
     body?: SimulateRequest,
+    local: string | null = null,
   ): Promise<unknown> {
     for (let attempt = 1; ; attempt += 1) {
-      const answer = await this.fetchOnce(url, contract, signal, body)
+      const answer = await this.fetchOnce(url, contract, signal, body, local)
       if (!(answer instanceof Shed)) {
         return answer
       }
@@ -642,10 +810,17 @@ export class PanelClient {
    * The request carries no credential: a page of another origin may not send
    * one to the service anyway, and a panel is public data.
    *
+   * A url of an endpoint of the page is answered by the function registered
+   * under that endpoint, with the same `init`, and its answer is read as one
+   * of the network; the wait for its registration is part of the request, so
+   * the timeout and the signal bound it.
+   *
    * @param url the url
    * @param contract the version the answer has to carry
    * @param signal a signal which stops the request
    * @param body the body of a POST, none for a GET
+   * @param local the endpoint of the page which answers the url, `null` for
+   *   a url of the network, which `fetch` answers
    * @returns the parsed body, or `Shed` for a 503 which asks to be retried
    * @throws PanelRequestError of the kind `timeout` for a request which was
    *   not answered within `timeoutMs`, `aborted` for one the caller stopped,
@@ -658,6 +833,7 @@ export class PanelClient {
     contract: string,
     signal: AbortSignal | undefined,
     body?: SimulateRequest,
+    local: string | null = null,
   ): Promise<unknown> {
     const controller = new AbortController()
     let timedOut = false
@@ -668,18 +844,29 @@ export class PanelClient {
     const stop = (): void => {
       controller.abort()
     }
+    // a request its caller stopped before it was sent is stopped at once
+    if (signal?.aborted === true) {
+      controller.abort()
+    }
     signal?.addEventListener('abort', stop)
     try {
-      const answer = await fetch(url, {
-        method: body === undefined ? 'GET' : 'POST',
-        credentials: 'omit',
-        headers:
-          body === undefined
-            ? { accept: 'application/json' }
-            : { accept: 'application/json', 'content-type': 'application/json' },
-        signal: controller.signal,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      })
+      const fetcher: EndpointFetch =
+        local === null
+          ? (target, init) => fetch(target, init)
+          : await registration(local, controller.signal)
+      const answer = await untilStopped(
+        fetcher(url, {
+          method: body === undefined ? 'GET' : 'POST',
+          credentials: 'omit',
+          headers:
+            body === undefined
+              ? { accept: 'application/json' }
+              : { accept: 'application/json', 'content-type': 'application/json' },
+          signal: controller.signal,
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+        controller.signal,
+      )
       if (answer.status === 503 && answer.headers.has('retry-after')) {
         return new Shed(answer.headers.get('retry-after'))
       }

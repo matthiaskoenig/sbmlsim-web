@@ -24,6 +24,8 @@ interface Library {
   SbmlsimPanelElement: unknown
   /** The client of an endpoint. */
   PanelClient: unknown
+  /** The registration of an endpoint inside the page. */
+  registerEndpoint: unknown
   /** The renderer of a figure. */
   plotSvg: unknown
   /** The reader of a grid. */
@@ -79,6 +81,8 @@ describe('the bundle a page loads', () => {
     const library = context.sbmlsimWeb as Library
     expect(library.PANEL_TAG).toBe('sbmlsim-panel')
     expect(typeof library.SbmlsimPanelElement).toBe('function')
+    // a page which simulates in its own workers registers its endpoint on the global
+    expect(typeof library.registerEndpoint).toBe('function')
   })
 
   it('leaves nothing of the bundler behind for a browser to trip over', () => {
