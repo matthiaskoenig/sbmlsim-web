@@ -1,0 +1,109 @@
+# The documentation site of sbmlsim-web, built with Zensical from `docs/` into
+# the ignored `site/` (`npm run docs`, `npm run docs:serve` for the preview) and
+# published to GitHub Pages by `.github/workflows/docs.yml`. The demo pages of
+# the end to end tests have a site of their own (`demo/zensical.toml`).
+[project]
+site_name = "sbmlsim-web"
+site_url = "https://matthiaskoenig.github.io/sbmlsim-web/"
+site_description = "Web components which draw the interactive panels of an SBML model in any page: a documentation site, a slide deck or a course"
+site_author = "Matthias König"
+
+copyright = 'Copyright &copy; 2026 <a href="https://livermetabolism.com">Matthias König</a>'
+
+repo_url = "https://github.com/matthiaskoenig/sbmlsim-web"
+repo_name = "matthiaskoenig/sbmlsim-web"
+edit_uri = "edit/main/docs/"
+
+docs_dir = "docs"
+site_dir = "site"
+
+# The examples section takes a page per example, e.g. `examples/glimepiride.md`
+# with its assets under `examples/glimepiride/`, listed after its index.
+nav = [
+  { "Overview" = "index.md" },
+  { "Getting started" = "getting-started.md" },
+  { "Components" = "components.md" },
+  { "Embedding" = "embedding.md" },
+  { "Endpoints" = "endpoints.md" },
+  { "Contracts" = "contracts.md" },
+  { "Examples" = [
+    { "Examples" = "examples/index.md" },
+  ] },
+]
+
+# The elements of this checkout, which `scripts/docs.mjs` copies from `dist/`
+# after `npm run build`; a site which loads them from a CDN names the url of a
+# release instead (Getting started). The script is loaded once for every page,
+# so an example page writes its elements and nothing else.
+extra_javascript = ["assets/sbmlsim-web/sbmlsim-web.iife.js"]
+# the panels and the apps in the colours and the type of the palette
+extra_css = ["stylesheets/sbmlsim.css"]
+
+[project.theme]
+language = "en"
+# No instant navigation: a page which is swapped in without a reload runs no
+# script of its own, and an example page registers its endpoint inside the
+# page from a module script (Endpoints).
+features = [
+  "content.action.edit",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "search.suggest",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "indigo"
+accent = "indigo"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "indigo"
+accent = "indigo"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/matthiaskoenig/sbmlsim-web"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/npm"
+link = "https://www.npmjs.com/package/sbmlsim-web"
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+tables = {}
+toc.permalink = true
+pymdownx.betterem = {}
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.magiclink = {}
+pymdownx.superfences = {}
+pymdownx.tabbed.alternate_style = true

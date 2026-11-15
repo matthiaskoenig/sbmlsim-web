@@ -5,3 +5,6 @@ package-lock.json
 test-results
 playwright-report
 src/fixtures
+site
+docs/assets/sbmlsim-web
+.cache

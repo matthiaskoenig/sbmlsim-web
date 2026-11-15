@@ -10,6 +10,8 @@ A model declares its panels in its own SBML and an [sbmlsim](https://github.com/
 | `paneldata/1` | the study data drawn under its curves                           |
 | `app/1`       | the pages of the panels of a model                              |
 
+The documentation is at **https://matthiaskoenig.github.io/sbmlsim-web/**.
+
 `src/contract.ts` is the only place which knows the shape of a payload. The ids of the models, panels, knobs, curves and series are data which come from those payloads, so no model and no entity of a model is built into this library, and `checkContract` refuses a payload of a version it does not speak.
 
 A grid is fetched once per figure and not once per movement of a knob: `interpolate(grid, at)` reads a position between its points locally, multilinear over the axes and clamped to their ends. A point which did not integrate is `null` on the wire with its index in `status.failed`, and it gives `NaN` for the positions it bounds without touching a neighbour it does not bound.
@@ -248,11 +250,15 @@ npm run typecheck  # the whole project, the tests included
 npm run build      # dist/sbmlsim-web.js (ESM), .umd.cjs (UMD), .iife.js (IIFE), dist/types, checked against package.json
 npm run e2e        # the demo pages in Chrome against a live endpoint, see below
 npm run format     # write what prettier wants
+npm run docs       # the build and the documentation site into site/ (Zensical through uvx)
+npm run docs:serve # the build and a preview of the documentation site
 ```
 
 Vue is bundled into every build, so a host page needs nothing else: it reads `dist/sbmlsim-web.js` with a `<script type="module">` or through a bundler, `dist/sbmlsim-web.umd.cjs` is the same library for a `require`, and `dist/sbmlsim-web.iife.js` is the one for a page which wants the `sbmlsimWeb` global from a plain `<script src>`, which a static server serves as a script where it serves a `.cjs` file as a download.
 
 Vue is no dependency of the package but a development dependency of the build: every bundle inlines it, and the published types import nothing of it (`scripts/check-package.mjs` checks both after every build, together with every entry point `package.json` names), so a consumer installs no Vue for the elements and a page which runs a Vue of its own gets no second copy of it in its dependencies. The elements are custom elements with shadow roots, which share nothing with a Vue app of the page, so the price is the copy of Vue a page with a Vue of its own loads beside it.
+
+The documentation site is `docs/` with `zensical.toml`: `scripts/docs.mjs` copies `dist/sbmlsim-web.iife.js` into the ignored `docs/assets/sbmlsim-web/`, which every page loads, and builds the site with Zensical (`uvx --from zensical==0.1.0`) into the ignored `site/`, which the workflow `docs` publishes to GitHub Pages from `main`. An example goes into `docs/examples/` as a page with its assets in a folder of its name.
 
 A release is a tag `vX.Y.Z` of the version of `package.json` with its notes in `release-notes/X.Y.Z.md`: the workflow `publish` runs the checks of `ci` for the commit of the tag, the end to end tests included, and publishes the package to npm with its provenance.
 
