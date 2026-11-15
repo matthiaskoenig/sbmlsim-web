@@ -28,6 +28,7 @@ nav = [
   { "Contracts" = "contracts.md" },
   { "Examples" = [
     { "Examples" = "examples/index.md" },
+    { "Glimepiride" = "examples/glimepiride.md" },
   ] },
 ]
 
