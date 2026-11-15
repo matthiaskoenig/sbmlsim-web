@@ -45,12 +45,34 @@ export function defaultWorkers() {
   return Math.max(1, Math.min(8, cores - 1));
 }
 
-/** A module worker of a browser. */
+/** The URLs of the module scripts which start a worker of another origin, by its script. */
+const trampolines = new Map();
+
+/**
+ * A module worker of a browser.
+ *
+ * A browser starts a worker only from a script of the origin of the page, so a pool of a module
+ * which a page loads from another origin (a CDN such as jsDelivr or unpkg, which allow the
+ * requests of every origin) starts its workers from a module of the page's own (a `blob:` URL)
+ * whose only line imports the script of the worker; the worker then runs in the global scope of
+ * that module and imports the loader next to its script.
+ */
 function browserWorker(url) {
   if (typeof globalThis.Worker !== "function") {
     throw new Error("this host has no Web Workers: give the pool a createWorker");
   }
-  return new globalThis.Worker(url, { type: "module" });
+  const script = new URL(url, globalThis.location?.href);
+  const origin = globalThis.location?.origin;
+  if (origin === undefined || origin === "null" || script.origin === origin) {
+    return new globalThis.Worker(script, { type: "module" });
+  }
+  let trampoline = trampolines.get(script.href);
+  if (trampoline === undefined) {
+    const source = `import ${JSON.stringify(script.href)};\n`;
+    trampoline = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    trampolines.set(script.href, trampoline);
+  }
+  return new globalThis.Worker(trampoline, { type: "module" });
 }
 
 /** Listens to the messages and the errors of a Web Worker or of a worker thread of Node. */

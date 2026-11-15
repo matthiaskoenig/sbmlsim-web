@@ -50,22 +50,22 @@ registerEndpoint(endpoint: string, fetcher: EndpointFetch): void
 type EndpointFetch = (url: string, init: RequestInit) => Promise<Response>
 ```
 
-[sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function: `createPanelEndpoint` of its `js/panels.mjs` answers the routes from a bundle of the panels of a model which sbmlsim exports, simulating the compiled model in WebAssembly on a pool of Web Workers. A page of an app on it is the script of the elements, the tag and a module script which registers the endpoint:
+[sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function: `createPanelEndpoint` of its npm package (`sbmlsim-core/panels`) answers the routes from a bundle of the panels of a model which sbmlsim exports (`python -m sbmlsim.serve --model id=module:attribute --export DIR`, sbmlsim >= 0.25.0), simulating the compiled model in WebAssembly on a pool of Web Workers. A page of an app on it is the script of the elements, the tag and a module script which registers the endpoint:
 
 ```html
-<script src="sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.2.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
 <script type="module">
-  import { createPanelEndpoint } from './sbmlsim-core/panels.mjs'
+  import { createPanelEndpoint } from 'https://cdn.jsdelivr.net/npm/sbmlsim-core@0.1.0/panels.mjs'
 
   sbmlsimWeb.registerEndpoint(
     'local:glimepiride',
-    createPanelEndpoint({ bundle: new URL('./bundle/glimepiride/bundle.json', import.meta.url) }),
+    createPanelEndpoint({ bundle: new URL('./bundle/glimepiride/bundle.json', location.href) }),
   )
 </script>
 ```
 
-`registerEndpoint` is in the releases after 0.1.1, so the script of the elements is one of them, pinned as on any page (here a copy next to the page). Any function with the signature of `fetch` will do; one which answers every request with a stored payload is a few lines:
+`registerEndpoint` is in the releases from 0.2.0 on, and both scripts are pinned to a release, as on any page; the npm package `sbmlsim-core` starts the workers of its pool from a module of the page's origin, so it runs from the CDN as well, and only the bundle (`bundle.json` and the compiled model) is a file of the site. Any function with the signature of `fetch` will do; one which answers every request with a stored payload is a few lines:
 
 ```js
 import { registerEndpoint } from 'sbmlsim-web'

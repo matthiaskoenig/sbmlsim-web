@@ -37,7 +37,7 @@
 // keeps as a string and `JSON.stringify` writes back, and the engine reads.
 
 /** The contract of a model description this loader loads. */
-export const MODEL_CONTRACT = "model/1";
+export const MODEL_CONTRACT = "model/2";
 
 /** The most pages of 64 KiB the memory of an instance grows to: 2 GiB, as the wasmtime host. */
 export const MAX_MEMORY_PAGES = 32768;
