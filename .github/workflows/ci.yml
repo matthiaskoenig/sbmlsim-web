@@ -18,7 +18,7 @@ env:
   # example `examples.panels`, which is no part of its package, so the tests
   # need a checkout of its repository and not an install from PyPI. The pin
   # moves with every release of sbmlsim the library is tested against.
-  SBMLSIM_REF: '0.25.0'
+  SBMLSIM_REF: '0.27.1'
 
 jobs:
   build:
