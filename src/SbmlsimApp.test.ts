@@ -1488,3 +1488,31 @@ describe('the return paths of a switch of the variant', () => {
     )
   })
 })
+
+describe('a page of small panels', () => {
+  it('lays out small panels and gives each panel the size of its page', async () => {
+    declared = app({
+      pages: [
+        {
+          id: 'pageA',
+          title: 'Page A',
+          panels: ['panelA', 'panelB'],
+          scenarios: [],
+          size: 'small',
+        },
+        { id: 'pageB', title: 'Page B', panels: ['panelB'], scenarios: [] },
+      ],
+    })
+    const element = await shell()
+    const grid = part(element, '.grid')
+    expect(grid.classList.contains('small')).toBe(true)
+    for (const placed of element.shadowRoot.querySelectorAll('sbmlsim-panel')) {
+      expect(placed.getAttribute('size')).toBe('small')
+    }
+    // a page without a size, as a service before sbmlsim 0.28 answers it, is regular
+    ;(tabs(element)[1] as HTMLElement).click()
+    await settled()
+    expect(part(element, '.grid').classList.contains('small')).toBe(false)
+    expect(part(element, 'sbmlsim-panel').getAttribute('size')).toBe('regular')
+  })
+})

@@ -3251,3 +3251,20 @@ describe('the names a reader of the panel is given', () => {
     expect(figure(element)).toContain('>elapsed [h]</text>')
   })
 })
+
+describe('the size of the figure', () => {
+  it('draws a small panel narrower and lower than a regular one', async () => {
+    const regular = await started()
+    const small = await started({ size: 'small' })
+    const height = (element: PanelElement): number =>
+      Number.parseFloat(
+        shadow(element).querySelector<HTMLElement>('.figure')?.style.minHeight ?? '',
+      )
+    // the default width of 480 px: 0.6 of it, and 0.7 of it up to the 260 px of a small one
+    expect(height(regular)).toBe(288)
+    expect(height(small)).toBe(260)
+    // a size which is none is regular
+    const other = await started({ size: 'huge' })
+    expect(height(other)).toBe(288)
+  })
+})
