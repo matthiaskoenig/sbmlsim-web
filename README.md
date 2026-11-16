@@ -40,7 +40,7 @@ npm install sbmlsim-web
 import 'sbmlsim-web' // registers <sbmlsim-panel> and <sbmlsim-app>
 ```
 
-The script is pinned to a release (`@0.2.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.3.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
+The script is pinned to a release (`@0.3.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.3.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
 
 **The endpoint.** A page of another origin than the service is answered only when the service allows its origin, once per origin of the pages which embed it:
 
