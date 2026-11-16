@@ -438,7 +438,15 @@ export interface AppPage {
   panels: string[]
   /** The scenarios a reader picks the knobs of the page from, empty for a page without. */
   scenarios: Scenario[]
+  /**
+   * The size of the panels of the page: `regular`, or `small` for a page of many readouts side
+   * by side; absent, as from a service before sbmlsim 0.28, is `regular`.
+   */
+  size?: PanelSize
 }
+
+/** The size of the panels of a page, see `AppPage.size`. */
+export type PanelSize = 'regular' | 'small'
 
 /** One variant of the model of an app, which a reader switches to. */
 export interface AppVariant {

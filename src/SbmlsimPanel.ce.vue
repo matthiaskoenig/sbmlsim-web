@@ -166,6 +166,7 @@ import type {
   PanelDataDeclaration,
   PanelDataSeries,
   PanelDeclaration,
+  PanelSize,
   SimulateRequest,
   SimulateResponse,
 } from './contract'
@@ -328,14 +329,17 @@ const CONTROLS_WIDTH = 200
 const COLUMN_GAP = 16
 /** The width a figure falls back to before anything has been measured. */
 const DEFAULT_WIDTH = 480
-/** The smallest figure which is drawn whatever the room, in pixels. */
-const MIN_FIGURE_WIDTH = 220
-/** The height of a figure as a share of its width. */
-const ASPECT = 0.6
-/** The smallest height of a figure, in pixels. */
-const MIN_HEIGHT = 200
-/** The largest height of a figure, in pixels. */
-const MAX_HEIGHT = 420
+/**
+ * The figure of a panel of a size (`size`): the smallest figure which is drawn whatever the
+ * room, its height as a share of its width and the smallest and the largest height, in pixels.
+ * A small panel is one of many readouts side by side, so its figure is narrower and lower.
+ */
+const FIGURES: Readonly<
+  Record<PanelSize, { minWidth: number; aspect: number; minHeight: number; maxHeight: number }>
+> = {
+  regular: { minWidth: 220, aspect: 0.6, minHeight: 200, maxHeight: 420 },
+  small: { minWidth: 160, aspect: 0.7, minHeight: 150, maxHeight: 260 },
+}
 /** The milliseconds a released knob waits before its simulation is sent. */
 const DEBOUNCE = 120
 /** How often one request is tried: the first try and one retry. */
@@ -464,6 +468,12 @@ const props = defineProps({
   head: { type: String, default: undefined },
   /** Where the controls go: `auto` (the default), `sidebar`, `stacked` or `toolbar`. */
   layout: { type: String as PropType<LayoutName>, default: 'auto' },
+  /**
+   * The size of the figure: `regular` (the default), or `small` for a panel of many readouts
+   * side by side, whose figure is narrower and lower; any other text is `regular`. The shell of
+   * an app writes the size of its page (`AppPage.size`).
+   */
+  size: { type: String as PropType<PanelSize>, default: 'regular' },
   /**
    * Which values of the tokens are used: `auto` (the default), `light` or
    * `dark`. It is read by the style of the element and not by its script: the
@@ -931,18 +941,23 @@ const drawnLayout = computed<DrawnLayout>(() => {
   return available.value >= SIDEBAR_FROM ? 'sidebar' : 'stacked'
 })
 
+/** The figure of the size of the panel, `regular` for a size which is none. */
+const figure = computed(() => (props.size === 'small' ? FIGURES.small : FIGURES.regular))
+
 /** The width of the figure in pixels, the room which is left next to the controls. */
 const figureWidth = computed<number>(() => {
   const room =
     drawnLayout.value === 'sidebar'
       ? available.value - CONTROLS_WIDTH - COLUMN_GAP
       : available.value
-  return Math.max(MIN_FIGURE_WIDTH, Math.round(room))
+  return Math.max(figure.value.minWidth, Math.round(room))
 })
 
 /** The height of the figure in pixels, its width in the aspect of the design. */
 const figureHeight = computed<number>(() =>
-  Math.round(clamp(figureWidth.value * ASPECT, MIN_HEIGHT, MAX_HEIGHT)),
+  Math.round(
+    clamp(figureWidth.value * figure.value.aspect, figure.value.minHeight, figure.value.maxHeight),
+  ),
 )
 
 /**

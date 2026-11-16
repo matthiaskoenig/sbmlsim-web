@@ -29,7 +29,10 @@
  * which would stay empty collapses, so a lone panel takes the row: two columns
  * from about 976px of the width of the shell, one below it, which is also the
  * one column of a phone. The width is the one of the shell and not of the
- * window, so an app in a column of a page is as narrow as its column.
+ * window, so an app in a column of a page is as narrow as its column. A page of
+ * small panels (`AppPage.size`, many readouts side by side) has columns of at
+ * least 280px, four in the width of the shell, and every panel of it draws its
+ * figure small (`size` of the panel).
  *
  * The cards of a row share the rows of the grid: a card spans three, the head,
  * the body and the foot of its panel, and lays its panel out on them as a
@@ -924,7 +927,11 @@ onBeforeUnmount(() => {
         ref="grid"
         :key="current.id"
         class="grid"
-        :class="{ switching: switching, failed: switchFailure !== null }"
+        :class="{
+          switching: switching,
+          failed: switchFailure !== null,
+          small: current.size === 'small',
+        }"
         :aria-busy="switchCaption !== '' ? 'true' : 'false'"
         :aria-label="current.title"
         @sbmlsim-result="collect"
@@ -940,6 +947,7 @@ onBeforeUnmount(() => {
             :theme="props.theme"
             :timeout="props.timeout"
             :heading-level="panelLevel"
+            :size="current.size === 'small' ? 'small' : 'regular'"
             :variant="variantOfPanels"
             :values.attr="valuesOf(one)"
             :head.attr="headOf(one)"
@@ -1454,6 +1462,14 @@ onBeforeUnmount(() => {
 :focus-visible {
   outline: 2px solid var(--_accent);
   outline-offset: 2px;
+}
+
+/* a page of small panels, many readouts side by side: as many columns as fit a card of 280px,
+   four in the width of the shell of a page */
+.grid.small {
+  --_card-pad: 12px;
+
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
 }
 
 /* a figure keeps the room on a phone, where the card is nearly the screen */
