@@ -15,6 +15,7 @@ export default tseslint.config(
       'docs/assets/sbmlsim-web/**',
       // the files an example takes from its sources as they are (scripts/glimepiride.sh)
       'docs/examples/*/sbmlsim-core/**',
+      'docs/examples/*/pkpdutils-core/**',
       'docs/examples/*/bundle/**',
       'test-results/**',
       'playwright-report/**',

@@ -40,7 +40,7 @@ npm install sbmlsim-web
 import 'sbmlsim-web' // registers <sbmlsim-panel> and <sbmlsim-app>
 ```
 
-The script is pinned to a release (`@0.3.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.3.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()` and `reset()` in TypeScript.
+The script is pinned to a release (`@0.3.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.3.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()`, `reset()`, `result()` and `drawn()` in TypeScript.
 
 **The endpoint.** A page of another origin than the service is answered only when the service allows its origin, once per origin of the pages which embed it:
 
@@ -204,7 +204,7 @@ It draws the title and the subtitle, the navigation of the pages (none for an ap
 
 **A failure leaves one line.** An app which cannot be read - an endpoint which is down, a model without an app, a payload of another version - shows one line in the voice of the panel, which names no url, no host and no status, and no navigation, grid or footer; `sbmlsim-error` is dispatched as a panel does.
 
-A panel dispatches `sbmlsim-result` with the `provenance` and the `spec_hash` of every successful simulation, never of a failure and never of a stored fallback. The shell dispatches `sbmlsim-page` with `detail.page`, the id of the page, when a reader switches the page (not when a page sets the attribute itself), which lets a deployment give its pages addresses and answer the back button by setting `page` again, and it announces the switch to a screen reader in a polite live region. `register(tagName, appTagName)` gives either element another tag, and the shells place their panels under `tagName`.
+A panel dispatches `sbmlsim-result` for every successful simulation, never for a failure and never for a stored fallback: the `panel` which answered, the `provenance` and the `spec_hash` of the run and the `values` of the knobs it was run at, which is the state it was sent at and not what the controls hold by the time the answer arrives. `result()` of that element is the run itself, a copy of the answer its figure was drawn from. A readout of the page which computes something the panels do not draw - a table of pharmacokinetic parameters, a ratio, a sum - follows `sbmlsim-shown` instead, which a panel dispatches whenever what it draws changed, after a run and after a movement of a knob the drawn grid covers, which fetches nothing; `drawn()` is that figure, one curve per id at the position of the controls, read out of the grid as the figure is, so a readout works from the curves the reader sees and never simulates a second time. The shell dispatches `sbmlsim-page` with `detail.page`, the id of the page, when a reader switches the page (not when a page sets the attribute itself), which lets a deployment give its pages addresses and answer the back button by setting `page` again, and it announces the switch to a screen reader in a polite live region. `register(tagName, appTagName)` gives either element another tag, and the shells place their panels under `tagName`.
 
 ## An endpoint inside the page
 

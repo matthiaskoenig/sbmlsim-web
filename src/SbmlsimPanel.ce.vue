@@ -145,6 +145,7 @@ import {
   onMounted,
   ref,
   shallowRef,
+  toRaw,
   useHost,
   useTemplateRef,
   watch,
@@ -171,6 +172,7 @@ import type {
   SimulateResponse,
 } from './contract'
 import { interpolate } from './interpolate'
+import type { DrawnFigure } from './interpolate'
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
 import {
@@ -2089,7 +2091,12 @@ async function simulate(gridId: string | null): Promise<void> {
     heldFoot.value = ''
     host?.dispatchEvent(
       new CustomEvent('sbmlsim-result', {
-        detail: { provenance: answer.provenance, spec_hash: answer.spec_hash },
+        detail: {
+          panel: props.panel,
+          provenance: answer.provenance,
+          spec_hash: answer.spec_hash,
+          values: sent,
+        },
         bubbles: true,
         composed: true,
       }),
@@ -2878,7 +2885,69 @@ onBeforeUnmount(() => {
   unobserve()
 })
 
-defineExpose({ activate, freeze, reset })
+/**
+ * The answer of the last simulation of this panel, a copy, or `null`.
+ *
+ * A readout which computes something of its own from the curves a panel drew - a table of
+ * parameters, a ratio, a sum - reads it here rather than simulating the same run again: the
+ * `panel` and the `values` of the `sbmlsim-result` event say which run answered and at which
+ * state of the controls, and this is that run. It is a copy, so what a reader does with it
+ * cannot reach what the panel draws, and it is `null` before the first answer, for a failure
+ * and for the stored fallback of a declaration, which is no simulation.
+ */
+function result(): SimulateResponse | null {
+  return grid.value === null ? null : structuredClone(toRaw(grid.value))
+}
+
+/**
+ * The figure this panel draws, or `null` while it draws nothing.
+ *
+ * The grid of the last run read at the position of the controls (`interpolate`), which is the
+ * figure itself: a readout which computes something of its own from the curves a panel drew
+ * takes them here, and gets the one curve per id the reader sees rather than the rows of a grid
+ * to pick from. `sbmlsim-shown` says when it changed, after a run and after a movement of a
+ * knob the grid covers, and `result()` is the run behind it.
+ */
+function drawn(): DrawnFigure | null {
+  const answer = grid.value
+  if (answer === null) {
+    return null
+  }
+  return {
+    x: [...answer.x],
+    curves: interpolate(answer, knobValues.value),
+    values: { ...knobValues.value },
+    units: { ...answer.units },
+    provenance: structuredClone(toRaw(answer.provenance)),
+    spec_hash: answer.spec_hash,
+  }
+}
+
+/*
+ * Announce what the panel draws, whenever it changes: the answer of a run, the movement of a
+ * knob the drawn grid covers, which fetches nothing, and the stored fallback of a declaration.
+ * It is `post` so a listener which reads `drawn()` reads the state the figure was drawn at, and
+ * it says no more than which panel and at which position, since a listener which wants the
+ * curves asks for them.
+ */
+watch(
+  [grid, knobValues],
+  () => {
+    if (grid.value === null) {
+      return
+    }
+    host?.dispatchEvent(
+      new CustomEvent('sbmlsim-shown', {
+        detail: { panel: props.panel, values: { ...knobValues.value } },
+        bubbles: true,
+        composed: true,
+      }),
+    )
+  },
+  { flush: 'post' },
+)
+
+defineExpose({ activate, freeze, reset, result, drawn })
 </script>
 
 <template>

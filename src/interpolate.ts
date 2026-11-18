@@ -7,7 +7,7 @@
  * dom - so it is the same function in a page, in a test and in a worker.
  */
 
-import type { Grid } from './contract'
+import type { Grid, Provenance } from './contract'
 
 /** One index of an axis and the weight it carries at a position. */
 interface AxisWeight {
@@ -122,6 +122,30 @@ function corners(grid: Grid, at: Record<string, number>): Corner[] {
     stride *= axis.values.length
   }
   return found
+}
+
+/**
+ * The figure a panel draws: one curve per id at the position its knobs stand at.
+ *
+ * It is what `drawn()` of a panel hands out, the grid of its last run read at the position of
+ * the controls by `interpolate` exactly as the figure is drawn, so a readout of the page -
+ * a table of parameters, a ratio, a sum - computes from the curves the reader sees and never
+ * simulates again. A grid of one point is that point, since the interpolation reads the point a
+ * position lands on alone.
+ */
+export interface DrawnFigure {
+  /** The times of the curves, the `x` of the grid. */
+  x: number[]
+  /** One timecourse per curve id, over `x`, with `NaN` where a point did not integrate. */
+  curves: Record<string, number[]>
+  /** The position the curves were read at, the value of every knob of the panel. */
+  values: Record<string, number>
+  /** The unit of `x` and of every curve, by its id, as the grid states them. */
+  units: Record<string, string | null>
+  /** What simulated the grid the curves are read out of. */
+  provenance: Provenance
+  /** The hash of the specification of that run. */
+  spec_hash: string
 }
 
 /**

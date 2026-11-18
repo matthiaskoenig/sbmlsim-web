@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Glimepiride app</title>
     <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="nca.css" />
     <meta
       name="description"
       content="The whole-body PBPK model of glimepiride as an app of interactive panels, simulated in the browser on sbmlsim-core."
@@ -66,6 +67,15 @@
   <body>
     <main>
       <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
+      <section id="pk-parameters" aria-labelledby="pk-head">
+        <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
+        <p class="pk-lead">
+          Of the simulated plasma curves above, computed in this page by the kernel of
+          <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.
+        </p>
+        <table></table>
+        <p class="pk-note"></p>
+      </section>
       <footer>
         <p>
           Every simulation runs in this browser, on
@@ -83,5 +93,6 @@
     </main>
     <script src="../../assets/sbmlsim-web/sbmlsim-web.iife.js"></script>
     <script type="module" src="register.mjs"></script>
+    <script type="module" src="nca.mjs"></script>
   </body>
 </html>

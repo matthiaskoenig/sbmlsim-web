@@ -1,5 +1,6 @@
 {
   "sbmlsim": "2995976754e732c49a2c54d1347a962c3af2c2b7",
   "sbmlsim-core": "1905df9c160738b2a724f106fdc16657a1d8acf5",
-  "pkdb_models": "1a8d30a91007fa1ba50d3bb59e4eb882731c7dad"
+  "pkdb_models": "1a8d30a91007fa1ba50d3bb59e4eb882731c7dad",
+  "pkpdutils-core": "0.7.0"
 }

@@ -1,0 +1,174 @@
+/*
+ * The table of the pharmacokinetic parameters of the app (`nca.mjs`).
+ *
+ * It is a card beside the cards of the panels: the tokens below read the `--sbmlsim-*` of the
+ * host and fall back to the values of `theme.css` of sbmlsim-web, in the same two schemes, so
+ * the table carries the colours, the radius and the shadow of the panels of the page and
+ * follows a host which sets a token of its own. The fallbacks are written twice as `theme.css`
+ * writes them, `light-dark()` once and the media query for a browser without it.
+ */
+#pk-parameters {
+  --pk-bg-card: var(--sbmlsim-bg-card, light-dark(rgb(255 255 255), rgb(26 30 36)));
+  --pk-fg: var(--sbmlsim-fg, light-dark(rgb(27 31 36), rgb(230 233 238)));
+  --pk-fg-soft: var(--sbmlsim-fg-soft, light-dark(rgb(91 100 114), rgb(154 164 178)));
+  --pk-line: var(--sbmlsim-line, light-dark(rgb(227 230 234), rgb(42 48 56)));
+  --pk-radius: var(--sbmlsim-radius, 10px);
+  --pk-shadow: var(
+    --sbmlsim-shadow,
+    0 1px 2px light-dark(rgb(16 24 40 / 6%), transparent),
+    0 1px 3px light-dark(rgb(16 24 40 / 10%), transparent)
+  );
+
+  /* the container of the query below: the table is as wide as the column it sits in */
+  container: pk-parameters / inline-size;
+  box-sizing: border-box;
+  /* a screen too narrow for the table scrolls the card and never the page */
+  overflow-x: auto;
+  margin: 16px 16px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--pk-line);
+  border-radius: var(--pk-radius);
+  background: var(--pk-bg-card);
+  box-shadow: var(--pk-shadow);
+  color: var(--pk-fg);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+@media (prefers-color-scheme: dark) {
+  #pk-parameters {
+    --pk-bg-card: var(--sbmlsim-bg-card, rgb(26 30 36));
+    --pk-fg: var(--sbmlsim-fg, rgb(230 233 238));
+    --pk-fg-soft: var(--sbmlsim-fg-soft, rgb(154 164 178));
+    --pk-line: var(--sbmlsim-line, rgb(42 48 56));
+    --pk-shadow: var(--sbmlsim-shadow, none);
+  }
+}
+
+#pk-parameters .pk-head {
+  margin: 0 0 2px;
+  color: var(--pk-fg);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+#pk-parameters .pk-lead {
+  margin: 0 0 10px;
+  color: var(--pk-fg-soft);
+  font-size: 13px;
+}
+
+/* a documentation theme wraps a table in a block which shrinks to its content and scrolls
+ * (`md-typeset__table`), which would leave the card half empty: the wrapper takes the width of
+ * the card here and keeps the scrolling for a screen too narrow for the table */
+#pk-parameters .md-typeset__table {
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
+/* a documentation theme lays its own hands on a table - a scrolling inline block, its own
+ * type, its own borders - so the table of the card states what it is itself */
+#pk-parameters table {
+  display: table;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-collapse: collapse;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+#pk-parameters th,
+#pk-parameters td {
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* the name of a parameter and its unit read from the left, the numbers from the right */
+#pk-parameters th[scope='row'],
+#pk-parameters tr > :nth-child(-n + 2) {
+  text-align: left;
+}
+
+#pk-parameters th[scope='row'] {
+  font-weight: 400;
+}
+
+/* the name and the unit take what they need, the three analytes share the rest of the width */
+#pk-parameters tr > :nth-child(-n + 2) {
+  width: 1%;
+}
+
+#pk-parameters th:first-child,
+#pk-parameters td:first-child {
+  padding-left: 0;
+}
+
+#pk-parameters th:last-child,
+#pk-parameters td:last-child {
+  padding-right: 0;
+}
+
+#pk-parameters thead th {
+  border-bottom: 1px solid var(--pk-line);
+  color: var(--pk-fg-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#pk-parameters tbody tr + tr th,
+#pk-parameters tbody tr + tr td {
+  border-top: 1px solid color-mix(in srgb, var(--pk-line) 55%, transparent);
+}
+
+/* the second block, what the terminal regression and the extrapolation stood on */
+#pk-parameters .pk-quality th,
+#pk-parameters .pk-quality td {
+  color: var(--pk-fg-soft);
+}
+
+#pk-parameters .pk-quality tr:first-child th,
+#pk-parameters .pk-quality tr:first-child td {
+  border-top: 1px solid var(--pk-line);
+}
+
+#pk-parameters .pk-unit {
+  color: var(--pk-fg-soft);
+  text-align: left;
+  font-size: 13px;
+}
+
+#pk-parameters .pk-value {
+  font-variant-numeric: tabular-nums;
+}
+
+#pk-parameters .pk-note {
+  margin: 10px 0 0;
+  color: var(--pk-fg-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* the unit of a row carries the parameter on a narrow screen, where the table would not fit */
+@container (max-width: 420px) {
+  #pk-parameters .pk-unit {
+    font-size: 12px;
+  }
+
+  #pk-parameters th,
+  #pk-parameters td {
+    padding: 5px 6px;
+  }
+}

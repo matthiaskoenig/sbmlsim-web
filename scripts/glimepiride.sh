@@ -14,7 +14,12 @@
 #    uncertainties of `distrib` stripped) and compiles it into `model.wasm` and `model.json`;
 # 3. the bundle, the compiled models, the JavaScript of sbmlsim-core (the loader, the pool of
 #    workers and the panel endpoint), its runtime and its notices of third parties are copied
-#    into `docs/examples/glimepiride/`, with `SOURCES.json` naming the commits they come from.
+#    into `docs/examples/glimepiride/`, with `SOURCES.json` naming the commits they come from;
+# 4. the npm package `pkpdutils-core`, the kernel of pkpdutils as WebAssembly, is unpacked from
+#    the registry at the version `PKPDUTILS_CORE` names and its loader and runtime are copied
+#    next to those of sbmlsim-core. It is a released package and not a checkout, so `SOURCES.json`
+#    carries its version where the others carry a commit, and `nca.mjs` of the example analyses
+#    the curves of the panels with it.
 #
 # The checkouts are siblings of this repository unless the variables name them:
 # SBMLSIM_REPO (sbmlsim), SBMLSIM_CORE_REPO (sbmlsim-core, with its CLI built:
@@ -29,6 +34,8 @@ pkdb="$(cd "${PKDB_MODELS_REPO:-$here/../pkdb_models}" && pwd)"
 cli="$core/target/release/sbmlsim-core"
 out="$here/docs/examples/glimepiride"
 model="glimepiride"
+# the release of the kernel of pkpdutils the example analyses its curves with
+pkpdutils_core="${PKPDUTILS_CORE:-0.7.0}"
 
 if [[ ! -x "$cli" ]]; then
   echo "error: $cli does not exist, build it with 'cargo build --release -p sbmlsim-cli' in $core" >&2
@@ -68,12 +75,22 @@ cp "$work/runtime"/{engine.wasm,mathlib.wasm} "$out/sbmlsim-core/runtime/"
 cp "$work/runtime/THIRD_PARTY.md" "$out/sbmlsim-core/THIRD_PARTY.md"
 cp "$core/LICENSE" "$out/sbmlsim-core/LICENSE"
 
+echo "4. unpack pkpdutils-core $pkpdutils_core of the registry"
+rm -rf "$out/pkpdutils-core"
+mkdir -p "$out/pkpdutils-core/runtime" "$work/npm"
+(cd "$work/npm" && npm pack --silent "pkpdutils-core@$pkpdutils_core" >/dev/null && tar xzf "pkpdutils-core-$pkpdutils_core.tgz")
+# the loader and the module alone: the example drives one instance and needs no pool of workers
+cp "$work/npm/package/loader.mjs" "$out/pkpdutils-core/"
+cp "$work/npm/package/runtime/pkpdutils-core.wasm" "$out/pkpdutils-core/runtime/"
+cp "$work/npm/package/LICENSE" "$out/pkpdutils-core/LICENSE"
+
 commit() { git -C "$1" rev-parse HEAD; }
 cat >"$out/SOURCES.json" <<EOF
 {
   "sbmlsim": "$(commit "$sbmlsim")",
   "sbmlsim-core": "$(commit "$core")",
-  "pkdb_models": "$(commit "$pkdb")"
+  "pkdb_models": "$(commit "$pkdb")",
+  "pkpdutils-core": "$pkpdutils_core"
 }
 EOF
 echo "done: $(du -sh "$out" | cut -f1) in ${out#"$here"/}"

@@ -21,6 +21,8 @@
 
 import { defineCustomElement } from 'vue'
 
+import type { SimulateResponse } from './contract'
+import type { DrawnFigure } from './interpolate'
 import SbmlsimApp from './SbmlsimApp.ce.vue'
 import SbmlsimPanel from './SbmlsimPanel.ce.vue'
 import { APP_TAG, PANEL_TAG, placePanelTag } from './tags'
@@ -69,6 +71,7 @@ export {
 } from './client'
 export type { EndpointFetch, FailureKind } from './client'
 export { interpolate } from './interpolate'
+export type { DrawnFigure } from './interpolate'
 export { canvasMeasure, fontOf } from './measure'
 export type { FigureFont } from './measure'
 export { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
@@ -96,6 +99,21 @@ export interface SbmlsimPanelHTMLElement extends HTMLElement {
   freeze(): void
   /** Put every knob back to the value its declaration states. */
   reset(): void
+  /**
+   * The answer of the last simulation of this panel, a copy, or `null`.
+   *
+   * `null` before the first answer, for a failure and for the stored fallback of a
+   * declaration, which is no simulation. A readout which computes something of its own from
+   * the curves a panel drew reads it here rather than running the same simulation again.
+   */
+  result(): SimulateResponse | null
+  /**
+   * The figure this panel draws, one curve per id at the position of its controls, or `null`.
+   *
+   * The grid of the last run read where the knobs stand, which is the figure itself.
+   * `sbmlsim-shown` says when it changed.
+   */
+  drawn(): DrawnFigure | null
 }
 
 /** `<sbmlsim-app>` as a page sees it, an element which is driven by its attributes alone. */
