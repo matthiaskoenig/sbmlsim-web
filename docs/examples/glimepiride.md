@@ -14,6 +14,17 @@ The whole-body PBPK model of glimepiride and its metabolites M1 and M2 as an app
 
 <script type="module" src="glimepiride/register.mjs"></script>
 
+<link rel="stylesheet" href="glimepiride/nca.css" />
+
+<section id="pk-parameters" aria-labelledby="pk-head">
+  <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
+  <p class="pk-lead">Of the simulated plasma curves above, computed in this page by the kernel of <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.</p>
+  <table></table>
+  <p class="pk-note"></p>
+</section>
+
+<script type="module" src="glimepiride/nca.mjs"></script>
+
 [Open the app on a page of its own](glimepiride/app.html){ .md-button }
 
 ## The model
@@ -40,7 +51,7 @@ The app is the same app the sbmlsim service serves (`python -m sbmlsim.serve --m
 2. **The compiled model.** [sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) compiles that SBML into `model.wasm` (92 kB) with its description `model.json`; its engine `engine.wasm` (CVODE with the sparse solver KLU, 660 kB) runs it.
 3. **The endpoint inside the page.** `register.mjs` registers a function of the page as the endpoint `local:glimepiride` ([an endpoint inside the page](../endpoints.md#an-endpoint-inside-the-page)), and the app is one element, `<sbmlsim-app endpoint="local:glimepiride" model="glimepiride">`.
 
-The module is all the code of the page:
+The module which registers it is all the code the app needs:
 
 ```js
 import { createPanelEndpoint } from './sbmlsim-core/panels.mjs'
@@ -54,6 +65,14 @@ sbmlsimWeb.registerEndpoint(
 The elements send their requests to the function instead of the network; it answers them from the bundle and runs every point of a grid as a simulation on the pool of workers. The four panels of the page share one simulation, so a state of the knobs costs one scan, a few milliseconds per point.
 
 The curves agree with the answers of the sbmlsim service, which simulates the same panels with roadrunner, to 1e-11 of their peak. The assets are written by `scripts/glimepiride.sh` of this repository from checkouts of sbmlsim, sbmlsim-core and pkdb_models (`SOURCES.json` names their commits).
+
+## The parameters
+
+The table under the app is a second reader of the same curves. A panel says with `sbmlsim-shown` whenever what it draws changed - the answer of a run, and a movement of the dose, which the grid of the run already covers and which simulates nothing - and hands the figure out with `drawn()`, one curve per id at the position of the knobs. The module `nca.mjs` of the example sends it to the kernel of [pkpdutils](https://matthiaskoenig.github.io/pkpdutils/), [`pkpdutils-core`](https://www.npmjs.com/package/pkpdutils-core) on npm, which is the non-compartmental analysis of that library as a WebAssembly module of 900 kB: a request of the times, the values, the dose and the units in, the columns of the result out. It runs next to the simulation which produced the curve, in the same page and without a server, and a curve of 501 points costs well under a millisecond.
+
+The dose of the knob is in mg and the curves carry a molar concentration, so the dose travels into the analysis as an amount of substance over the molar mass of the model (`Mr_gli`, 490.616 g/mol) and the clearance comes back in l/h; the concentration is sent as `µmol/l`, which is what `µM` of the model is. CL/F and V~z~/F are of glimepiride alone, since a metabolite carries no dose of its own.
+
+The three rows under the rule are what the analysis stood on. A whole-body model keeps a slowly decaying terminal phase at the end of the simulated window, so the regression of the terminal slope sits on that tail: it covers about one half-life rather than the two a study would ask for, and a fifth to two fifths of the area to infinity is extrapolated. The half-life of such a window is the apparent one of the simulation and not the 5 to 8 h of the literature, which a window of 24 h of measurements gives; the table says which window it used, so both numbers can be read for what they are.
 
 ## Reference
 

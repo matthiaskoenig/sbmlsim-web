@@ -59,6 +59,7 @@ export default defineConfig(({ command }) => ({
   test: {
     environment: 'node',
     css: true,
-    include: ['src/**/*.test.ts'],
+    // the modules of the examples of the documentation are tested as the package is
+    include: ['src/**/*.test.ts', 'docs/examples/**/*.test.mjs'],
   },
 }))

@@ -2536,6 +2536,73 @@ describe('the variant of the model', () => {
     expect(figure(element)).toContain('class="curve"')
   })
 
+  it('announces the panel and the knob values of every answer, and hands the run out as a copy', async () => {
+    // a readout of the page computes from the run the figure was drawn from: the event says
+    // which panel answered and at which state of the knobs, and `result()` is that run
+    const heard: { panel: string; values: Record<string, number> }[] = []
+    document.addEventListener('sbmlsim-result', (event) =>
+      heard.push((event as CustomEvent<{ panel: string; values: Record<string, number> }>).detail),
+    )
+    const element = await started()
+    expect(heard.map((one) => one.panel)).toEqual(['panelA'])
+    // the whole state of the knobs and not only what the body carried: the gridded knob
+    // travels as `grid` and a readout wants the value of every knob the run was made at
+    expect(Object.keys(heard[0]?.values ?? {}).sort()).toEqual(['knobA', 'knobB'])
+    expect(heard[0]?.values).toMatchObject(simulations().at(-1)?.values ?? {})
+    const answer = element.result()
+    expect(answer?.x).toEqual(run().x)
+    expect(answer?.curves).toEqual(run().curves)
+    expect(answer?.units).toEqual(run().units)
+    // a copy: what a reader does with it cannot reach what the panel draws
+    expect(answer).not.toBe(element.result())
+    answer?.x.push(999)
+    expect(element.result()?.x).toEqual(run().x)
+  })
+
+  it('draws out of the grid where the knobs stand, and says so with every change', async () => {
+    // a readout of the page follows `sbmlsim-shown`: it is dispatched for a run and for a
+    // movement of a knob the grid covers, which simulates nothing, and `drawn()` is the
+    // figure the reader sees at that moment
+    const heard: { panel: string; values: Record<string, number> }[] = []
+    document.addEventListener('sbmlsim-shown', (event) =>
+      heard.push((event as CustomEvent<{ panel: string; values: Record<string, number> }>).detail),
+    )
+    const element = await started()
+    expect(heard.map((one) => one.panel)).toEqual(['panelA'])
+    const figure = element.drawn()
+    // the gridded knob stands on the second point of its axis, so the figure is that row
+    const row = AXIS_VALUES.indexOf(heard[0]?.values.knobB ?? 0)
+    expect(figure?.x).toEqual(run().x)
+    expect(figure?.curves.curveA).toEqual(run().curves.curveA?.[row])
+    expect(figure?.values).toEqual(heard[0]?.values)
+    expect(figure?.units).toEqual(run().units)
+    expect(figure?.spec_hash).toBe(HASH)
+
+    // a movement of that knob is announced and read out of the grid, and asks for nothing
+    const before = calls.length
+    const knob = shadow(element).querySelector<HTMLInputElement>('#knob-knobB')
+    if (knob === null) {
+      throw new Error('the panel draws no control of the gridded knob')
+    }
+    knob.value = String(AXIS_VALUES.at(-1))
+    knob.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(calls.length).toBe(before)
+    expect(heard.length).toBe(2)
+    expect(heard[1]?.values.knobB).toBe(AXIS_VALUES.at(-1))
+    expect(element.drawn()?.curves.curveA).toEqual(run().curves.curveA?.at(-1))
+  })
+
+  it('draws nothing before its first answer', async () => {
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    expect(element.drawn()).toBe(null)
+  })
+
+  it('has no result before its first answer', async () => {
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    expect(element.result()).toBe(null)
+  })
+
   it('announces every answer with its provenance', async () => {
     const heard: unknown[] = []
     document.addEventListener('sbmlsim-result', (event) =>
