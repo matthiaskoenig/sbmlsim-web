@@ -519,6 +519,14 @@ const props = defineProps({
    * declares no uncertainty draws no band whatever it says.
    */
   draws: { type: Number, default: undefined },
+  /**
+   * The scale of the y axis the host asks for, `true` or `false`; absent is the scale the curves
+   * declare (`initialLog`). The shell of an app writes it for the logarithmic switch of its page:
+   * it is the axis the panel starts at and goes back to on a reset, and a change of it sets the
+   * axis, which the panel's own switch may change again. A panel whose curves do not share one
+   * scale keeps the axis its declaration gives it, whatever the host asks for.
+   */
+  log: { type: String as PropType<'true' | 'false'>, default: undefined },
   /** The milliseconds one request is given before it is stopped. */
   timeout: { type: Number, default: DEFAULT_TIMEOUT },
   /**
@@ -1938,14 +1946,18 @@ function firstGridded(declared: PanelDeclaration): string | null {
  * Get whether the y axis of a panel starts logarithmic.
  *
  * The axis is one, so it follows the curves only when every one of them asks
- * for it; the toggle is there for every other case.
+ * for it; the toggle is there for every other case. The host may ask for the
+ * axis of a panel whose curves all share one scale (`log`).
  *
  * @param declared the declaration of the panel
  * @returns whether the axis starts logarithmic
  */
 function initialLog(declared: PanelDeclaration): boolean {
   const curves = curvesOf(declared)
-  return curves.length > 0 && curves.every((one) => one.scale === 'log')
+  const own = curves.length > 0 && curves.every((one) => one.scale === 'log')
+  // one axis for curves of two scales cannot be asked for: only a panel of one scale follows the host
+  const alike = curves.length > 0 && curves.every((one) => one.scale === curves[0]?.scale)
+  return props.log !== undefined && alike ? props.log === 'true' : own
 }
 
 /**
@@ -2919,6 +2931,15 @@ watch(
  * study data are untouched, so it is a run and no restart, and a frozen panel
  * owes it as it owes a movement of a knob.
  */
+watch(
+  () => props.log,
+  () => {
+    if (declaration.value !== null) {
+      logY.value = initialLog(declaration.value)
+    }
+  },
+)
+
 watch(requestedDraws, () => {
   if (declaration.value === null) {
     return

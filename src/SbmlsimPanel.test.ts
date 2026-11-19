@@ -941,6 +941,31 @@ describe('the figure', () => {
     expect(figure(await started())).not.toContain('>1e-6<')
   })
 
+  it('takes the scale of its y axis from the host where its curves share one', async () => {
+    served.panel = () =>
+      Promise.resolve({
+        ...declaration(),
+        curves: declaration().curves.map((one) => ({ ...one, scale: 'linear' as const })),
+      })
+    served.simulate = () => Promise.resolve(decades())
+    const element = await started({ log: 'true' })
+    const toggle = shadow(element).querySelector('.toggle input')
+    if (!(toggle instanceof HTMLInputElement)) {
+      throw new Error('the panel has no toggle of the scale of its y axis')
+    }
+    expect(toggle.checked).toBe(true)
+    // a change of the attribute sets the axis, and the reset goes back to what it asks for
+    element.setAttribute('log', 'false')
+    await nextTick()
+    expect(toggle.checked).toBe(false)
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change'))
+    await nextTick()
+    element.reset()
+    await nextTick()
+    expect(toggle.checked).toBe(false)
+  })
+
   it('keeps the title and the role of the figure and names its axes', async () => {
     const element = await started()
     expect(figure(element)).toContain('role="img"')

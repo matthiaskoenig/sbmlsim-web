@@ -7,6 +7,7 @@ import type {
   AppDeclaration,
   PanelAxis,
   PanelDeclaration,
+  Provenance,
   SimulateRequest,
   SimulateResponse,
 } from './contract'
@@ -369,7 +370,11 @@ describe('the shell of an app', () => {
 
   it('renders a nav entry per page and the panels of the current page', async () => {
     const element = await shell()
-    expect(tabs(element).map((one) => one.textContent.trim())).toEqual(['Page A', 'Page B'])
+    expect(tabs(element).map((one) => one.textContent.trim())).toEqual([
+      'Page A',
+      'Page B',
+      'Information',
+    ])
     expect(tabs(element)[0]?.getAttribute('aria-current')).toBe('page')
     expect(tabs(element)[1]?.hasAttribute('aria-current')).toBe(false)
     expect(panels(element)).toEqual(['panelA'])
@@ -1869,5 +1874,132 @@ describe('the figure of an app', () => {
     } finally {
       register('sbmlsim-panel', 'sbmlsim-app', 'sbmlsim-figure')
     }
+  })
+})
+
+describe('the settings and the information of an app', () => {
+  /** An app of two pages, the first of which shows the figure, in two variants. */
+  function figured(): Given {
+    return app({
+      pages: [
+        {
+          id: 'pageA',
+          title: 'Page A',
+          panels: ['glimepiride', 'm1', 'li_gli'],
+          scenarios: [],
+          figure: true,
+          shown: ['glimepiride', 'm1'],
+        },
+        { id: 'pageB', title: 'Page B', panels: ['panelB'], scenarios: [] },
+      ],
+      figure: {
+        svg: '<svg viewBox="0 0 10 10"><g data-k="li"></g></svg>',
+        title: 'The body',
+        credit: '',
+        panels: { 'li/sub:gli': ['li_gli'] },
+      },
+    })
+  }
+
+  /** The panels the shell placed, as elements. */
+  function placed(element: AppElement): PlacedPanel[] {
+    return [...element.shadowRoot.querySelectorAll<PlacedPanel>('sbmlsim-panel')]
+  }
+
+  /** Announce an answer of a panel, as the panel does. */
+  function answer(element: AppElement, panel: string, more: Partial<Provenance>): void {
+    const provenance = { ...run({}).provenance, panel, ...more }
+    placed(element)
+      .find((one) => one.getAttribute('panel') === panel)
+      ?.dispatchEvent(
+        new CustomEvent('sbmlsim-result', {
+          detail: { panel, provenance, spec_hash: 'a'.repeat(64), values: {} },
+          bubbles: true,
+          composed: true,
+        }),
+      )
+  }
+
+  it('sets the logarithmic axis of every placed panel, and of the panels placed after it', async () => {
+    declared = figured()
+    const element = await shell({ variant: 'variantA' })
+    const box = part(element, '.settings input[type=checkbox]') as HTMLInputElement
+    box.checked = true
+    box.dispatchEvent(new Event('change'))
+    await settled()
+    expect(placed(element).every((one) => one.getAttribute('log') === 'true')).toBe(true)
+    element.setAttribute('selection', 'glimepiride,m1,li_gli')
+    await settled()
+    expect(placed(element)).toHaveLength(3)
+    expect(placed(element).every((one) => one.getAttribute('log') === 'true')).toBe(true)
+  })
+
+  it('passes the draws of the card on and shows the one of the attribute', async () => {
+    declared = figured()
+    const element = await shell({ draws: '20' })
+    const input = part(element, '.settings input[type=number]') as HTMLInputElement
+    expect(input.value).toBe('20')
+    input.value = '5'
+    input.dispatchEvent(new Event('change'))
+    await settled()
+    expect(placed(element).every((one) => one.getAttribute('draws') === '5')).toBe(true)
+  })
+
+  it('reports the seconds and the engine of the last run, once, from the collected provenance', async () => {
+    declared = figured()
+    const element = await shell()
+    answer(element, 'glimepiride', {
+      seconds: 0.042,
+      engine: 'sbmlsim-core 0.12.0',
+      created: '2999-01-01T00:00:00+00:00',
+    })
+    await settled()
+    expect(part(element, '.settings .run').textContent).toContain('0.042 s')
+    expect(part(element, '.settings .run').textContent).toContain('sbmlsim-core 0.12.0')
+  })
+
+  it('keeps the selection when the page is reset, and resets the card', async () => {
+    declared = figured()
+    const element = await shell()
+    await settled()
+    element.setAttribute('selection', 'li_gli')
+    await settled()
+    const box = part(element, '.settings input[type=checkbox]') as HTMLInputElement
+    box.checked = true
+    box.dispatchEvent(new Event('change'))
+    await settled()
+    ;(part(element, '.settings button.reset') as HTMLButtonElement).click()
+    await settled()
+    expect(panels(element)).toEqual(['li_gli'])
+    expect(element.getAttribute('selection')).toBe('li_gli')
+    expect(placed(element)[0]?.getAttribute('log')).toBeNull()
+    expect(box.checked).toBe(false)
+  })
+
+  it('builds an information tab from the declaration', async () => {
+    declared = figured()
+    const element = await shell({ variant: 'variantA' })
+    const tab = part(element, '.nav .information-tab') as HTMLButtonElement
+    expect(element.shadowRoot.querySelector('.information')).toBeNull()
+    tab.click()
+    await settled()
+    const text = part(element, '.information').textContent
+    for (const wanted of [
+      'Model A',
+      'what model A is',
+      'Author et al. (2026)',
+      'CC BY-SA 4.0',
+      '10.5281/zenodo.0000000',
+      'Variant B',
+    ]) {
+      expect(text).toContain(wanted)
+    }
+    expect(tab.getAttribute('aria-current')).toBe('page')
+    // the grid is hidden, not removed, and a page tab leaves the information
+    expect((part(element, '.stage') as HTMLElement).style.display).toBe('none')
+    tabs(element)[0]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.information')).toBeNull()
+    expect((part(element, '.stage') as HTMLElement).style.display).toBe('')
   })
 })
