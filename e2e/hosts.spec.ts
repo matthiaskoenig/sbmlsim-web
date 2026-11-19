@@ -1456,6 +1456,48 @@ test.describe('the app shell', () => {
     })
   }
 
+  test('adds the panel of a part of the drawing a reader presses, and marks the part', async ({
+    page,
+  }) => {
+    // the app of the demo with the drawing of a model, in which one part opens the second panel
+    // of its first page: the page shows the first panel before any click
+    await page.route(
+      (url) => url.pathname === '/api/models/hctz/app',
+      async (route) => {
+        const response = await route.fetch()
+        const body = (await response.json()) as {
+          pages: { panels: string[]; figure?: boolean; shown?: string[] }[]
+          figure?: unknown
+        }
+        const [first, second] = body.pages[0]?.panels ?? []
+        if (body.pages[0] === undefined || first === undefined || second === undefined) {
+          throw new Error('the first page of the demo has fewer than two panels')
+        }
+        body.pages[0].figure = true
+        body.pages[0].shown = [first]
+        body.figure = {
+          svg: '<svg viewBox="0 0 100 100"><g data-k="organ"><rect x="10" y="10" width="80" height="80" /></g></svg>',
+          title: 'The body',
+          credit: '',
+          panels: { organ: [second] },
+        }
+        await route.fulfill({ response, json: body })
+      },
+    )
+    await page.goto('/demo/app.html')
+    const app = page.locator('sbmlsim-app')
+    const organ = app.locator('sbmlsim-figure [data-k=organ]')
+    await expect(app.locator('sbmlsim-panel')).toHaveCount(1)
+    await expect(organ).toHaveAttribute('aria-pressed', 'false')
+    await organ.locator('rect').click()
+    await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
+    await expect(organ).toHaveAttribute('aria-pressed', 'true')
+    // a second press takes the panel away again
+    await organ.locator('rect').click()
+    await expect(app.locator('sbmlsim-panel')).toHaveCount(1)
+    await expect(organ).toHaveAttribute('aria-pressed', 'false')
+  })
+
   test('keeps the focus on the Reset of the page it was pressed with', async ({ page }) => {
     const app = await openApp(page)
     await app.locator('.knobs select').first().selectOption({ label: 'impaired' })

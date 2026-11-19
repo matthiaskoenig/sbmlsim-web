@@ -2006,7 +2006,7 @@ describe('the settings and the information of an app', () => {
     expect(logarithmic(element, 'glimepiride')).toBe(false)
   })
 
-  it('draws a panel added by a click on the figure on the logarithmic axis', async () => {
+  it('draws a panel added by the select event of the figure on the logarithmic axis', async () => {
     declared = figured()
     const element = await shell()
     await clickSwitch(element)
@@ -2103,12 +2103,21 @@ describe('the settings and the information of an app', () => {
     const box = await clickSwitch(element)
     expect(logarithmic(element, 'li_gli')).toBe(true)
     // a change of the own switch of a panel is put back as well, with the page still at its defaults
-    ;(part(element, '.settings input[type=number]') as HTMLInputElement).value = '3'
+    const draws = part(element, '.settings input[type=number]') as HTMLInputElement
+    draws.value = '3'
+    draws.dispatchEvent(new Event('change'))
+    await settled()
+    expect(placed(element)[0]?.getAttribute('draws')).toBe('3')
     ;(part(element, '.settings button.reset') as HTMLButtonElement).click()
     await settled()
     expect(panels(element)).toEqual(['li_gli'])
     expect(element.getAttribute('selection')).toBe('li_gli')
     expect(placed(element)[0]?.getAttribute('log')).toBeNull()
+    // the axis of the panel is linear again and not only its attribute gone, and the draws of the
+    // page are the attribute's again, which the stub panels run as none
+    expect(logarithmic(element, 'li_gli')).toBe(false)
+    expect(placed(element)[0]?.hasAttribute('draws')).toBe(false)
+    expect(draws.value).toBe('0')
     expect(box.checked).toBe(false)
     const own = ownToggle(placed(element)[0])
     own.checked = true
