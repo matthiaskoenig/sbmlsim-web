@@ -2026,25 +2026,41 @@ describe('the settings and the information of an app', () => {
     declared = figured()
     const element = await shell({ draws: '20' })
     const input = part(element, '.settings input[type=number]') as HTMLInputElement
-    expect(input.value).toBe('20')
+    // the panels of the stub declare no uncertainty and ran no draw, which the field says
+    expect(input.value).toBe('0')
+    expect(placed(element)[0]?.getAttribute('draws')).toBe('20')
     input.value = '5'
     input.dispatchEvent(new Event('change'))
     await settled()
     expect(placed(element).every((one) => one.getAttribute('draws') === '5')).toBe(true)
     expect(input.title).toContain('draws')
     // a negative number is no band, a decimal is cut, an empty or invalid text is the attribute
-    for (const [typed, shown, attribute] of [
-      ['-3', '0', '0'],
-      ['2.9', '2', '2'],
-      ['', '20', '20'],
-      ['abc', '20', '20'],
+    for (const [typed, attribute] of [
+      ['-3', '0'],
+      ['2.9', '2'],
+      ['', '20'],
+      ['abc', '20'],
     ] as const) {
       input.value = typed
       input.dispatchEvent(new Event('change'))
       await settled()
-      expect(input.value, typed).toBe(shown)
       expect(placed(element)[0]?.getAttribute('draws'), typed).toBe(attribute)
     }
+  })
+
+  it('shows the draws a panel ran with when it holds the number asked for to its sample', async () => {
+    declared = figured()
+    const element = await shell()
+    const input = part(element, '.settings input[type=number]') as HTMLInputElement
+    input.value = '999'
+    input.dispatchEvent(new Event('change'))
+    await settled()
+    expect(placed(element)[0]?.getAttribute('draws')).toBe('999')
+    for (const id of ['glimepiride', 'm1']) {
+      answer(element, id, { created: '2999-01-01T00:00:00+00:00' }, 64)
+    }
+    await settled()
+    expect(input.value).toBe('64')
   })
 
   it('shows the draws of the runs where nothing sets them', async () => {
@@ -2151,6 +2167,36 @@ describe('the settings and the information of an app', () => {
     tabs(element)[2]?.click()
     await settled()
     tabs(element)[1]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.information')).toBeNull()
+    expect(panels(element)).toEqual(['panelB'])
+  })
+
+  it('makes the information a value of the page: the attribute, the event and the selection kept', async () => {
+    declared = figured()
+    const element = await shell({ selection: 'li_gli' })
+    const heard: string[] = []
+    element.addEventListener('sbmlsim-page', (event) => {
+      heard.push((event as CustomEvent<{ page: string }>).detail.page)
+    })
+    tabs(element)[2]?.click()
+    await settled()
+    expect(element.getAttribute('page')).toBe('information')
+    expect(heard).toEqual(['information'])
+    expect(element.shadowRoot.querySelector('.information')).not.toBeNull()
+    // the page under it stays, with its selection, and the tab of that page brings it back
+    expect(panels(element)).toEqual(['li_gli'])
+    tabs(element)[0]?.click()
+    await settled()
+    expect(element.getAttribute('page')).toBe('pageA')
+    expect(heard).toEqual(['information', 'pageA'])
+    expect(element.getAttribute('selection')).toBe('li_gli')
+    expect(panels(element)).toEqual(['li_gli'])
+    // the attribute set from outside is the same view, and the back button's value leaves it
+    element.setAttribute('page', 'information')
+    await settled()
+    expect(element.shadowRoot.querySelector('.information')).not.toBeNull()
+    element.setAttribute('page', 'pageB')
     await settled()
     expect(element.shadowRoot.querySelector('.information')).toBeNull()
     expect(panels(element)).toEqual(['panelB'])

@@ -1514,7 +1514,7 @@ test.describe('the app shell', () => {
   test('keeps the focus on a shared Reset it was pressed with', async ({ page }) => {
     const app = await openApp(page)
     await app.locator('.knobs select').first().selectOption({ label: 'impaired' })
-    const reset = app.locator('.knobs button.reset')
+    const reset = app.locator('.settings button.reset')
     await reset.focus()
     await page.keyboard.press('Enter')
     await expect(app.locator('.knobs select').first()).toHaveValue('1')
@@ -2023,7 +2023,7 @@ test.describe('the page of a patient', () => {
     await expect(scenario.locator('option[value=""]')).toHaveText('custom')
     await expect(scenario.locator('option[value=""]')).toBeDisabled()
     // and Reset brings the defaults back, which the select follows
-    await app.locator('.knobs button.reset').click()
+    await app.locator('.settings button.reset').click()
     await expect(scenario).toHaveValue('healthy')
   })
 

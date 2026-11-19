@@ -26,20 +26,10 @@ export const COLUMN_GAP = 16
  * The widest column of the card. Every length of the rule is in px, as the
  * grid it lays out is (`SbmlsimApp.ce.vue`): a length of the layout of a
  * component never depends on the root font of its host, which a documentation
- * theme sets to 125 % and a slide deck to its own, so the container queries,
- * the columns and the room of the Reset are one unit system.
+ * theme sets to 125 % and a slide deck to its own, so the container queries
+ * and the columns are one unit system.
  */
 export const COLUMN_MAX = 320
-/**
- * The room the Reset takes in a column of its own, beside the columns of the
- * knobs and the gap before it: the button is 49.7px wide in the 11px of the
- * small type of the panel (its padding of 2 x 10px, its border of 2 x 1px and
- * its label), so the room leaves 30px for a larger small type a host sets
- * (`--sbmlsim-font-size-small`), about 17px. It is the room a level keeps
- * beside full columns of knobs before it gives the Reset a column there; the
- * end to end tests measure the button against it.
- */
-export const RESET_ROOM = 80
 /** The numbers of columns which can fit that the card lays out a level for; the last level holds for every wider card. */
 export const LEVELS = 8
 
@@ -47,13 +37,6 @@ export const LEVELS = 8
 export interface CardLevel {
   /** The columns of the knobs, each as wide as the card gives it up to `COLUMN_MAX`. */
   columns: number
-  /**
-   * Whether the Reset has a column of its own after them, as wide as the Reset:
-   * beside the examples above a single column of knobs, or after the last knob
-   * of a last row which is as long as the others. It takes no width from a knob
-   * beyond its own.
-   */
-  reset: boolean
   /** The positions of the knobs which start a line, the first knob left out. */
   starts: number[]
 }
@@ -102,24 +85,13 @@ export function levelWidth(fit: number): number {
  * Get the layout of a card of knobs at a number of columns which fit.
  *
  * The knobs take their balanced columns and start a line at every row of
- * `rowsOf`. The examples of a page take a line of their own above the knobs
- * with the Reset beside them, in the second column of the knobs or, above a
- * single column of them, in a column of its own where two fit, and a page
- * without examples has its Reset follow the last knob: in the free column of a
- * last row which is shorter than the first, and else in a column of its own. A
- * column of its own is as wide as the Reset and given only where the narrowest
- * card of the level holds it beside the columns of the knobs at their widest
- * (`COLUMN_MAX`, `RESET_ROOM`), so the Reset never narrows a select. Where no
- * column is left for it, it takes a line of its own.
+ * `rowsOf`.
  *
  * @param knobs the number of knobs
  * @param fit the number of columns of `COLUMN_MIN` which fit the card
- * @param examples whether the page has examples, whose select takes a line above the knobs
- * @returns the columns of the knobs, whether the Reset has one of its own, and
- *   the knobs which start a line
+ * @returns the columns of the knobs and the knobs which start a line
  */
-export function cardLevel(knobs: number, fit: number, examples: boolean): CardLevel {
-  const balanced = balancedColumns(knobs, fit)
+export function cardLevel(knobs: number, fit: number): CardLevel {
   const rows = rowsOf(knobs, fit)
   const starts: number[] = []
   let at = 0
@@ -127,25 +99,15 @@ export function cardLevel(knobs: number, fit: number, examples: boolean): CardLe
     at += row
     starts.push(at)
   }
-  // the Reset has a column of its own only where the narrowest card of the
-  // level holds it beside the columns of the knobs at their widest, so it never
-  // narrows a select; elsewhere it takes a line of its own
-  const room = levelWidth(fit) >= balanced * (COLUMN_MAX + COLUMN_GAP) + RESET_ROOM
-  if (examples) {
-    // beside the examples in the second column of the knobs, or in one of its own
-    return { columns: balanced, reset: balanced < 2 && room, starts }
-  }
-  const shorter = (rows.at(-1) ?? balanced) < balanced
-  return { columns: balanced, reset: !shorter && room, starts }
+  return { columns: balancedColumns(knobs, fit), starts }
 }
 
 /**
  * Get the layout of a card at every level, the first of one column.
  *
  * @param knobs the number of knobs
- * @param examples whether the page has examples
  * @returns the level of `1` to `LEVELS` columns which fit, in that order
  */
-export function cardLevels(knobs: number, examples: boolean): CardLevel[] {
-  return Array.from({ length: LEVELS }, (_, index) => cardLevel(knobs, index + 1, examples))
+export function cardLevels(knobs: number): CardLevel[] {
+  return Array.from({ length: LEVELS }, (_, index) => cardLevel(knobs, index + 1))
 }

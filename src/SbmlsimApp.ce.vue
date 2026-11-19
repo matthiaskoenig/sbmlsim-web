@@ -207,6 +207,8 @@ const DOI_PREFIX = /^https?:\/\/(?:dx\.)?doi\.org\//i
 const SWITCH_MESSAGE = 'The panels of the variant shown cannot be drawn.'
 /** The label of the select of the scenarios of a page, which are examples of its knobs. */
 const SCENARIO_LABEL = 'Example'
+/** The value of `page` which shows the information of the app, unless a page of the app has that id. */
+const INFORMATION_PAGE = 'information'
 /** The label of the information tab, the last entry of the tab row. */
 const INFORMATION_LABEL = 'Information'
 
@@ -283,8 +285,8 @@ const drawsAll = ref<number | undefined>(undefined)
 const scales = ref<Record<string, boolean>>({})
 /** The draws the latest run of every panel was asked for, by the id of the panel. */
 const used = ref<Record<string, number>>({})
-/** Whether the information tab is shown in place of the panels of the page. */
-const information = ref(false)
+/** The id of the page which was shown last, which the information view keeps on screen under it. */
+const lastPage = ref('')
 /** What the live region says, the page which was switched to; empty until a reader switches. */
 const announced = ref('')
 
@@ -299,8 +301,37 @@ const shared = ref<Record<string, number>>({})
 /** The page which is shown: the one `page` names, else the first one. */
 const current = computed<AppPage | null>(() => {
   const pages = app.value?.pages ?? []
-  return pages.find((one) => one.id === props.page) ?? pages[0] ?? null
+  const named = pages.find((one) => one.id === props.page)
+  if (named !== undefined) {
+    return named
+  }
+  // the information is a value of `page` and no page of its own: the page which was shown
+  // before it stays the current one, so a switch to it and back moves nothing
+  return (
+    (props.page === INFORMATION_PAGE
+      ? pages.find((one) => one.id === lastPage.value)
+      : undefined) ??
+    pages[0] ??
+    null
+  )
 })
+
+/** Whether the information tab is shown in place of the panels of the page. */
+const information = computed<boolean>(
+  () =>
+    props.page === INFORMATION_PAGE &&
+    !(app.value?.pages ?? []).some((one) => one.id === props.page),
+)
+
+watch(
+  () => current.value?.id,
+  (id) => {
+    if (id !== undefined && !information.value) {
+      lastPage.value = id
+    }
+  },
+  { immediate: true },
+)
 
 /** The variants the reader switches between, empty for an app which has fewer than two. */
 const variants = computed(() => {
@@ -375,7 +406,7 @@ const scenarios = computed<Scenario[]>(() => current.value?.scenarios ?? [])
  * `--_columns-<fit>`, which the container query of the width of the card reads,
  * and the classes `start-<fit>` of the knobs which start a line at that width.
  */
-const levels = computed(() => cardLevels(sharedKnobs.value.length, scenarios.value.length > 0))
+const levels = computed(() => cardLevels(sharedKnobs.value.length))
 
 /**
  * The columns of the grid of the card at every level, as custom properties: the
@@ -632,11 +663,24 @@ const logState = computed<'all' | 'none' | 'mixed'>(() => {
   return known.every((one) => one) ? 'all' : 'mixed'
 })
 
-/** The draws of the plots which are shown: the reader's number, the attribute, else the run's. */
+/**
+ * The draws in effect: the most the latest runs of the placed panels were made with, which is the
+ * number a panel held to the sample of its endpoint ran and not the one it was asked for; before
+ * any run the number the reader typed or the attribute asks for.
+ */
 const drawsShown = computed<number | ''>(() => {
   const ran = placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : []))
-  return drawsOfPanels.value ?? (ran.length > 0 ? Math.max(...ran) : '')
+  return ran.length > 0 ? Math.max(...ran) : (drawsOfPanels.value ?? '')
 })
+
+const drawsField = useTemplateRef<HTMLInputElement>('drawsField')
+
+/** Show the draws in effect in the field, which Vue leaves alone where the value it computes did not change. */
+function syncDraws(): void {
+  if (drawsField.value !== null && drawsField.value.value !== String(drawsShown.value)) {
+    drawsField.value.value = String(drawsShown.value)
+  }
+}
 
 /**
  * Take the logarithmic switch of the page, which sets the axis of every plot at once: it turns
@@ -668,8 +712,8 @@ function onDrawsAll(event: Event): void {
   }
   const asked = event.target.value.trim() === '' ? Number.NaN : Number(event.target.value)
   drawsAll.value = Number.isFinite(asked) ? Math.max(0, Math.trunc(asked)) : undefined
-  // the field shows what rules, which is the attribute for a text which was no number
-  event.target.value = String(drawsShown.value)
+  // the field shows what is asked until the runs say what they used (`syncDraws`)
+  event.target.value = String(drawsOfPanels.value ?? drawsShown.value)
 }
 
 /**
@@ -952,6 +996,7 @@ function collect(event: Event): void {
     const draws = (event as CustomEvent<{ draws?: number }>).detail.draws
     if (draws !== undefined) {
       used.value = { ...used.value, [id ?? provenance.panel]: draws }
+      void nextTick(syncDraws)
     }
     settle(event)
   }
@@ -1012,13 +1057,19 @@ function settle(event: Event): void {
  * @param id the id of the page
  */
 function show(id: string): void {
-  if (id === current.value?.id) {
+  const page = id === INFORMATION_PAGE ? null : current.value?.id
+  if (id === props.page || (id === page && !information.value)) {
     return
   }
-  // the clicks of the page which is left mean nothing on the one which is shown
-  host?.removeAttribute('selection')
+  if (id !== INFORMATION_PAGE && id !== current.value?.id) {
+    // the clicks of the page which is left mean nothing on the one which is shown
+    host?.removeAttribute('selection')
+  }
   host?.setAttribute('page', id)
-  const title = app.value?.pages.find((one) => one.id === id)?.title ?? id
+  const title =
+    id === INFORMATION_PAGE
+      ? INFORMATION_LABEL
+      : (app.value?.pages.find((one) => one.id === id)?.title ?? id)
   announced.value = `Showing ${title}`
   host?.dispatchEvent(
     new CustomEvent('sbmlsim-page', {
@@ -1027,27 +1078,6 @@ function show(id: string): void {
       composed: true,
     }),
   )
-}
-
-/**
- * Show the information tab in place of the panels, which stop while it is shown, and say so.
- */
-function showInformation(): void {
-  if (information.value) {
-    return
-  }
-  information.value = true
-  announced.value = 'Showing Information'
-}
-
-/**
- * Take a click on the tab of a page: the page again if the information was shown, else its switch.
- *
- * @param id the id of the page
- */
-function pickPage(id: string): void {
-  information.value = false
-  show(id)
 }
 
 /** The panels the information view froze, which it starts again where they are still on screen. */
@@ -1091,7 +1121,6 @@ watch(
   () => current.value?.id,
   (_id, before) => {
     freezeShown()
-    information.value = false
     answers.value = {}
     scales.value = {}
     used.value = {}
@@ -1187,7 +1216,7 @@ onBeforeUnmount(() => {
             :data-label="one.title"
             :aria-current="one.id === current.id && !information ? 'page' : undefined"
             :disabled="switching"
-            @click="pickPage(one.id)"
+            @click="show(one.id)"
           >
             {{ one.title }}
           </button>
@@ -1198,7 +1227,7 @@ onBeforeUnmount(() => {
             :data-label="INFORMATION_LABEL"
             :aria-current="information ? 'page' : undefined"
             :disabled="switching"
-            @click="showInformation()"
+            @click="show(INFORMATION_PAGE)"
           >
             {{ INFORMATION_LABEL }}
           </button>
@@ -1324,6 +1353,7 @@ onBeforeUnmount(() => {
             <label class="setting" part="settings-draws">
               <span>draws</span>
               <input
+                ref="drawsField"
                 type="number"
                 min="0"
                 step="1"
