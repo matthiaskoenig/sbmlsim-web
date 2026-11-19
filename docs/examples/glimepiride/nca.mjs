@@ -695,7 +695,7 @@ function valueRow(parameter, waiting) {
   unit.className = 'pk-unit'
   unit.textContent = parameter.unit
   row.append(unit)
-  for (const analyte of ANALYTES) {
+  for (const analyte of ANALYTES.filter(onScreen)) {
     const { cell, box } = valueCell(parameter, analyte)
     if (box !== null) {
       waiting.push({ cell, box })
@@ -710,9 +710,17 @@ function render() {
   if (table === null) {
     return
   }
+  if (!ANALYTES.some(onScreen)) {
+    // every panel was removed: no table, and no note about draws nobody looks at
+    table.replaceChildren()
+    if (note !== null) {
+      note.textContent = 'Nothing to show: none of the plasma curves is on screen.'
+    }
+    return
+  }
   const head = document.createElement('thead')
   const headRow = document.createElement('tr')
-  for (const text of ['Parameter', 'Unit', ...ANALYTES.map((one) => one.label)]) {
+  for (const text of ['Parameter', 'Unit', ...ANALYTES.filter(onScreen).map((one) => one.label)]) {
     const cell = document.createElement('th')
     cell.scope = 'col'
     cell.textContent = text
@@ -817,7 +825,7 @@ function renderNote(scale) {
   // the analytes which raised the same flags are one sentence: a model raises them for all
   // three as often as not, and three sentences of the same words are three times the reading
   const together = new Map()
-  for (const analyte of ANALYTES) {
+  for (const analyte of ANALYTES.filter(onScreen)) {
     const held = rows.get(analyte.panel)
     const raised = FLAGS.filter(([bit]) => ((held?.flags ?? 0) & bit) !== 0).map(([, text]) => text)
     if (raised.length > 0) {
@@ -926,6 +934,7 @@ function scheduleDraws(key, values) {
  * @returns {Promise<void>}
  */
 async function take(event) {
+  readPlaced(document.querySelector('sbmlsim-app'))
   const detail = event.detail ?? {}
   const analyte = ANALYTES.find((one) => one.panel === detail.panel)
   if (analyte === undefined || !onScreen(analyte)) {
@@ -970,6 +979,24 @@ async function take(event) {
  */
 function onScreen(analyte) {
   return selected === null || selected.includes(analyte.panel)
+}
+
+/**
+ * Take the panels the app has placed, from its shadow root, where the page has not been told a
+ * selection yet: a page which declares `shown` hides an analyte from the start, with no event.
+ *
+ * @param {Element | null} host the app element
+ */
+function readPlaced(host) {
+  if (selected !== null || host?.shadowRoot == null) {
+    return
+  }
+  const placed = [...host.shadowRoot.querySelectorAll('sbmlsim-panel')].map(
+    (one) => one.getAttribute('panel') ?? '',
+  )
+  if (placed.length > 0) {
+    selected = placed
+  }
 }
 
 /**

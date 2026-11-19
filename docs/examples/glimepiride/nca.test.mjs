@@ -288,21 +288,28 @@ describe('the numbers of the table', () => {
     document.dispatchEvent(new CustomEvent('sbmlsim-selection', { detail: { panels } }))
   }
 
+  /** The headers of the table. */
+  function headers() {
+    return [...document.querySelectorAll('#pk-parameters thead th')].map((one) => one.textContent)
+  }
+
   it('drops the column of a panel the reader removed and takes it back with the panel', async () => {
     try {
       await showAll(DOSE)
       expect(Number(row('Cmax')[3])).toBeGreaterThan(0)
       select(['glimepiride', 'm2'])
       // the column of the panel which left is at its placeholder again, the others stay
-      expect(row('Cmax')[3]).toBe('…')
+      expect(headers()).toEqual(['Parameter', 'Unit', 'Glimepiride', 'M2'])
+      expect(row('Cmax')).toHaveLength(4)
       expect(Number(row('Cmax')[2])).toBeGreaterThan(0)
-      expect(Number(row('Cmax')[4])).toBeGreaterThan(0)
+      expect(Number(row('Cmax')[3])).toBeGreaterThan(0)
       // a late answer of the panel which left does not bring the column back
       await show('m1', figureOf(DOSE))
-      expect(row('Cmax')[3]).toBe('…')
+      expect(headers()).not.toContain('M1')
       // and the panel which is selected again fills it when it draws
       select(['glimepiride', 'm1', 'm2'])
       await show('m1', figureOf(DOSE))
+      expect(headers()).toEqual(['Parameter', 'Unit', 'Glimepiride', 'M1', 'M2'])
       expect(Number(row('Cmax')[3])).toBeGreaterThan(0)
     } finally {
       select(['glimepiride', 'm1', 'm2'])
@@ -417,6 +424,25 @@ describe('the draws of the uncertainty', () => {
     expect(noteText()).not.toContain('set the draws')
     await settle()
     expect(noteText()).toContain('standard deviation of 16 draws')
+  })
+
+  /** Tell the page the panels the reader has on screen, as the app does. */
+  function selectIn(panels) {
+    document.dispatchEvent(new CustomEvent('sbmlsim-selection', { detail: { panels } }))
+  }
+
+  it('says there is nothing to show once the reader removed every panel, and drops the draws note', async () => {
+    try {
+      ran(8)
+      await showAll(DOSE)
+      await settle()
+      expect(noteText()).toContain('standard deviation of 8 draws')
+      selectIn([])
+      expect(document.querySelectorAll('#pk-parameters tr')).toHaveLength(0)
+      expect(noteText()).toBe('Nothing to show: none of the plasma curves is on screen.')
+    } finally {
+      selectIn(['glimepiride', 'm1', 'm2'])
+    }
   })
 
   it('keeps saying it is computing until the draws of every analyte are back', async () => {
