@@ -117,6 +117,13 @@ test.describe('the glimepiride example', () => {
     await expect(peak).toHaveAttribute('title', /16 draws: median/)
     // and the coefficient of variation of the draws, the standard deviation over their mean
     await expect(peak.locator('.pk-cv')).toContainText(/^CV \d/)
+    // the metabolites come after it, each in a round trip of its own, and get theirs as well
+    for (const column of [1, 2]) {
+      const later = cell(cmax, column)
+      await expect(later.locator('.pk-spread')).toContainText('±', { timeout: 60_000 })
+      await expect(later.locator('.pk-cv')).toContainText(/^CV \d/)
+      await expect(later.locator('svg.pk-box rect')).toHaveCount(4)
+    }
     const note = page.locator('#pk-parameters .pk-note')
     await expect(note).toContainText('standard deviation of 16 draws')
     await expect(note).toContainText('90.0 % band')

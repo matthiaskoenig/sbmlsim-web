@@ -207,11 +207,20 @@ let provenance = null
 /** The loop of the draws which counts, so a superseded one is dropped. */
 let generation = 0
 
+/** Whether the loop of the draws is still running, one analyte answers after the other. */
+let pending = false
+
 /** Whether the last loop of the draws ended without any draw, the draws asked for or not. */
 let emptyDraws = false
 
 /** Whether a panel reported its draws, which the declaration then no longer decides. */
 let heard = false
+
+/**
+ * The panels the reader has on screen, `null` while the page has not been told: every one of
+ * them. A panel which left the grid has no curve above the table any more, so it has no column.
+ */
+let selected = null
 
 /** The timer of the draws of the position which is shown. */
 let timer = null
@@ -748,7 +757,7 @@ function listed(labels) {
  * @returns {string} the sentence, empty for a table without draws
  */
 function drawsLine(scale) {
-  if (draws > 0 && provenance === null && declared !== null) {
+  if (draws > 0 && (provenance === null || pending) && declared !== null) {
     return emptyDraws
       ? `The ${String(draws)} draws of the uncertainty of the fit were asked for and the ` +
           'endpoint answered none, so the parameters are the model at its own parameters.'
@@ -845,8 +854,12 @@ async function takeDraws(key, values) {
   const mine = generation
   const wanted = draws
   const current = () => mine === generation && key === shown && wanted === draws
+  pending = true
   try {
     for (const analyte of ANALYTES) {
+      if (!onScreen(analyte)) {
+        continue
+      }
       const uncertainty = await analyseDraws(analyte, values, wanted, current)
       if (!current()) {
         return
@@ -861,15 +874,16 @@ async function takeDraws(key, values) {
       }
       render()
     }
-    if (provenance === null) {
-      // the loop is done and no answer carried draws: the note says so and not "computing"
-      emptyDraws = true
-      render()
-    }
+    // the table is complete only now: until then an analyte may be back without its spread
+    pending = false
+    // the loop is done: if no answer carried draws the note says so and not "computing"
+    emptyDraws = provenance === null
+    render()
   } catch (bad) {
     // the failure of a loop which was superseded is of draws nobody looks at any more, and the
     // table the loop which replaced it computed is no failure
     if (current()) {
+      pending = false
       failure = bad instanceof Error ? bad.message : String(bad)
       render()
     }
@@ -914,7 +928,7 @@ function scheduleDraws(key, values) {
 async function take(event) {
   const detail = event.detail ?? {}
   const analyte = ANALYTES.find((one) => one.panel === detail.panel)
-  if (analyte === undefined) {
+  if (analyte === undefined || !onScreen(analyte)) {
     return
   }
   const panel = event.composedPath()[0]
@@ -937,11 +951,45 @@ async function take(event) {
   } catch (bad) {
     failure = bad instanceof Error ? bad.message : String(bad)
   }
-  // a knob which moved while this analysis ran has cleared these rows already
+  // a knob which moved while this analysis ran has cleared these rows already, and a panel
+  // which the reader removed meanwhile has no column to come back to
+  if (!onScreen(analyte)) {
+    rows.delete(analyte.panel)
+  }
   if (key === shown) {
     render()
     scheduleDraws(key, { ...figure.values })
   }
+}
+
+/**
+ * Whether the panel of an analyte is on screen.
+ *
+ * @param {{panel: string}} analyte the analyte
+ * @returns {boolean} `false` for a panel the reader removed from the grid
+ */
+function onScreen(analyte) {
+  return selected === null || selected.includes(analyte.panel)
+}
+
+/**
+ * Follow the panels on screen: the column of a panel the reader removed is back at its
+ * placeholder, with its draws, and comes back with the panel.
+ *
+ * @param {Event} event the `sbmlsim-selection` of the app, whose `detail` is `{ panels }`
+ */
+function followSelection(event) {
+  const panels = event.detail?.panels
+  if (!Array.isArray(panels)) {
+    return
+  }
+  selected = panels
+  for (const analyte of ANALYTES) {
+    if (!onScreen(analyte)) {
+      rows.delete(analyte.panel)
+    }
+  }
+  render()
 }
 
 /**
@@ -1038,6 +1086,7 @@ function start() {
     followDraws(event)
   })
   document.addEventListener('sbmlsim-page', followPage)
+  document.addEventListener('sbmlsim-selection', followSelection)
   // a page set from outside is no event of the reader, so the attribute the app reflects it in
   // is watched as well
   const host = document.querySelector('sbmlsim-app')
