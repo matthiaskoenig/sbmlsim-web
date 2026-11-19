@@ -380,6 +380,19 @@ describe('the information view of the app', () => {
     openPage('overview')
     expect(section.hidden).toBe(false)
   })
+
+  it('follows the page attribute a deployment sets from outside', async () => {
+    const section = document.querySelector('#pk-parameters')
+    const app = document.querySelector('sbmlsim-app')
+    app.setAttribute('page', 'information')
+    await vi.waitFor(() => {
+      expect(section.hidden).toBe(true)
+    })
+    app.setAttribute('page', 'overview')
+    await vi.waitFor(() => {
+      expect(section.hidden).toBe(false)
+    })
+  })
 })
 
 describe('the request of the kernel', () => {

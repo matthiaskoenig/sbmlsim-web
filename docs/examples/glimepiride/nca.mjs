@@ -931,6 +931,17 @@ function followPage(event) {
   }
 }
 
+/**
+ * Show or hide the table by the `page` attribute of the app.
+ *
+ * @param {Element} host the app element
+ */
+function followAttribute(host) {
+  if (section !== null) {
+    section.hidden = host.getAttribute('page') === INFORMATION_PAGE
+  }
+}
+
 /** Find the table of the page and follow what the panels of the app draw. */
 function start() {
   section = document.querySelector('#pk-parameters')
@@ -948,6 +959,15 @@ function start() {
     followDraws(event)
   })
   document.addEventListener('sbmlsim-page', followPage)
+  // a page set from outside is no event of the reader, so the attribute the app reflects it in
+  // is watched as well
+  const host = document.querySelector('sbmlsim-app')
+  if (host !== null) {
+    followAttribute(host)
+    new MutationObserver(() => {
+      followAttribute(host)
+    }).observe(host, { attributes: true, attributeFilter: ['page'] })
+  }
   readDeclaration().catch(() => {
     // a page whose endpoint does not answer its declaration takes the draws the panels report:
     // the panels of the app say the same thing in their own lines

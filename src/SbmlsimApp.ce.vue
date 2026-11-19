@@ -1986,7 +1986,10 @@ onBeforeUnmount(() => {
 
 .settings .draws {
   box-sizing: border-box;
-  width: 6ch;
+  /* four digits, a number input's spin buttons, the padding and the border: the value is never clipped */
+  width: calc(4ch + 28px);
+  /* the line of the settings is a flex row, which must not squeeze the field below its width */
+  flex: none;
   padding: 2px 6px;
   border: 1px solid var(--_line);
   border-radius: 6px;

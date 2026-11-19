@@ -88,6 +88,22 @@ test.describe('the glimepiride example', () => {
     const draws = page.locator('sbmlsim-app input.draws')
     await expect(draws).toBeVisible()
     await expect(draws).toHaveValue('16')
+    // a number of four digits fits the field beside its spin buttons: the client width of a
+    // number input already leaves the spin buttons out, and the room is at least that text
+    const room = await draws.evaluate((input: HTMLInputElement) => {
+      const style = getComputedStyle(input)
+      const probe = document.createElement('span')
+      probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${style.font}`
+      probe.textContent = '1000'
+      document.body.append(probe)
+      const text = probe.getBoundingClientRect().width
+      probe.remove()
+      const inner =
+        input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      return { text, inner }
+      return { text, inner }
+    })
+    expect(room.inner).toBeGreaterThanOrEqual(room.text)
 
     // every figure of the app shades the band of those draws under its curve
     await expect(page.locator('sbmlsim-app .curve-band').first()).toBeAttached({
