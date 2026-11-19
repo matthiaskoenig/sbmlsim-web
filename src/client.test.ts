@@ -10,7 +10,7 @@ import {
 } from './client'
 import type { EndpointFetch, FailureKind } from './client'
 import { figureOf, shownPanels, showsFigure } from './contract'
-import type { AppPage, PanelDeclaration, SimulateResponse } from './contract'
+import type { PanelDeclaration, SimulateResponse } from './contract'
 
 // Every id below is a neutral one: a model, a panel, a knob, a curve and a
 // series are data of a payload and never of this library.
@@ -74,6 +74,13 @@ function run(): SimulateResponse {
 /** Serve every request with one answer, or with one failure. */
 function serve(answer: (url: string, init: RequestInit | undefined) => Promise<Response>): void {
   globalThis.fetch = vi.fn(answer) as unknown as typeof fetch
+}
+
+/** Get the one item of a list, which the test knows has one. */
+function only<T>(items: T[]): T {
+  const [item] = items
+  if (item === undefined) throw new Error('no item')
+  return item
 }
 
 /** Get the kind of the failure a call ends in. */
@@ -240,17 +247,17 @@ describe('the client of an endpoint', () => {
       figure: { ...figure, panels: { li: ['nowhere_else'] } },
     }
     const unchecked = await client.app('modelA')
-    expect(shownPanels(unchecked.pages[0]!)).toEqual(['nowhere'])
+    expect(shownPanels(only(unchecked.pages))).toEqual(['nowhere'])
     expect(figureOf(unchecked)?.panels.li).toEqual(['nowhere_else'])
     // the accessors give two states where the payload has three
     const plain = { ...app, pages: [{ ...app.pages[0] }] }
     body = plain
     const older = await client.app('modelA')
     expect(figureOf(older)).toBeNull()
-    expect(showsFigure(older.pages[0]!)).toBe(false)
-    expect(shownPanels(older.pages[0]!)).toEqual([])
+    expect(showsFigure(only(older.pages))).toBe(false)
+    expect(shownPanels(only(older.pages))).toEqual([])
     expect(figureOf(read)?.title).toBe('The model')
-    expect(showsFigure(read.pages[0]!)).toBe(true)
+    expect(showsFigure(only(read.pages))).toBe(true)
     for (const broken of [
       { ...app, figure: [] },
       { ...app, figure: { ...figure, panels: [] } },
