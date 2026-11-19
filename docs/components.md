@@ -93,11 +93,11 @@ The shell has no methods: it starts itself when it is connected and is driven by
 
 ### Events
 
-| event               | `detail`            | when                                                                                                                                                                                         |
-| ------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sbmlsim-page`      | `{ page }`          | a reader switched the page; not when the page sets the attribute itself                                                                                                                      |
-| `sbmlsim-selection` | `{ panels }`        | a reader clicked the figure: the ids of the panels now shown, in the order of the page; not when the page sets the attribute itself, and a switch of the page drops the selection without it |
-| `sbmlsim-error`     | `{ kind, message }` | the app could not be read (an endpoint which is down, a model without an app, a payload of another version)                                                                                  |
+| event               | `detail`            | when                                                                                                                                                                                    |
+| ------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sbmlsim-page`      | `{ page }`          | a reader switched the page; not when the page sets the attribute itself                                                                                                                 |
+| `sbmlsim-selection` | `{ panels }`        | a reader clicked the figure: the ids of the panels now shown, in the order of the page, or a page change reset it to the new page's panels; not when the page sets the attribute itself |
+| `sbmlsim-error`     | `{ kind, message }` | the app could not be read (an endpoint which is down, a model without an app, a payload of another version)                                                                             |
 
 The events of its panels (`sbmlsim-result`, `sbmlsim-error`) bubble out of the shell as well. `sbmlsim-page` lets a deployment give its pages addresses and answer the back button by setting `page` again:
 

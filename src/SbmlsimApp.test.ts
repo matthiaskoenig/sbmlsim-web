@@ -1806,6 +1806,7 @@ describe('the figure of an app', () => {
     }
     await settled()
     expect(part(element, '.simulated').classList.contains('held')).toBe(true)
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('Switching to Variant B …')
     await clickKey(element, 'li/sub:gli')
     expect(part(element, '.simulated').classList.contains('held')).toBe(false)
     expect(part(element, '.variant .caption').textContent.trim()).toBe('')
