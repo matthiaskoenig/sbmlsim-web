@@ -9,7 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { createRuntime } from './pkpdutils-core/loader.mjs'
 
@@ -126,6 +126,23 @@ function noteText() {
 /** The answers of one number of draws the stub holds back until a promise settles, or `null`. */
 let hold = null
 
+/**
+ * Answers of one number of draws to hold back.
+ *
+ * @param {number} draws the number of draws whose answers wait
+ * @returns {{draws: number, until: Promise<void>, release: () => void}} the hold
+ */
+function heldAt(draws) {
+  let release
+  const until = new Promise((resolve) => {
+    release = resolve
+  })
+  return { draws, until, release }
+}
+
+/** The error the stub throws for the answers of one number of draws, or `null`. */
+let failing = null
+
 /** The draws every request of the stub asked for, in the order they were sent. */
 const asked = []
 
@@ -183,6 +200,9 @@ class StubClient {
     // a test holds the answers of one number of draws back to force the order they come in
     if (hold !== null && body.draws === hold.draws) {
       await hold.until
+    }
+    if (failing !== null && body.draws === failing.draws) {
+      throw new Error(failing.message)
     }
     return answerOf(panel, body)
   }
@@ -266,6 +286,13 @@ describe('the numbers of the table', () => {
 })
 
 describe('the draws of the uncertainty', () => {
+  // a test which fails before it releases the answers it held back must not hang the next ones
+  afterEach(() => {
+    hold?.release()
+    hold = null
+    failing = null
+  })
+
   /**
    * The panels of the app run with a number of draws, as the draws field of its settings card
    * makes them: every panel announces the run it answered with the draws it asked for.
@@ -358,8 +385,7 @@ describe('the draws of the uncertainty', () => {
     await showAll(DOSE)
     await settle()
     asked.length = 0
-    let release
-    hold = { draws: 16, until: new Promise((resolve) => (release = resolve)) }
+    hold = heldAt(16)
     ran(16)
     // the loop of 16 is in flight, its first answer held back, when the number moves again
     await vi.waitFor(() => {
@@ -371,14 +397,38 @@ describe('the draws of the uncertainty', () => {
       expect(noteText()).toContain('standard deviation of 8 draws')
     })
     // now the superseded loop answers, after the one which replaced it
+    hold.release()
     hold = null
-    release()
     await new Promise((resolve) => setTimeout(resolve, 100))
     // it writes nothing: the table states the draws of the last number only
     expect(noteText()).toContain('standard deviation of 8 draws')
     expect(cell('Cmax', 2).title).toContain('8 draws: median')
     expect(cell('Cmax', 3).title).toContain('8 draws: median')
     expect(cell('Cmax', 4).title).toContain('8 draws: median')
+  })
+
+  it('drops the failure of a superseded loop and keeps the table of the loop which won', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    asked.length = 0
+    // the answer of 16 draws is held back and then fails, as a request which times out does
+    hold = heldAt(16)
+    failing = { draws: 16, message: 'the endpoint timed out' }
+    ran(16)
+    await vi.waitFor(() => {
+      expect(asked.some((one) => one.draws === 16)).toBe(true)
+    })
+    ran(8)
+    await settle()
+    await vi.waitFor(() => {
+      expect(noteText()).toContain('standard deviation of 8 draws')
+    })
+    hold.release()
+    hold = null
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(noteText()).not.toContain('could not be computed')
+    expect(noteText()).toContain('standard deviation of 8 draws')
   })
 
   it('asks for the draws the panels ran with', async () => {
@@ -414,6 +464,22 @@ describe('the draws of the uncertainty', () => {
     ran(8)
     await settle()
     expect(asked.map((one) => one.draws)).toEqual([8, 8, 8])
+  })
+
+  it('shows the failure of the loop which counts', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    failing = { draws: 16, message: 'the endpoint timed out' }
+    ran(16)
+    await vi.waitFor(() => {
+      expect(noteText()).toContain('could not be computed: the endpoint timed out')
+    })
+    // the next analysis of a position clears the failure, so the tests after this one start clean
+    failing = null
+    ran(8)
+    await showAll(DOSE)
+    await settle()
   })
 })
 

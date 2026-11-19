@@ -587,8 +587,18 @@ function boxFigure(box, scale) {
  *   without a number is no statement
  */
 export function variationText(cv) {
+  return `CV ${variationValue(cv)}`
+}
+
+/**
+ * The value of a coefficient of variation, as text.
+ *
+ * @param {number} cv the coefficient of variation, a fraction
+ * @returns {string} `10.0 %`, and `–` where there is none
+ */
+function variationValue(cv) {
   const percent = format(100 * cv)
-  return percent === '–' ? 'CV –' : `CV ${percent} %`
+  return percent === '–' ? percent : `${percent} %`
 }
 
 /**
@@ -602,7 +612,7 @@ function boxTitle(parameter, statistics) {
   const show = (value) => format(value, parameter.percent)
   return (
     `${String(statistics.count)} draws: median ${show(statistics.median)}, ` +
-    `coefficient of variation ${variationText(statistics.cv).slice(3)}, ` +
+    `coefficient of variation ${variationValue(statistics.cv)}, ` +
     `half of them between ${show(statistics.q25)} and ${show(statistics.q75)}, ` +
     `all of them between ${show(statistics.min)} and ${show(statistics.max)} ${parameter.unit}`
   )
@@ -778,13 +788,13 @@ function renderNote(scale) {
   const amount = (1000 * dose) / MOLAR_MASS
   // the window the rows were analysed over, as the panels drew it
   const span = [...rows.values()].find((held) => Number.isFinite(held.span?.[1]))?.span
-  const window =
+  const timespan =
     span === undefined
       ? 'the simulated time'
       : `the simulated ${format(span[0])} to ${format(span[1])} h`
   const lines = [
     `A single oral dose of ${format(dose)} mg glimepiride (${format(amount)} µmol, ` +
-      `M = ${MOLAR_MASS} g/mol), analysed over ${window} of this patient with ` +
+      `M = ${MOLAR_MASS} g/mol), analysed over ${timespan} of this patient with ` +
       `the linear up / log down trapezoid and the best fit of the terminal slope. CL/F and ` +
       `Vz/F are of glimepiride alone: a metabolite carries no dose of its own. A whole-body ` +
       `model keeps a slowly decaying terminal phase at the end of that window, so the rows ` +
@@ -835,25 +845,34 @@ async function takeDraws(key, values) {
   const mine = generation
   const wanted = draws
   const current = () => mine === generation && key === shown && wanted === draws
-  for (const analyte of ANALYTES) {
-    const uncertainty = await analyseDraws(analyte, values, wanted, current)
-    if (!current()) {
-      return
-    }
-    if (uncertainty !== null) {
-      provenance = {
-        draws: uncertainty.draws,
-        fit: uncertainty.fit,
-        level: uncertainty.level,
-        failed: uncertainty.failed,
+  try {
+    for (const analyte of ANALYTES) {
+      const uncertainty = await analyseDraws(analyte, values, wanted, current)
+      if (!current()) {
+        return
       }
+      if (uncertainty !== null) {
+        provenance = {
+          draws: uncertainty.draws,
+          fit: uncertainty.fit,
+          level: uncertainty.level,
+          failed: uncertainty.failed,
+        }
+      }
+      render()
     }
-    render()
-  }
-  if (provenance === null) {
-    // the loop is done and no answer carried draws: the note says so and not "computing"
-    emptyDraws = true
-    render()
+    if (provenance === null) {
+      // the loop is done and no answer carried draws: the note says so and not "computing"
+      emptyDraws = true
+      render()
+    }
+  } catch (bad) {
+    // the failure of a loop which was superseded is of draws nobody looks at any more, and the
+    // table the loop which replaced it computed is no failure
+    if (current()) {
+      failure = bad instanceof Error ? bad.message : String(bad)
+      render()
+    }
   }
 }
 
@@ -869,16 +888,17 @@ function scheduleDraws(key, values) {
   }
   // a loop which is running is of a position or a number which is gone
   generation += 1
-  emptyDraws = false
+  if (emptyDraws) {
+    // the note of an empty loop is about the loop before this one
+    emptyDraws = false
+    render()
+  }
   if (draws === 0 || declared === null) {
     return
   }
   timer = setTimeout(() => {
     timer = null
-    takeDraws(key, values).catch((bad) => {
-      failure = bad instanceof Error ? bad.message : String(bad)
-      render()
-    })
+    void takeDraws(key, values)
   }, DRAWS_DELAY)
 }
 
@@ -909,6 +929,7 @@ async function take(event) {
     shown = key
     dose = figure.values.dose ?? Number.NaN
     provenance = null
+    emptyDraws = false
   }
   try {
     await analyse(analyte, figure)
@@ -946,6 +967,7 @@ function followDraws(event) {
   }
   draws = asked
   provenance = null
+  emptyDraws = false
   for (const held of rows.values()) {
     held.statistics = null
   }
