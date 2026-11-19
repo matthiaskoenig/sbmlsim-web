@@ -193,6 +193,53 @@ describe('the client of an endpoint', () => {
     }
   })
 
+  it('reads the figure of an app, which an older payload lacks and a service may spell null', async () => {
+    const app = {
+      contract: 'app/1',
+      title: 'Model A',
+      subtitle: '',
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['li_gli'], scenarios: [] }],
+      variants: [],
+      variant: '',
+      citation: '',
+      doi: '',
+      licenses: [],
+      shared: {},
+      heads: {},
+    }
+    const figure = {
+      svg: '<svg/>',
+      title: 'The model',
+      credit: '',
+      panels: { 'li/sub:gli': ['li_gli'] },
+    }
+    let body: unknown = app
+    serve(() => Promise.resolve(json(body)))
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    // no key at all and null are the same, no figure
+    expect((await client.app('modelA')).figure).toBeUndefined()
+    body = { ...app, figure: null }
+    expect((await client.app('modelA')).figure).toBeNull()
+    body = {
+      ...app,
+      pages: [{ ...app.pages[0], figure: true, shown: ['li_gli'] }],
+      figure,
+    }
+    const read = await client.app('modelA')
+    expect(read.figure?.panels['li/sub:gli']).toEqual(['li_gli'])
+    expect(read.pages[0]?.figure).toBe(true)
+    expect(read.pages[0]?.shown).toEqual(['li_gli'])
+    for (const broken of [
+      { ...app, figure: { ...figure, svg: 1 } },
+      { ...app, figure: { ...figure, panels: { li: 'li_gli' } } },
+      { ...app, pages: [{ ...app.pages[0], figure: 'yes' }] },
+      { ...app, pages: [{ ...app.pages[0], shown: 'li_gli' }] },
+    ]) {
+      body = broken
+      expect(await kindOf(client.app('modelA'))).toBe('body')
+    }
+  })
+
   it('reads the stops, the targetless knobs, the limits and the derived values of a declaration', async () => {
     const stops = [
       { label: 'normal', value: 110 },

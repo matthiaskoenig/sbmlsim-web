@@ -12,7 +12,9 @@
           "renal_urine"
         ],
         "scenarios": [],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       },
       {
         "id": "dose",
@@ -22,7 +24,9 @@
           "dose_urine"
         ],
         "scenarios": [],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       },
       {
         "id": "patient",
@@ -57,7 +61,9 @@
             }
           }
         ],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       },
       {
         "id": "dosing",
@@ -67,7 +73,9 @@
           "dosing_urine"
         ],
         "scenarios": [],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       }
     ],
     "variants": [],
@@ -450,7 +458,8 @@
         }
       ]
     },
-    "variant": "default"
+    "variant": "default",
+    "figure": null
   },
   "panel": {
     "contract": "panel/1",

@@ -30,6 +30,7 @@ import { APP_TAG, PANEL_TAG, placePanelTag } from './tags'
 export { CONTRACTS, ContractError, checkContract } from './contract'
 export type {
   AppDeclaration,
+  AppFigure,
   AppPage,
   AppVariant,
   Band,

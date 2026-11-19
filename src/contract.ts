@@ -557,6 +557,37 @@ export interface AppPage {
    * by side; absent, as from a service before sbmlsim 0.28, is `regular`.
    */
   size?: PanelSize
+  /**
+   * Whether the page shows the figure of the app next to its panels; absent, as from a service
+   * before the figure, is `false`.
+   */
+  figure?: boolean
+  /**
+   * The ids of the panels of the page a reader sees before any click on the figure; absent is
+   * empty.
+   */
+  shown?: string[]
+}
+
+/**
+ * The figure of an app, the drawing of its model a reader clicks to open panels.
+ *
+ * The `svg` is trusted markup of the model package which assembles the app, the same origin as
+ * the declarations of the panels, and is not sanitized.
+ */
+export interface AppFigure {
+  /** The drawing as svg markup. */
+  svg: string
+  /** The figure as it is shown. */
+  title: string
+  /** The credit of the drawing, empty for none. */
+  credit: string
+  /**
+   * The panels a click opens, by the key path of the clicked element: the `data-k` attributes of
+   * the drawing joined from the outside in with `/`, `li` or `li/sub:gli`. A key may open several
+   * panels, a group of units is split into one panel per unit.
+   */
+  panels: Record<string, string[]>
 }
 
 /** The size of the panels of a page, see `AppPage.size`. */
@@ -626,6 +657,11 @@ export interface AppDeclaration {
    * variant.
    */
   variant: string
+  /**
+   * The figure of the app: `null` for an app without, and absent, as from a service before the
+   * figure, is the same.
+   */
+  figure?: AppFigure | null
 }
 
 /** A model the endpoint serves, as it is listed. */
