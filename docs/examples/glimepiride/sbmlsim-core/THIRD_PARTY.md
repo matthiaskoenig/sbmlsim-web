@@ -4,7 +4,7 @@ The code of sbmlsim-core is MIT licensed (`LICENSE`). `engine.wasm`, which `sbml
 
 | Library | Version | Submodule and commit | License |
 |---|---|---|---|
-| SUNDIALS (CVODE and its vectors, matrices and linear solvers) | 7.9.0 | `third_party/sundials`, tag v7.9.0, commit 312fc0f3684f27209ca9dc9249d194436eb41a7a | BSD-3-Clause |
+| SUNDIALS (CVODES, IDA and their vectors, matrices and linear solvers) | 7.9.0 | `third_party/sundials`, tag v7.9.0, commit 312fc0f3684f27209ca9dc9249d194436eb41a7a | BSD-3-Clause |
 | KLU (SuiteSparse) | 2.3.6 | `third_party/SuiteSparse`, tag v7.14.1, commit e202a5bcef55f5a780c26830ebd6ff13af193baf | LGPL-2.1-or-later |
 | BTF (SuiteSparse) | 2.3.3 | the same | LGPL-2.1-or-later |
 | AMD (SuiteSparse) | 3.3.4 | the same | BSD-3-Clause |
@@ -18,6 +18,10 @@ KLU and BTF are under the GNU Lesser General Public License 2.1 or later and are
 Also compiled into the modules, under permissive licenses whose texts are in their sources: the Rust standard library (MIT OR Apache-2.0); in `engine.wasm` the crates serde, serde_json, itoa, rand_core, rand_pcg and thiserror (MIT OR Apache-2.0), memchr (Unlicense OR MIT) and zmij (MIT), and wasi-libc, which the Rust target wasm32-wasip1 links (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, with parts of musl under MIT; the C of the solvers is compiled against the sysroot of wasi-sdk 34); in `mathlib.wasm` the crate libm (MIT). `model.wasm` contains no third-party code.
 
 `mathlib.wasm` and the crate `sbmlsim-mathlib` it is built from (which every native build of the compiler links for constant folding) also contain `exp`, `log` and `pow` of ARM optimized-routines (https://github.com/ARM-software/optimized-routines, commit 20859d3fd9e797dde592c489c8ef7d383f778620: `math/exp.c`, `math/log.c`, `math/pow.c` and their tables), ported to Rust in `crates/mathlib/src/arm`. optimized-routines is under `MIT OR Apache-2.0 WITH LLVM-exception` and is used here under the MIT License, whose text is below.
+
+The extension module of the python package (`sbmlsim_core._core`, the crate `sbmlsim-python`) additionally links mimalloc 3.3.2 statically, the allocator of the extension (`crates/python/src/lib.rs`). Its C sources are vendored in the crate `libmimalloc-sys` 0.1.49, which compiles them with `cc`; mimalloc is under the MIT License (Microsoft Corporation, Daan Leijen) and the crate which wraps it under the MIT License (Octavian Oncescu), both texts below. Nothing else carries mimalloc: it is in no wasm module, in no other crate and in no package of the JavaScript host.
+
+The native Wasmtime hosts (`sbmlsim-host`, the command line and the Python extension) also link Zstandard 1.5.7 for the persistent compilation cache, through `zstd` 0.13.5, `zstd-safe` 7.4.1 and `zstd-sys` 2.1.3. Zstandard and these Rust wrappers are used under BSD-3-Clause; their license texts are below. These cache dependencies are in no Wasm module and in no package of the JavaScript host.
 
 SuiteSparse_config states its license in the header of `third_party/SuiteSparse/SuiteSparse_config/SuiteSparse_config.c`: "SuiteSparse_config, Copyright (c) 2012-2023, Timothy A. Davis. All Rights Reserved. SPDX-License-Identifier: BSD-3-clause", the license of the text of AMD and COLAMD below.
 
@@ -238,6 +242,130 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### mimalloc: `c_src/mimalloc/v3/LICENSE` of the crate libmimalloc-sys 0.1.49
+
+```text
+MIT License
+
+Copyright (c) 2018-2025 Microsoft Corporation, Daan Leijen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### libmimalloc-sys: `LICENSE.txt` of the crate libmimalloc-sys 0.1.49
+
+```text
+Copyright 2019 Octavian Oncescu
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### Zstandard 1.5.7: `zstd/LICENSE` of the crate zstd-sys 2.1.3
+
+```text
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook, nor Meta, nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Rust wrappers zstd 0.13.5, zstd-safe 7.4.1 and zstd-sys 2.1.3: `LICENSE`
+
+```text
+BSD 3-Clause License
+
+Copyright (c) 2026, Alexandre Bury
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ### GNU Lesser General Public License 2.1 (of KLU and BTF): `third_party/SuiteSparse/KLU/Doc/lesser.txt`

@@ -54,9 +54,42 @@
 }
 
 #pk-parameters .pk-lead {
-  margin: 0 0 10px;
+  margin: 0;
   color: var(--pk-fg-soft);
   font-size: 13px;
+}
+
+/* the head of the card and the control of the draws, which sits at its right end */
+#pk-parameters .pk-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+#pk-parameters .pk-draws {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--pk-fg-soft);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#pk-parameters .pk-draws[hidden] {
+  display: none;
+}
+
+#pk-parameters .pk-draws select {
+  padding: 2px 4px;
+  border: 1px solid var(--pk-line);
+  border-radius: 6px;
+  background: var(--pk-bg-card);
+  color: var(--pk-fg);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 /* a documentation theme wraps a table in a block which shrinks to its content and scrolls
@@ -154,6 +187,57 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* the box of the draws of a cell, its value and the spread of its draws, on one line */
+#pk-parameters .pk-cell {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: flex-end;
+}
+
+/* the value and its spread take a column of their own, so the numbers of a column line up
+ * under each other whatever the width of the spread beside them */
+#pk-parameters .pk-point {
+  min-width: 4.2em;
+  text-align: right;
+}
+
+#pk-parameters .pk-spread {
+  min-width: 4.4em;
+  color: var(--pk-fg-soft);
+  font-size: 12px;
+  text-align: right;
+}
+
+/*
+ * The box of the draws of a cell, stretched to the room its line leaves it, so every box of the
+ * table is one scale and the marks of a box are rectangles and no stroke.
+ */
+#pk-parameters .pk-box {
+  flex: 1 1 auto;
+  align-self: center;
+  min-width: 48px;
+  max-width: 160px;
+  height: 11px;
+  overflow: visible;
+}
+
+#pk-parameters .pk-box .pk-middle {
+  fill: var(--pk-line);
+}
+
+#pk-parameters .pk-box .pk-range {
+  fill: color-mix(in srgb, var(--pk-fg-soft) 55%, transparent);
+}
+
+#pk-parameters .pk-box .pk-iqr {
+  fill: color-mix(in srgb, var(--pk-fg-soft) 28%, transparent);
+}
+
+#pk-parameters .pk-box .pk-point-mark {
+  fill: var(--pk-fg);
+}
+
 #pk-parameters .pk-note {
   margin: 10px 0 0;
   color: var(--pk-fg-soft);
@@ -170,5 +254,11 @@
   #pk-parameters th,
   #pk-parameters td {
     padding: 5px 6px;
+  }
+
+  /* the numbers come first on a card this narrow: the box of a cell is what a reader reads
+   * next to them and not instead of them, and it would push them out of the card */
+  #pk-parameters .pk-box {
+    display: none;
   }
 }

@@ -2909,6 +2909,25 @@ watch(
   { immediate: true },
 )
 
+/*
+ * The draws a request asks for are part of what a run answers, so a page which
+ * moves them runs the panel again: the band of a figure is the draws of the
+ * number the page states now and never the ones of a number before it, and a
+ * page which turns them off is a figure without a band. The declaration and the
+ * study data are untouched, so it is a run and no restart, and a frozen panel
+ * owes it as it owes a movement of a knob.
+ */
+watch(requestedDraws, () => {
+  if (declaration.value === null) {
+    return
+  }
+  if (frozen.value) {
+    owed = gridded.value
+    return
+  }
+  schedule(gridded.value)
+})
+
 watch(
   () => [props.endpoint, props.model, props.panel],
   () => {

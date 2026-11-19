@@ -221,14 +221,21 @@ export interface PanelDataDeclaration {
  * anything of its own.
  */
 export interface PanelUncertainty {
-  /** The draws a request runs when it names no number. */
+  /**
+   * The draws a client asks for when its host names no number; a request which
+   * names none runs no draw at all, since the draws are the work of the band.
+   */
   draws: number
   /** The draws the sample of the endpoint holds, the most a request may ask for. */
   max_draws: number
   /** The share of the draws the band covers, e.g. `0.9` for the 5th to the 95th percentile. */
   level: number
-  /** The uncertainty record of the model the draws come from, e.g. the name of a fit. */
-  fit: string
+  /**
+   * The seed the sample of the endpoint was drawn with, the provenance of the
+   * band: the fit the draws come from travels with an answer (`Uncertainty.fit`),
+   * since it is a property of the model and not of the panel.
+   */
+  seed: number
 }
 
 export interface PanelSimulation {
@@ -336,7 +343,8 @@ export interface SimulateRequest {
   /**
    * The draws of the uncertainty of the panel to run next to the curves, the
    * first ones of the sample of the endpoint; `0` or absent for a run without a
-   * band, and at most the `max_draws` of the declaration.
+   * band, and more than the `max_draws` of the declaration is refused rather
+   * than cut, so a page never states a band it did not get.
    */
   draws?: number
   /** The variant of the model to simulate; the one the panel declares without. */

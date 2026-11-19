@@ -22,7 +22,7 @@
 //   GET  /api/models/{model}/app[?variant=V]               answers[V].app, a 404 for none
 //   GET  /api/models/{model}/panels/{panel}[?variant=V]    answers[V].panels[panel].declaration
 //   GET  /api/models/{model}/panels/{panel}/data[?variant=V]                         .data
-//   POST /api/models/{model}/panels/{panel}/simulate       body { values?, grid?, variant? }
+//   POST /api/models/{model}/panels/{panel}/simulate       body { values?, grid?, variant?, draws? }
 //
 // A simulation is checked against the declaration as the service checks it (a knob the panel
 // does not declare, a value outside the bounds of a range knob or none of the choices of a
@@ -35,6 +35,18 @@
 // derived targets compiled into the model read), sorted by id, the selections of the model and
 // its settings with an absolute tolerance per state. A point which does not integrate is a row
 // of `null` in every curve and its flat index is in `status.failed`, as the service answers it.
+//
+// A panel whose recipe carries an uncertainty (the sample of the fit of its model, which the
+// bundle holds) answers a band next to its curves for the `draws` a request asks for: every
+// point of the grid is run once per draw, with the parameters of that draw set before the
+// initialization, and `uncertainty.band[curve][point]` is the percentiles of that sample, time
+// by time, of the level the recipe states (`low`, `high`; the linear interpolation of the order
+// statistics, as numpy and the service compute it). A draw which does not integrate is left out
+// of the percentiles and its index is in `uncertainty.failed`. A run of one point alone carries
+// the curves of the draws themselves as `uncertainty.curves[curve]`, where their size is
+// bounded; over a grid only the band travels. The draws are the first ones of the sample, which
+// is why the sample of a recipe is written in the order of a latin hypercube: a prefix of it is
+// a sample of its own, so the band settles as a page asks for more draws instead of jumping.
 //
 // The runs are shared: the points of one model, end and pre-initialization are one run, so the
 // panels of a page which show one state (each its own curves, all selections of the model are
@@ -51,14 +63,14 @@
 // `spec_hash` is the sha256 of the canonical JSON (sorted keys, no whitespace, every character
 // which is not ASCII escaped) of the resolved request: the model, the panel, the query `variant`,
 // the declaration, the sha256 of the SBML, the value of every knob (its default for one the
-// request leaves out), the grid, the engine and the settings. It identifies what was simulated
+// request leaves out), the grid, the draws, the engine and the settings. It identifies what was simulated
 // by this endpoint; it is not the hash of the service, whose engine and settings differ.
 
 import { EngineError } from "./loader.mjs";
 import { createPool, defaultWorkers } from "./pool.mjs";
 
 /** The version of sbmlsim-core (`js/package.json`), which the provenance of a run names. */
-export const CORE_VERSION = "0.2.0";
+export const CORE_VERSION = "0.11.0";
 
 /** The engine a provenance names. */
 export const ENGINE = `sbmlsim-core ${CORE_VERSION}`;
@@ -79,7 +91,7 @@ export const MAX_ID = 128;
 const DEFAULT_LIMITS = { knobs: 8, grid: 64 };
 
 /** The fields of the body of a simulation. */
-const REQUEST_FIELDS = new Set(["values", "grid", "variant"]);
+const REQUEST_FIELDS = new Set(["values", "grid", "variant", "draws"]);
 
 /** A request which is answered with an error status. */
 class HttpError extends Error {
@@ -260,7 +272,7 @@ function readBody(text) {
   }
   const unknown = Object.keys(body).filter((key) => !REQUEST_FIELDS.has(key));
   if (unknown.length > 0) {
-    throw new HttpError(422, `The body of a simulation has the unknown fields ${pyList(unknown.sort())}; its fields are ['grid', 'values', 'variant'].`);
+    throw new HttpError(422, `The body of a simulation has the unknown fields ${pyList(unknown.sort())}; its fields are ['draws', 'grid', 'values', 'variant'].`);
   }
   const mapping = (name) => {
     const value = body[name] ?? {};
@@ -284,7 +296,11 @@ function readBody(text) {
   if (typeof variant !== "string" || variant.length > MAX_ID) {
     throw new HttpError(422, `The variant is no text of at most ${MAX_ID} characters.`);
   }
-  return { values, grid, variant };
+  const draws = body.draws ?? 0;
+  if (!Number.isInteger(draws) || draws < 0) {
+    throw new HttpError(422, `The draws of the uncertainty are no whole number of at least 0.`);
+  }
+  return { values, grid, variant, draws };
 }
 
 /**
@@ -369,7 +385,9 @@ function product(axes) {
 
 /** The runs of the points of a model, shared by the requests of one state (see the module comment). */
 class Runs {
-  constructor(maxBytes) {
+  constructor(maxBytes, maxEntries, maxInflight) {
+    this.maxEntries = maxEntries;
+    this.maxInflight = maxInflight;
     this.maxBytes = maxBytes;
     this.bytes = 0;
     this.inflight = new Map();
@@ -391,6 +409,7 @@ class Runs {
     }
     let entry = this.inflight.get(key);
     if (!entry) {
+      if (this.inflight.size >= this.maxInflight) return Promise.reject(new Error("panel run limit reached"));
       const controller = new AbortController();
       entry = { controller, waiters: 0 };
       entry.promise = start(controller.signal).then(
@@ -439,16 +458,112 @@ class Runs {
 
   /** Keeps the results of a run, evicting the least recently used ones beyond the bound. */
   store(key, results) {
-    const bytes = results.reduce((sum, result) => sum + (result ? result.values.byteLength : 0), 0);
+    if (results.some((result) => result === null)) return;
+    const bytes = 256 + key.length * 2 + results.reduce((sum, result) => sum + 128 + result.values.byteLength + JSON.stringify(result.columns).length * 2, 0);
     if (bytes > this.maxBytes) return;
+    const previous = this.done.get(key);
+    if (previous) {
+      this.bytes -= previous.bytes;
+      this.done.delete(key);
+    }
     this.done.set(key, { results, bytes });
     this.bytes += bytes;
     for (const [old, entry] of this.done) {
-      if (this.bytes <= this.maxBytes) break;
+      if (this.bytes <= this.maxBytes && this.done.size <= this.maxEntries) break;
       this.done.delete(old);
       this.bytes -= entry.bytes;
     }
   }
+}
+
+/** The most doses of a dosing protocol after its first one, `MAX_DOSES` of sbmlsim. */
+export const MAX_DOSES = 1000;
+
+/**
+ * The times of the doses of a dosing protocol after its first one, as `dose_times` of
+ * `sbmlsim.panel`: `k * interval` for `k = 1, 2, ...` while before the duration (the end without)
+ * and the end, at most `MAX_DOSES`; none for an interval which is not positive.
+ */
+export function doseTimes(interval, duration, end) {
+  if (!(interval > 0)) return [];
+  const until = duration === null || duration === undefined ? end : Math.min(duration, end);
+  const times = [];
+  for (let k = 1; k <= MAX_DOSES; k += 1) {
+    const time = k * interval;
+    if (!(time < until)) break;
+    times.push(time);
+  }
+  return times;
+}
+
+/**
+ * The changes of the doses of the dosing protocols of a run at a state of its knobs: per dose
+ * the increment of its target by the dose of its knob in the unit of the target, in the order of
+ * the times (the changes of one time are one change of the engine).
+ */
+function doseChanges(run, state) {
+  const changes = [];
+  for (const dosing of run.dosing ?? []) {
+    const dose = state[dosing.dose] * run.knobs[dosing.dose].factor;
+    const interval = state[dosing.interval] * dosing.interval_factor;
+    const duration = dosing.duration === null || dosing.duration === undefined ? null : state[dosing.duration] * dosing.duration_factor;
+    for (const time of doseTimes(interval, duration, run.end)) {
+      changes.push({ time, values: [], increments: [[dosing.target, dose]] });
+    }
+  }
+  return changes.sort((a, b) => a.time - b.time);
+}
+
+/**
+ * The rows of a result which are its output times: of two rows of one time (a change at an
+ * output time, the state before it and after it) the one after it.
+ */
+function outputRows(result) {
+  if (result.columns[0] !== "time") throw new Error(`a result has the first column ${result.columns[0]}, not time`);
+  const width = result.columns.length;
+  const time = (r) => result.values[r * width];
+  const rows = [];
+  for (let r = 0; r < result.nRows; r += 1) {
+    if (r + 1 < result.nRows && time(r + 1) === time(r)) continue;
+    rows.push(r);
+  }
+  return rows;
+}
+
+/**
+ * The draws of the uncertainty a request gets, 0 for a run without a band.
+ *
+ * A request which names no number gets no draw: the draws are the work of the band and a
+ * request which did not ask for them never pays for them, while the number a client asks for
+ * when its host names none is the `draws` of the declaration, which is where a client reads
+ * it. A request for more draws than the sample of the recipe holds is refused rather than cut,
+ * as a knob outside its bounds is refused: a page which asks for 64 draws and silently gets 32
+ * would state a band it did not get. A panel whose recipe carries no uncertainty gets none,
+ * whatever it asked for, so a declaration is what decides whether a band exists at all.
+ */
+function resolveDraws(panel, uncertainty, asked) {
+  if (!uncertainty || asked === 0) return 0;
+  const max = uncertainty.max_draws ?? (uncertainty.draws ?? []).length;
+  if (asked > max) {
+    throw new HttpError(422, `The panel '${panel}' carries ${max} draws of its uncertainty, ${asked} were asked for.`);
+  }
+  return asked;
+}
+
+/**
+ * The percentile of a sample, the linear interpolation of its order statistics.
+ *
+ * It is the `linear` method of numpy, which is the one the python half of a panel uses, so the
+ * two halves answer the same band. A value which is no finite number is no member of the
+ * sample (a draw which did not integrate), and a sample without one has no percentile.
+ */
+function percentile(sample, share) {
+  const sorted = sample.filter((one) => one !== null && one !== undefined && Number.isFinite(one)).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const at = share * (sorted.length - 1);
+  const low = Math.floor(at);
+  const high = Math.ceil(at);
+  return sorted[low] + (at - low) * (sorted[high] - sorted[low]);
 }
 
 /**
@@ -463,7 +578,9 @@ class Runs {
  * - `pool`: a pool of `createPool` to run on instead of one of its own (e.g. shared by the
  *   endpoints of several bundles), which `close()` leaves open.
  * - `fetch`: loads the files of the bundle and the runtime (`globalThis.fetch` without).
- * - `maxRunBytes`: the bound of the cache of the runs (`MAX_RUN_BYTES` without).
+ * - `maxRunBytes`: numeric buffers plus estimated metadata (`MAX_RUN_BYTES` without).
+ * - `maxRunEntries`: maximum cached successful runs (128); failed runs are not stored.
+ * - `maxInflightRuns`: maximum distinct runs in flight (32).
  *
  * The function has `close()`, which terminates the workers of its own pool.
  */
@@ -479,10 +596,15 @@ export function createPanelEndpoint(options) {
     pool: givenPool = null,
     fetch: load = (url) => globalThis.fetch(url),
     maxRunBytes = MAX_RUN_BYTES,
+    maxRunEntries = 128,
+    maxInflightRuns = 32,
   } = options;
   if (bundle === undefined || bundle === null) throw new Error("createPanelEndpoint needs the URL of a bundle");
   const bundleUrl = new URL(String(bundle), globalThis.location?.href);
-  const runs = new Runs(maxRunBytes);
+  for (const [name, value] of Object.entries({ maxRunBytes, maxRunEntries, maxInflightRuns })) {
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive safe integer`);
+  }
+  const runs = new Runs(maxRunBytes, maxRunEntries, maxInflightRuns);
   const models = new Map();
   let loading = null;
   let ownPool = null;
@@ -598,13 +720,14 @@ export function createPanelEndpoint(options) {
   /** Runs a simulation of a panel. */
   const simulate = async (bundleData, pool, model, panel, text, signal) => {
     const started = globalThis.performance?.now() ?? Date.now();
-    const { values, grid, variant } = readBody(text);
+    const { values, grid, variant, draws } = readBody(text);
     const answer = panelOf(bundleData, model, panel, variant);
     const declaration = answer.declaration;
     checkLimits(values, grid, { ...DEFAULT_LIMITS, ...declaration.limits });
     const knobs = declaration.axes ?? [];
     checkKnobs(panel, knobs, values, grid);
     const run = answer.run;
+    const asked = resolveDraws(panel, run.uncertainty, draws);
     const info = await abortable(modelOf(bundleData, pool, run.model), signal);
 
     const axes = knobs
@@ -629,63 +752,129 @@ export function createPanelEndpoint(options) {
         if (spec.target !== null && spec.target !== undefined) preinit.set(spec.target, state[knob.id] * spec.factor);
         if (spec.parameter !== null && spec.parameter !== undefined) preinit.set(spec.parameter, state[knob.id]);
       }
-      return [...preinit].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      return {
+        preinit: [...preinit].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        changes: doseChanges(run, state),
+      };
     });
+
+    const runner = (list) => async (runSignal) => {
+      const requests = list.map(({ preinit, changes }) => ({
+        contract: "simulation/1",
+        start: run.start,
+        end: run.end,
+        output: { uniform: { steps: run.points } },
+        preinit,
+        changes,
+        steady_state: null,
+        selections: info.selections,
+        settings: info.settings,
+      }));
+      // an error of the engine is a point which failed, any other error fails the run
+      return Promise.all(
+        requests.map((request) =>
+          pool.simulate(info.poolKey, request, { signal: runSignal }).catch((error) => {
+            if (error instanceof EngineError) return null;
+            throw error;
+          }),
+        ),
+      );
+    };
+
+    /**
+     * The rows of every curve of a list of results, in the order of the list: the row of a
+     * result which is null (a run which did not integrate) is null for every time, and its
+     * index is one of the failed ones.
+     */
+    const rowsOf = (list) => {
+      const out = {};
+      const failedAt = [];
+      for (const curve of declaration.curves ?? []) out[curve.id] = [];
+      list.forEach((result, index) => {
+        if (result === null) failedAt.push(index);
+        // a dose at an output time is two rows of that time, the state before it and after it;
+        // the curve is the state after it, as the service interpolates onto its times
+        const rows = result === null ? [] : outputRows(result);
+        if (result !== null && rows.length !== run.x.length) {
+          throw new Error(`the run of the panel ${panel} has ${rows.length} rows, its x ${run.x.length}`);
+        }
+        for (const curve of declaration.curves ?? []) {
+          const spec = run.curves?.[curve.id];
+          if (!spec) throw new Error(`the run of the panel ${panel} has no curve ${curve.id}`);
+          if (result === null) {
+            out[curve.id].push(run.x.map(() => null));
+            continue;
+          }
+          const width = result.columns.length;
+          const column = result.columns.indexOf(spec.selection);
+          if (column < 0) throw new Error(`the model ${run.model} does not select ${spec.selection}`);
+          const row = new Array(rows.length);
+          rows.forEach((r, i) => {
+            const value = result.values[r * width + column] * spec.factor;
+            row[i] = Number.isFinite(value) ? value : null;
+          });
+          out[curve.id].push(row);
+        }
+      });
+      return { curves: out, failed: failedAt };
+    };
 
     const runKey = JSON.stringify([run.model, run.start, run.end, run.points, points]);
-    const results = await runs.get(
-      runKey,
-      async (runSignal) => {
-        const requests = points.map((preinit) => ({
-          contract: "simulation/1",
-          start: run.start,
-          end: run.end,
-          output: { uniform: { steps: run.points } },
-          preinit,
-          changes: [],
-          steady_state: null,
-          selections: info.selections,
-          settings: info.settings,
-        }));
-        // an error of the engine is a point which failed, any other error fails the run
-        return Promise.all(
-          requests.map((request) =>
-            pool.simulate(info.poolKey, request, { signal: runSignal }).catch((error) => {
-              if (error instanceof EngineError) return null;
-              throw error;
-            }),
-          ),
-        );
-      },
-      signal,
-    );
+    const results = await runs.get(runKey, runner(points), signal);
+    const { curves, failed } = rowsOf(results);
 
-    const failed = [];
-    const curves = {};
-    for (const curve of declaration.curves ?? []) curves[curve.id] = [];
-    results.forEach((result, index) => {
-      if (result === null) failed.push(index);
-      if (result !== null && result.nRows !== run.x.length) {
-        throw new Error(`the run of the panel ${panel} has ${result.nRows} rows, its x ${run.x.length}`);
+    /**
+     * The uncertainty of the answer: the band of every curve for every point of the grid, and
+     * the curves of the draws themselves for a run of one point, where their size is bounded.
+     *
+     * Every draw is the run of its point with the parameters of its vector of the sample set
+     * before the initialization, exactly as a knob with a `parameter` is set, and the draws of
+     * a point are its own sample: the band is the percentiles of that sample, time by time.
+     */
+    const uncertaintyOf = async () => {
+      if (asked === 0) return null;
+      const vectors = (run.uncertainty.draws ?? []).slice(0, asked);
+      const parameters = run.uncertainty.parameters ?? [];
+      const drawPoints = [];
+      for (const point of points) {
+        for (const vector of vectors) {
+          const preinit = new Map(point.preinit);
+          parameters.forEach((id, k) => preinit.set(id, vector[k]));
+          drawPoints.push({
+            preinit: [...preinit].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+            changes: point.changes,
+          });
+        }
       }
+      const drawKey = JSON.stringify([run.model, run.start, run.end, run.points, drawPoints]);
+      const drawResults = await runs.get(drawKey, runner(drawPoints), signal);
+      const drawn = rowsOf(drawResults);
+      const level = run.uncertainty.level ?? 0.9;
+      const low = (1 - level) / 2;
+      const high = (1 + level) / 2;
+      const band = {};
       for (const curve of declaration.curves ?? []) {
-        const spec = run.curves?.[curve.id];
-        if (!spec) throw new Error(`the run of the panel ${panel} has no curve ${curve.id}`);
-        if (result === null) {
-          curves[curve.id].push(run.x.map(() => null));
-          continue;
-        }
-        const width = result.columns.length;
-        const column = result.columns.indexOf(spec.selection);
-        if (column < 0) throw new Error(`the model ${run.model} does not select ${spec.selection}`);
-        const row = new Array(result.nRows);
-        for (let r = 0; r < result.nRows; r += 1) {
-          const value = result.values[r * width + column] * spec.factor;
-          row[r] = Number.isFinite(value) ? value : null;
-        }
-        curves[curve.id].push(row);
+        band[curve.id] = points.map((_, p) => {
+          const sample = vectors.map((__, d) => drawn.curves[curve.id][p * asked + d]);
+          const ends = { low: new Array(run.x.length), high: new Array(run.x.length) };
+          for (let t = 0; t < run.x.length; t += 1) {
+            const column = sample.map((row) => row[t]);
+            ends.low[t] = percentile(column, low);
+            ends.high[t] = percentile(column, high);
+          }
+          return ends;
+        });
       }
-    });
+      return {
+        draws: asked,
+        fit: run.uncertainty.fit ?? "",
+        level,
+        band,
+        ...(points.length === 1 ? { curves: drawn.curves } : {}),
+        failed: drawn.failed,
+      };
+    };
+    const uncertainty = await uncertaintyOf();
 
     const resolvedValues = {};
     for (const knob of knobs) if (!(knob.id in grid)) resolvedValues[knob.id] = fixed[knob.id];
@@ -702,6 +891,7 @@ export function createPanelEndpoint(options) {
         model_sha256: run.model_sha256,
         values: resolvedValues,
         grid: resolvedGrid,
+        draws: asked,
         engine: ENGINE,
         settings: { settings: modelEntry.settings, absolute_tolerances: modelEntry.absolute_tolerances ?? {} },
       }),
@@ -725,6 +915,7 @@ export function createPanelEndpoint(options) {
         created: new Date().toISOString(),
       },
       status: { ok: failed.length === 0, points: results.length, failed },
+      ...(uncertainty === null ? {} : { uncertainty }),
     };
   };
 

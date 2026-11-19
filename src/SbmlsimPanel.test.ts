@@ -3350,7 +3350,7 @@ describe('the uncertainty of a panel', () => {
       ...declared,
       simulation: {
         ...declared.simulation,
-        uncertainty: { draws, max_draws: maxDraws, level: 0.9, fit: 'fitA' },
+        uncertainty: { draws, max_draws: maxDraws, level: 0.9, seed: 0 },
       },
     }
   }
@@ -3431,5 +3431,41 @@ describe('the uncertainty of a panel', () => {
     const element = await started()
     expect(figure(element)).not.toContain('curve-band')
     expect(element.drawn()?.bands).toEqual({})
+  })
+
+  it('runs again when the page moves the draws, and keeps no band of a number before', async () => {
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(uncertain())
+    served.simulate = (body) => Promise.resolve((body.draws ?? 0) > 0 ? banded() : run())
+    const element = await started()
+    expect(simulations().at(-1)?.draws).toBe(4)
+
+    // the draws of the page are part of what a run answers, so another number is another run
+    element.setAttribute('draws', '8')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations().at(-1)?.draws).toBe(8)
+    expect(figure(element)).toContain('curve-band')
+
+    // and no draw at all is a run of the curves alone, whose figure carries no band
+    element.setAttribute('draws', '0')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations().at(-1)?.draws).toBeUndefined()
+    expect(figure(element)).not.toContain('curve-band')
+    expect(element.drawn()?.bands).toEqual({})
+  })
+
+  it('owes the run of a number a page moved while it was frozen', async () => {
+    vi.useFakeTimers()
+    served.panel = () => Promise.resolve(uncertain())
+    served.simulate = () => Promise.resolve(banded())
+    const element = await started()
+    element.freeze()
+    calls = []
+    element.setAttribute('draws', '8')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations()).toEqual([])
+    await element.activate()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(simulations().at(-1)?.draws).toBe(8)
   })
 })

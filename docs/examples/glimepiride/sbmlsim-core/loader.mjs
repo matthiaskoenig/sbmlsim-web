@@ -49,7 +49,7 @@ export const MAX_MEMORY_PAGES = 32768;
 export const ENGINE_SECTION = "sbmlsim.engine";
 
 /** The version of the output of `engine.wasm` this loader reads (`ENGINE_OUTPUT_FORMAT`). */
-export const ENGINE_OUTPUT_FORMAT = 1;
+export const ENGINE_OUTPUT_FORMAT = 2;
 
 const WASI = "wasi_snapshot_preview1";
 
@@ -81,6 +81,14 @@ export const STATS_NAMES = [
   "integrations",
   "probe_rhs_evals",
   "steady_state_rhs_evals",
+  "linear_iterations",
+  "linear_convergence_failures",
+  "jacobian_vector_evals",
+  "preconditioner_evals",
+  "preconditioner_solves",
+  "sensitivity_rhs_evals",
+  "sensitivity_model_rhs_evals",
+  "sensitivity_jac_p_evals",
 ];
 
 const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
@@ -98,6 +106,14 @@ export class EngineError extends Error {
     this.detail = message;
     if (flag !== undefined) this.flag = flag;
     if (time !== undefined) this.time = time === null ? NaN : time;
+  }
+}
+
+/** An older runtime without the optional prepared-request capability. */
+export class UnsupportedError extends EngineError {
+  constructor(message) {
+    super("unsupported", message);
+    this.name = "UnsupportedError";
   }
 }
 
@@ -245,6 +261,71 @@ function checkRuntime(engineModule, mathlibModule) {
   }
 }
 
+/** Validate model state sections before compilation. Modules supplied already compiled are trusted. */
+export function validateModelBytes(source) {
+  const bytes = source instanceof ArrayBuffer ? new Uint8Array(source)
+    : ArrayBuffer.isView(source) ? new Uint8Array(source.buffer, source.byteOffset, source.byteLength) : null;
+  if (!bytes || bytes.length < 8) throw new Error("model.wasm is not a WASM binary");
+  let pos = 8;
+  const leb = (end) => {
+    let value = 0;
+    for (let shift = 0; shift < 35 && pos < end; shift += 7) {
+      const byte = bytes[pos++];
+      value += (byte & 127) * 2 ** shift;
+      if (!(byte & 128)) return value;
+    }
+    throw new Error("invalid model.wasm section encoding");
+  };
+  while (pos < bytes.length) {
+    const id = bytes[pos++];
+    const length = leb(bytes.length);
+    const end = pos + length;
+    if (end > bytes.length) throw new Error("invalid model.wasm section length");
+    if (id === 1) {
+      const count = leb(end);
+      for (let i = 0; i < count; i++) {
+        // Generated models need ordinary numeric function signatures, not GC heaps,
+        // recursive types or host references outside the shared-memory policy.
+        if (bytes[pos++] !== 0x60) throw new Error("model.wasm has an unsupported type");
+        for (let vector = 0; vector < 2; vector++) {
+          const n = leb(end);
+          for (let j = 0; j < n; j++) {
+            if (pos >= end || ![0x7f, 0x7e, 0x7d, 0x7c, 0x7b].includes(bytes[pos++])) {
+              throw new Error("model.wasm has an unsupported reference type");
+            }
+          }
+        }
+      }
+    }
+    if (id === 13) throw new Error("model.wasm must not define exception tags");
+    if ([4, 5, 8, 9, 11, 12].includes(id)) {
+      // Empty declarations are harmless, but start/data-count are scalar sections.
+      if (id === 8 || id === 12 || leb(end) !== 0) {
+        throw new Error("model.wasm must not define tables, memories, a start function, elements or data");
+      }
+    }
+    if (id === 6) {
+      const count = leb(end);
+      for (let i = 0; i < count; i++) {
+        const type = bytes[pos++];
+        if (![0x7f, 0x7e, 0x7d, 0x7c].includes(type)) throw new Error("model.wasm has an unsupported global type");
+        if (bytes[pos++] !== 0) throw new Error("model.wasm must not define mutable globals");
+        // The compiler emits no globals. Accept ordinary immutable scalar constants;
+        // reject extended constant expressions rather than guessing instruction lengths.
+        const op = bytes[pos++];
+        if (op === 0x41 || op === 0x42) {
+          let n = 0;
+          while (pos < end && n++ < 10 && (bytes[pos++] & 128)) {}
+        } else if (op === 0x43) pos += 4;
+        else if (op === 0x44) pos += 8;
+        else throw new Error("model.wasm has an unsupported global initializer");
+        if (pos >= end || bytes[pos++] !== 0x0b) throw new Error("model.wasm has an invalid global initializer");
+      }
+    }
+    pos = end;
+  }
+}
+
 /** Checks that a model imports `env.memory` and otherwise only functions of mathlib. */
 function checkModel(modelModule, mathlibModule) {
   const math = new Set(
@@ -286,6 +367,9 @@ export async function createRuntime({
   const mathlibModule = await toModule(mathlib, "mathlib.wasm");
   checkRuntime(engineModule, mathlibModule);
   const minimum = memoryMinimum(engineModule);
+  if (!Number.isSafeInteger(maxMemoryPages) || maxMemoryPages < minimum || maxMemoryPages > MAX_MEMORY_PAGES) {
+    throw new Error(`maxMemoryPages must be between ${minimum} and ${MAX_MEMORY_PAGES}`);
+  }
   return {
     /** The compiled modules, which a worker gets to create a runtime of its own. */
     modules: { engine: engineModule, mathlib: mathlibModule },
@@ -302,7 +386,19 @@ export async function createRuntime({
       if (desc.contract !== MODEL_CONTRACT) {
         throw new Error(`the description is of the contract ${desc.contract}, not ${MODEL_CONTRACT}`);
       }
+      if (!(modelWasm instanceof WebAssembly.Module)) validateModelBytes(modelWasm);
       const modelModule = await toModule(modelWasm, "model.wasm");
+      const history = WebAssembly.Module.customSections(modelModule, "sbmlsim.history");
+      const nDelays = desc.n_delays ?? 0;
+      if (history.length > 1 || (history.length === 0 && nDelays !== 0)) {
+        throw new Error("model.wasm history sites differ from its description");
+      }
+      if (history.length === 1) {
+        const info = new DataView(history[0]);
+        if (info.byteLength !== 8 || info.getUint32(0, true) !== 1 || info.getUint32(4, true) !== nDelays) {
+          throw new Error("model.wasm history metadata differs from its description");
+        }
+      }
       checkModel(modelModule, mathlibModule);
       const memory = new WebAssembly.Memory({ initial: minimum, maximum: maxMemoryPages });
       const wasi = wasiImports(engineModule, () => memory, out);
@@ -337,6 +433,24 @@ export async function createRuntime({
 }
 
 /** A model loaded into an engine; one per model and thread. */
+const preparedStates = new WeakMap();
+
+/** An opaque reusable request bound to the instance that prepared it. */
+export class PreparedSimulation {
+  constructor(token, state) {
+    if (token !== preparedStates) throw new TypeError("use instance.prepare()");
+    preparedStates.set(this, state);
+  }
+  get nValues() { return preparedStates.get(this).nValues; }
+  close() {
+    const state = preparedStates.get(this);
+    if (state.closed) return;
+    state.closed = true;
+    state.instance.plans.delete(this);
+    if (!state.instance.trapped) state.instance.guard(() => state.instance.exports.engine_release_prepared(state.handle));
+  }
+}
+
 class Instance {
   constructor(exports, memory, calls) {
     this.exports = exports;
@@ -345,6 +459,9 @@ class Instance {
     this.trapped = false;
     this.encoder = new TextEncoder();
     this.decoder = new TextDecoder();
+    this.inputPtr = 0;
+    this.inputCapacity = 0;
+    this.plans = new Set();
   }
 
   /** The number of calls of the engine into WASI since the instance was created. */
@@ -388,6 +505,52 @@ class Instance {
     throw new EngineError("internal", `engine_simulate returned ${code} with the output ${JSON.stringify(output.header)}`);
   }
 
+  /** Prepares fixed request structure once; varying IDs define the raw value order. */
+  prepare(request, { varying = [] } = {}) {
+    if (!["engine_prepare", "engine_simulate_prepared", "engine_release_prepared"].every((name) => typeof this.exports[name] === "function")) {
+      throw new UnsupportedError("this engine does not support prepared requests");
+    }
+    if (this.trapped) throw new EngineError("internal", "the instance trapped before and is not used again");
+    if (this.plans.size >= 32) throw new EngineError("request", "prepared request limit reached (32)");
+    const code = this.call(this.exports.engine_prepare, jsonText({ request: typeof request === "string" ? JSON.parse(request) : request, varying }));
+    const output = this.output();
+    if (code !== 0) throw output.error ?? new EngineError("internal", "engine_prepare failed without an error");
+    const { prepared: handle, n_values: nValues } = output.header;
+    if (!Number.isInteger(handle) || !Number.isSafeInteger(nValues) || nValues < 0) throw new EngineError("internal", "invalid prepared request output");
+    const plan = new PreparedSimulation(preparedStates, { instance: this, handle, nValues, closed: false });
+    this.plans.add(plan);
+    return plan;
+  }
+
+  simulatePrepared(plan, values = []) {
+    const state = preparedStates.get(plan);
+    if (!state || state.instance !== this || state.closed) throw new EngineError("request", "foreign or closed prepared request");
+    if (this.trapped) throw new EngineError("internal", "the instance trapped before and is not used again");
+    if ((!Array.isArray(values) && !(values instanceof Float64Array)) || values.length !== state.nValues || values.findIndex((value) => !Number.isFinite(value)) >= 0) {
+      throw new EngineError("request", `prepared request requires ${state.nValues} finite values`);
+    }
+    const ptr = this.inputBuffer(values.length * 8);
+    const view = new DataView(this.memory.buffer, ptr, values.length * 8);
+    for (let i = 0; i < values.length; i++) view.setFloat64(i * 8, values[i], true);
+    const code = this.guard(() => this.exports.engine_simulate_prepared(state.handle, ptr, values.length));
+    const output = this.output();
+    if (code === 0 && output.table) return output.table;
+    if (output.error) throw output.error;
+    throw new EngineError("internal", "engine_simulate_prepared returned invalid output");
+  }
+
+  inputBuffer(length) {
+    if (length > this.inputCapacity) {
+      const capacity = Math.max(length, this.inputCapacity * 2, 256);
+      const ptr = this.guard(() => this.exports.engine_alloc(capacity)) >>> 0;
+      if (!ptr) throw new EngineError("internal", "engine_alloc found no memory for the input");
+      if (this.inputCapacity) this.guard(() => this.exports.engine_free(this.inputPtr, this.inputCapacity));
+      this.inputPtr = ptr;
+      this.inputCapacity = capacity;
+    }
+    return this.inputPtr;
+  }
+
   /** Loads the description (`engine_load`). */
   load(descText, id) {
     const before = this.calls();
@@ -406,13 +569,9 @@ class Instance {
       throw new EngineError("internal", "the instance trapped before and is not used again");
     }
     const bytes = this.encoder.encode(text);
-    const ptr = this.guard(() => this.exports.engine_alloc(bytes.length)) >>> 0;
-    if (ptr === 0 && bytes.length > 0) {
-      throw new EngineError("internal", "engine_alloc found no memory for the input");
-    }
+    const ptr = this.inputBuffer(bytes.length);
     new Uint8Array(this.memory.buffer, ptr, bytes.length).set(bytes);
     const code = this.guard(() => fn(ptr, bytes.length));
-    this.guard(() => this.exports.engine_free(ptr, bytes.length));
     return code;
   }
 
@@ -461,6 +620,7 @@ class Instance {
       error.engineKind = kind;
       return { header, error };
     }
+    if (header.prepared !== undefined) return { header };
     const { columns, n_rows: nRows } = header;
     const start = (4 + headerLength + 7) & ~7;
     const n = nRows * columns.length;

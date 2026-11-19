@@ -68,11 +68,19 @@
     <main>
       <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
       <section id="pk-parameters" aria-labelledby="pk-head">
-        <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
-        <p class="pk-lead">
-          Of the simulated plasma curves above, computed in this page by the kernel of
-          <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.
-        </p>
+        <div class="pk-top">
+          <div class="pk-titles">
+            <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
+            <p class="pk-lead">
+              Of the simulated plasma curves above, computed in this page by the kernel of
+              <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.
+            </p>
+          </div>
+          <label class="pk-draws" id="pk-draws" hidden>
+            draws of the fit
+            <select aria-label="draws of the uncertainty of the fit"></select>
+          </label>
+        </div>
         <table></table>
         <p class="pk-note"></p>
       </section>
