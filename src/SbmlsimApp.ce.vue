@@ -213,6 +213,16 @@ const props = defineProps({
   page: { type: String, default: '' },
   /** Which values of the tokens are used: `auto` (the default), `light` or `dark`. */
   theme: { type: String as PropType<ThemeName>, default: 'auto' },
+  /**
+   * The draws of the uncertainty every panel of the page asks for, absent for
+   * the number each of them declares; it is passed on as it is given, so `0`
+   * is a page without a band and a page of a model which declares no
+   * uncertainty draws none whatever it says.
+   *
+   * It is one attribute of the app and not one per panel, so a control of the
+   * page moves the bands of its figures together.
+   */
+  draws: { type: Number, default: undefined },
   /** The milliseconds one request is given before it is stopped. */
   timeout: { type: Number, default: DEFAULT_TIMEOUT },
   /**
@@ -946,6 +956,7 @@ onBeforeUnmount(() => {
             :panel="one"
             :theme="props.theme"
             :timeout="props.timeout"
+            :draws="props.draws"
             :heading-level="panelLevel"
             :size="current.size === 'small' ? 'small' : 'regular'"
             :variant="variantOfPanels"

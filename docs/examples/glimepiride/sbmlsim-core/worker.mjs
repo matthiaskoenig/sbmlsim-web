@@ -14,6 +14,7 @@
 //   { type: "model", key, module, description }    a model: its `WebAssembly.Module` and the text
 //                                                  of its `model.json`, instantiated at its first
 //                                                  request
+//   { type: "removeModel", key }                  drops a retained model and its instance
 //   { type: "simulate", id, key, request }         a request of `simulation/1` on the model `key`
 //
 // and its answers, one per request:
@@ -59,20 +60,53 @@ async function instanceOf(key) {
 async function handle(message) {
   switch (message.type) {
     case "init":
-      runtime = createRuntime({ engine: message.engine, mathlib: message.mathlib });
+      runtime = createRuntime({ engine: message.engine, mathlib: message.mathlib, maxMemoryPages: message.maxMemoryPages });
       runtime.catch(() => {}); // the error is the one of every request
       return;
     case "model":
-      models.set(message.key, { module: message.module, description: message.description, instance: null });
+      models.set(message.key, { module: message.module, description: message.description, instance: null, plans: new Map(), definitions: new Map() });
       return;
+    case "releasePrepared": {
+      const model = models.get(message.key);
+      model?.plans.get(message.planId)?.close();
+      model?.plans.delete(message.planId);
+      model?.definitions.delete(message.planId);
+      return;
+    }
+    case "removeModel":
+      for (const plan of models.get(message.key)?.plans.values() ?? []) plan.close();
+      models.delete(message.key);
+      return;
+    case "prepare":
+    case "simulatePrepared":
     case "simulate": {
       let instance = null;
       try {
         instance = await instanceOf(message.key);
-        const { columns, nRows, values } = instance.simulate(message.request);
+        const model = models.get(message.key);
+        let plan;
+        if (message.type !== "simulate") {
+          if (message.request !== undefined) model.definitions.set(message.planId, { request: message.request, varying: message.varying });
+          plan = model.plans.get(message.planId);
+          if (!plan) {
+            const definition = model.definitions.get(message.planId);
+            if (!definition) throw new Error("missing prepared request definition");
+            plan = instance.prepare(definition.request, { varying: definition.varying });
+            model.plans.set(message.planId, plan);
+          }
+        }
+        if (message.type === "prepare") {
+          post({ type: "prepared", id: message.id, nValues: plan.nValues });
+          return;
+        }
+        const { columns, nRows, values } = plan ? instance.simulatePrepared(plan, message.values) : instance.simulate(message.request);
         post({ type: "result", id: message.id, columns, nRows, values }, [values.buffer]);
       } catch (error) {
-        if (instance?.trapped) models.get(message.key).instance = null;
+        if (instance?.trapped) {
+          const model = models.get(message.key);
+          model.instance = null;
+          model.plans.clear();
+        }
         post({ type: "error", id: message.id, error: errorFields(error) });
       }
       return;
@@ -93,9 +127,11 @@ if (typeof WorkerGlobalScope !== "undefined" && globalThis instanceof WorkerGlob
   globalThis.addEventListener("message", (event) => receive(event.data));
 } else {
   // a worker thread of Node: the messages wait in `parentPort` until a listener is added
+  // No top-level await, so the inline build (`inline.mjs`) runs this script as a classic worker.
   const specifier = "node:worker_threads";
-  const { parentPort } = await import(specifier);
-  if (!parentPort) throw new Error("worker.mjs runs as a Web Worker or as a worker thread of Node");
-  post = (message, transfer = []) => parentPort.postMessage(message, transfer);
-  parentPort.on("message", receive);
+  import(specifier).then(({ parentPort }) => {
+    if (!parentPort) throw new Error("worker.mjs runs as a Web Worker or as a worker thread of Node");
+    post = (message, transfer = []) => parentPort.postMessage(message, transfer);
+    parentPort.on("message", receive);
+  });
 }

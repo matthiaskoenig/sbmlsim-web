@@ -171,7 +171,7 @@ import type {
   SimulateRequest,
   SimulateResponse,
 } from './contract'
-import { interpolate } from './interpolate'
+import { interpolate, interpolateBands } from './interpolate'
 import type { DrawnFigure } from './interpolate'
 import KnobControl from './KnobControl.ce.vue'
 import ResetButton from './ResetButton.ce.vue'
@@ -508,6 +508,17 @@ const props = defineProps({
    * were the default state, and nothing here can notice it.
    */
   fallback: { type: String, default: '' },
+  /**
+   * The draws of the uncertainty of the panel its curves carry a band of;
+   * absent is the number its declaration states (`PanelUncertainty.draws`), `0`
+   * is no band at all, and a number above the `max_draws` of the sample of the
+   * endpoint is that maximum, as a knob beyond its range is its end.
+   *
+   * A page which lets a reader trade the smoothness of the band against the
+   * cost of the draws writes this attribute, and a panel of a model which
+   * declares no uncertainty draws no band whatever it says.
+   */
+  draws: { type: Number, default: undefined },
   /** The milliseconds one request is given before it is stopped. */
   timeout: { type: Number, default: DEFAULT_TIMEOUT },
   /**
@@ -1400,6 +1411,23 @@ const frame = computed<Limits | null>(() => {
         }
       }
     }
+    // the band of every point of the grid holds the frame open as the rows do:
+    // the axis has to hold the band of the position the reader moves to, or a
+    // band which reaches past the curves would be cut at the frame
+    const points = answer.uncertainty?.band[one.id] ?? []
+    for (let index = 0; index < points.length; index += 1) {
+      if (failed.has(index)) {
+        continue
+      }
+      const band = points[index]
+      for (const ends of band === undefined ? [] : [band.low, band.high]) {
+        for (const [column, value] of ends.entries()) {
+          if (!((answer.x[column] ?? Number.NEGATIVE_INFINITY) > end)) {
+            hold(value)
+          }
+        }
+      }
+    }
   }
   // the x the curves cover up to the end of the axis, which is what the
   // renderer clips a series to (`xRange`): a figure whose answer carries no x
@@ -1443,12 +1471,15 @@ const plot = computed<PlotSpec | null>(() => {
     return null
   }
   const columns = interpolate(answer, knobValues.value)
+  const bands = interpolateBands(answer, knobValues.value)
   const series = drawnCurves.value.map((one): Series => {
+    const band = bands[one.id]
     const drawn = {
       id: one.id,
       label: one.label,
       scale: one.scale,
       values: columns[one.id] ?? [],
+      ...(band === undefined ? {} : { band }),
     }
     return one.unit === null || one.unit === '' ? drawn : { ...drawn, unit: one.unit }
   })
@@ -1918,6 +1949,26 @@ function initialLog(declared: PanelDeclaration): boolean {
 }
 
 /**
+ * The draws a request asks for, `0` for a run without a band.
+ *
+ * The declaration of the panel says what its model carries and what a request
+ * which names no number gets; the attribute of the host overrides it and is
+ * held to the sample the endpoint has, so a page may ask for fewer draws than
+ * the declaration and never for more than exist.
+ */
+const requestedDraws = computed<number>(() => {
+  const declared = declaration.value?.simulation.uncertainty
+  if (declared === undefined) {
+    return 0
+  }
+  const wanted = props.draws
+  if (wanted === undefined || !Number.isFinite(wanted)) {
+    return Math.max(0, Math.min(Math.trunc(declared.draws), Math.trunc(declared.max_draws)))
+  }
+  return Math.max(0, Math.min(Math.trunc(wanted), Math.trunc(declared.max_draws)))
+})
+
+/**
  * Get the body of a simulation at the values the knobs have now.
  *
  * @param gridId the knob the run grids over, `null` for a run of one point
@@ -1946,9 +1997,13 @@ function bodyFor(gridId: string | null): SimulateRequest {
  * @returns the body, with the variant the panel is given
  */
 function bodyOf(fixed: Record<string, number>, over: Record<string, number>): SimulateRequest {
-  return props.variant === ''
-    ? { values: fixed, grid: over }
-    : { values: fixed, grid: over, variant: props.variant }
+  const draws = requestedDraws.value
+  return {
+    values: fixed,
+    grid: over,
+    ...(props.variant === '' ? {} : { variant: props.variant }),
+    ...(draws > 0 ? { draws } : {}),
+  }
 }
 
 /**
@@ -2854,6 +2909,25 @@ watch(
   { immediate: true },
 )
 
+/*
+ * The draws a request asks for are part of what a run answers, so a page which
+ * moves them runs the panel again: the band of a figure is the draws of the
+ * number the page states now and never the ones of a number before it, and a
+ * page which turns them off is a figure without a band. The declaration and the
+ * study data are untouched, so it is a run and no restart, and a frozen panel
+ * owes it as it owes a movement of a knob.
+ */
+watch(requestedDraws, () => {
+  if (declaration.value === null) {
+    return
+  }
+  if (frozen.value) {
+    owed = gridded.value
+    return
+  }
+  schedule(gridded.value)
+})
+
 watch(
   () => [props.endpoint, props.model, props.panel],
   () => {
@@ -2905,8 +2979,10 @@ function result(): SimulateResponse | null {
  * The grid of the last run read at the position of the controls (`interpolate`), which is the
  * figure itself: a readout which computes something of its own from the curves a panel drew
  * takes them here, and gets the one curve per id the reader sees rather than the rows of a grid
- * to pick from. `sbmlsim-shown` says when it changed, after a run and after a movement of a
- * knob the grid covers, and `result()` is the run behind it.
+ * to pick from. `bands` carries the band of every curve which has one, read at that same
+ * position, so a readout states the same range the figure shades. `sbmlsim-shown` says when it
+ * changed, after a run and after a movement of a knob the grid covers, and `result()` is the
+ * run behind it.
  */
 function drawn(): DrawnFigure | null {
   const answer = grid.value
@@ -2916,6 +2992,7 @@ function drawn(): DrawnFigure | null {
   return {
     x: [...answer.x],
     curves: interpolate(answer, knobValues.value),
+    bands: interpolateBands(answer, knobValues.value),
     values: { ...knobValues.value },
     units: { ...answer.units },
     provenance: structuredClone(toRaw(answer.provenance)),

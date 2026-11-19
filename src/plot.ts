@@ -60,6 +60,23 @@
  * is no point of its path, which starts again with an `M` after the gap.
  */
 
+/**
+ * The band of a curve: a range drawn under it, point for point of the x of its
+ * spec.
+ *
+ * It is what the figure draws and says nothing about where the range comes
+ * from - the percentiles of a Monte Carlo, the interval of a fit, the spread
+ * of a group. A value which is `NaN`, and one which is not positive on a
+ * logarithmic axis, is no point of the band: a gap splits it into one filled
+ * polygon per run of points, as a gap splits a curve into one path per run.
+ */
+export interface SeriesBand {
+  /** The low end of the range over `PlotSpec.x`, `NaN` where it has none. */
+  low: number[]
+  /** The high end of the range over `PlotSpec.x`, `NaN` where it has none. */
+  high: number[]
+}
+
 /** One curve of a figure: the values of a selection over the x of its spec. */
 export interface Series {
   /** The id of the curve, which the study data of a panel names to sit under it. */
@@ -72,6 +89,11 @@ export interface Series {
   scale: 'linear' | 'log'
   /** Its values over `PlotSpec.x`, `NaN` where it has none. */
   values: number[]
+  /**
+   * The range drawn under the curve in its colour, absent for a curve without
+   * one; the axis of the figure holds it as it holds the values.
+   */
+  band?: SeriesBand
 }
 
 /** One series of study data, drawn as markers under the curve it belongs to. */
@@ -277,6 +299,7 @@ const TOKENS = {
   'axis-width': '1px',
   'curve-width': '1.8px',
   'data-width': '1px',
+  'band-opacity': '0.18',
 } as const
 
 /** The padding between the figure and what it draws, in pixels. */
@@ -1518,6 +1541,59 @@ function pathOf(xs: number[], values: number[], x: Axis, y: Axis): string {
 }
 
 /**
+ * Write the path of the band of a curve.
+ *
+ * The band of a run of points is the closed polygon of its low end and its
+ * high end read back, filled and not stroked. A point whose two ends are not
+ * both drawable is no point of it, so a gap splits the band into one polygon
+ * per run, exactly as it splits a curve into one path per run (`pathOf`); a run
+ * of one point is a polygon of no area and is left out.
+ *
+ * @param xs the x of the values
+ * @param band the band
+ * @param x the x axis
+ * @param y the y axis
+ * @returns the `d` of the path, empty for a band without a run of two points
+ */
+function bandOf(xs: number[], band: SeriesBand, x: Axis, y: Axis): string {
+  const count = Math.min(xs.length, band.low.length, band.high.length)
+  const parts: string[] = []
+  let run: { at: number; low: number; high: number }[] = []
+  const close = (): void => {
+    if (run.length > 1) {
+      const low = run.map(
+        (one, index) =>
+          `${index === 0 ? 'M' : 'L'}${coord(x.position(one.at))} ${coord(y.position(one.low))}`,
+      )
+      const high = [...run]
+        .reverse()
+        .map((one) => `L${coord(x.position(one.at))} ${coord(y.position(one.high))}`)
+      parts.push(`${low.join(' ')} ${high.join(' ')} Z`)
+    }
+    run = []
+  }
+  for (let index = 0; index < count; index += 1) {
+    const at = xs[index]
+    const low = band.low[index]
+    const high = band.high[index]
+    const drawable =
+      at !== undefined &&
+      low !== undefined &&
+      high !== undefined &&
+      x.drawable(at) &&
+      y.drawable(low) &&
+      y.drawable(high)
+    if (drawable) {
+      run.push({ at, low, high })
+    } else {
+      close()
+    }
+  }
+  close()
+  return parts.join(' ')
+}
+
+/**
  * Get the x the curves of a figure cover.
  *
  * @param xs the x of the figure, the output times of a run
@@ -2734,6 +2810,16 @@ function layoutFor(spec: PlotSpec): Layout {
           yValues.push(value)
         }
       }
+      // a band is drawn, so the axis holds it: a curve whose band reaches past
+      // it would be drawn against an axis its own range does not fit in
+      for (const ends of one.band === undefined ? [] : [one.band.low, one.band.high]) {
+        for (let index = 0; index < Math.min(spec.x.length, ends.length); index += 1) {
+          const value = ends[index]
+          if (value !== undefined) {
+            yValues.push(value)
+          }
+        }
+      }
     }
     for (const one of points) {
       for (const [index, value] of one.y.entries()) {
@@ -2990,6 +3076,25 @@ export function plotSvg(spec: PlotSpec): string {
     })
     .join('')
 
+  // every band is drawn before every curve, so a band never covers a line: two
+  // curves whose bands overlap are both readable, which is the whole point of
+  // drawing them in one figure
+  const drawnBands = series
+    .map((one, index) => {
+      const d = one.band === undefined ? '' : bandOf(spec.x, one.band, x, y)
+      return d === ''
+        ? ''
+        : tag('path', {
+            class: 'curve-band',
+            'data-series': one.id,
+            style:
+              `fill:${colours[index] ?? token('fg-soft')};` +
+              `fill-opacity:${token('band-opacity')};stroke:none`,
+            d,
+          })
+    })
+    .join('')
+
   const drawnSeries = series
     .map((one, index) =>
       tag('path', {
@@ -3052,7 +3157,11 @@ export function plotSvg(spec: PlotSpec): string {
     `${title}${defs}${background}` +
     axisGroup(x, true, box, xLines, bottomRoom, type) +
     axisGroup(y, false, box, yLines, box.x0, type) +
-    tag('g', { class: 'data', 'clip-path': `url(#${clip})` }, drawnPoints + drawnSeries) +
+    tag(
+      'g',
+      { class: 'data', 'clip-path': `url(#${clip})` },
+      drawnBands + drawnPoints + drawnSeries,
+    ) +
     side +
     under
 

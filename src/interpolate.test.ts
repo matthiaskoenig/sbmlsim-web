@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Grid, GridAxis, SimulateResponse } from './contract'
-import { interpolate } from './interpolate'
+import type { Band, Grid, GridAxis, SimulateResponse, Uncertainty } from './contract'
+import { interpolate, interpolateBands } from './interpolate'
 
 /** Build an axis of a grid from its id and its values, the rest being filler. */
 function axis(id: string, values: number[]): GridAxis {
@@ -189,5 +189,104 @@ describe('interpolate', () => {
   it('gives NaN for a grid whose axis has no values', () => {
     const g = grid([axis('k', [])], { c: [[1, 2]] })
     expect(interpolate(g, { k: 0 }).c).toEqual([NaN, NaN])
+  })
+})
+
+describe('interpolateBands', () => {
+  /** Build an answer of a grid, with the uncertainty of the bands it carries. */
+  function answerOf(one: Grid, uncertainty?: Uncertainty): SimulateResponse {
+    return {
+      contract: 'panel/1',
+      spec_hash: '0'.repeat(64),
+      ...one,
+      units: { x: 'hr' },
+      provenance: {
+        model: 'm',
+        panel: 'p',
+        model_sha256: '0'.repeat(64),
+        variant: null,
+        engine: 'roadrunner',
+        sbmlsim: '0.0.0',
+        seconds: 0.1,
+        created: '2026-11-19T00:00:00+00:00',
+      },
+      ...(uncertainty === undefined ? {} : { uncertainty }),
+    }
+  }
+
+  /** Build the uncertainty of one curve from the band of every point of its grid. */
+  function uncertaintyOf(id: string, band: Band[]): Uncertainty {
+    return { draws: 8, fit: 'fit', level: 0.9, band: { [id]: band }, failed: [] }
+  }
+
+  it('reads the band of a grid point exactly', () => {
+    const answer = answerOf(
+      grid([axis('dose', [0, 4])], {
+        c: [
+          [0, 0],
+          [10, 20],
+        ],
+      }),
+      uncertaintyOf('c', [
+        { low: [0, 0], high: [0, 0] },
+        { low: [8, 16], high: [12, 24] },
+      ]),
+    )
+    expect(interpolateBands(answer, { dose: 4 })).toEqual({ c: { low: [8, 16], high: [12, 24] } })
+  })
+
+  it('interpolates the band between two points as it interpolates the curve', () => {
+    const answer = answerOf(
+      grid([axis('dose', [0, 4])], {
+        c: [
+          [0, 0],
+          [10, 20],
+        ],
+      }),
+      uncertaintyOf('c', [
+        { low: [0, 0], high: [0, 0] },
+        { low: [8, 16], high: [12, 24] },
+      ]),
+    )
+    // half way along the axis is half of every value, the band with the curve
+    expect(interpolate(answer, { dose: 2 }).c).toEqual([5, 10])
+    expect(interpolateBands(answer, { dose: 2 })).toEqual({ c: { low: [4, 8], high: [6, 12] } })
+  })
+
+  it('gives NaN where a point which bounds the position did not integrate', () => {
+    const answer = answerOf(
+      grid(
+        [axis('dose', [0, 4])],
+        {
+          c: [
+            [1, 2],
+            [null, null],
+          ],
+        },
+        [1],
+      ),
+      uncertaintyOf('c', [
+        { low: [0, 1], high: [2, 3] },
+        { low: [null, null], high: [null, null] },
+      ]),
+    )
+    expect(interpolateBands(answer, { dose: 2 })).toEqual({
+      c: { low: [NaN, NaN], high: [NaN, NaN] },
+    })
+    // the point which integrated is read as it is
+    expect(interpolateBands(answer, { dose: 0 })).toEqual({ c: { low: [0, 1], high: [2, 3] } })
+  })
+
+  it('is empty for an answer which carries no uncertainty', () => {
+    const answer = answerOf(grid([axis('dose', [0])], { c: [[1, 2]] }))
+    expect(interpolateBands(answer, { dose: 0 })).toEqual({})
+  })
+
+  it('reads a band of a run of one point, which has no axis', () => {
+    const answer = answerOf(
+      grid([], { c: [[1, 2]] }),
+      uncertaintyOf('c', [{ low: [0.5, 1], high: [1.5, 3] }]),
+    )
+    expect(interpolateBands(answer, {})).toEqual({ c: { low: [0.5, 1], high: [1.5, 3] } })
   })
 })

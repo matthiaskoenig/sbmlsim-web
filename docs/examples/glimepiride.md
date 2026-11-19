@@ -8,7 +8,7 @@ hide:
 
 # Glimepiride: a model app without a server
 
-The whole-body PBPK model of glimepiride and its metabolites M1 and M2 as an app of interactive panels. Move a knob or load an example patient and the four curves follow. Every simulation runs in your browser, on [sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) in a pool of Web Workers over the cores of your machine: this page is static files and talks to no simulation server.
+The whole-body PBPK model of glimepiride and its metabolites M1 and M2 as an app of interactive panels. Move a knob or load an example patient and the four curves follow, each with the band of the uncertainty of the fit of the model, and the table under them states the pharmacokinetic parameters of those very curves with the spread of the same draws. Every simulation runs in your browser, on [sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) in a pool of Web Workers over the cores of your machine: this page is static files and talks to no simulation server.
 
 <sbmlsim-app endpoint="local:glimepiride" model="glimepiride" heading-level="2"></sbmlsim-app>
 
@@ -17,8 +17,13 @@ The whole-body PBPK model of glimepiride and its metabolites M1 and M2 as an app
 <link rel="stylesheet" href="glimepiride/nca.css" />
 
 <section id="pk-parameters" aria-labelledby="pk-head">
-  <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
-  <p class="pk-lead">Of the simulated plasma curves above, computed in this page by the kernel of <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.</p>
+  <div class="pk-top">
+    <div class="pk-titles">
+      <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
+      <p class="pk-lead">Of the simulated plasma curves above, computed in this page by the kernel of <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.</p>
+    </div>
+    <label class="pk-draws" id="pk-draws" hidden>draws of the fit <select aria-label="draws of the uncertainty of the fit"></select></label>
+  </div>
   <table></table>
   <p class="pk-note"></p>
 </section>
@@ -73,6 +78,16 @@ The table under the app is a second reader of the same curves. A panel says with
 The dose of the knob is in mg and the curves carry a molar concentration, so the dose travels into the analysis as an amount of substance over the molar mass of the model (`Mr_gli`, 490.616 g/mol) and the clearance comes back in l/h; the concentration is sent as `µmol/l`, which is what `µM` of the model is. CL/F and V~z~/F are of glimepiride alone, since a metabolite carries no dose of its own.
 
 The three rows under the rule are what the analysis stood on. A whole-body model keeps a slowly decaying terminal phase at the end of the simulated window, so the regression of the terminal slope sits on that tail: it covers about one half-life rather than the two a study would ask for, and a fifth to two fifths of the area to infinity is extrapolated. The half-life of such a window is the apparent one of the simulation and not the 5 to 8 h of the literature, which a window of 24 h of measurements gives; the table says which window it used, so both numbers can be read for what they are.
+
+## The uncertainty of the fit
+
+The ten parameters of the model which were fitted are known to a distribution and not to a number, and the SBML of the model carries those distributions (the `distrib` package, written from the records of the adopted fit). The panels declare a sample of them, so every curve of this page is drawn with the band of its draws - the 5th to the 95th percentile of the draws at every output time - and the control beside the table says how many draws a reader wants: the sample holds 64, a request runs the first 16 of them, and the figures and the table answer the same draws.
+
+The draws are the uncertainty of the fit and no variability of a population: every draw is the patient of the knobs, with the parameters of one draw of that fit, so a band is what the data the model was fitted to leaves open about this patient and not what two patients would differ by.
+
+The parameters of a shaded curve are a distribution of their own, which no band of a figure states: the 95th percentile of a concentration at every time is the curve of no draw, so its area is the area of no draw either. The page therefore asks the endpoint for the curves of the draws themselves - which travel for a request of one point, where their size is bounded - analyses all of them in one batch of the kernel and reduces that table to the statistics of every parameter with `summarize` of the same kernel, so no statistic is computed in this page. The cell then carries the value of the model, the standard deviation of the draws and the box of their spread against their own median, one axis for the whole table.
+
+The two phases are what a reader sees: the curve the panel just drew is analysed at once, and the draws of that position follow a moment later. A movement of the dose costs no simulation of the panels, since the grid of their run covers it, but it does cost the runs of the draws, which are of the position itself; the page asks for them once the knobs come to rest.
 
 ## Reference
 
