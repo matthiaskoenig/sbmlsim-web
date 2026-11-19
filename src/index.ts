@@ -26,7 +26,7 @@ import type { DrawnFigure } from './interpolate'
 import SbmlsimApp from './SbmlsimApp.ce.vue'
 import SbmlsimFigure from './SbmlsimFigure.ce.vue'
 import SbmlsimPanel from './SbmlsimPanel.ce.vue'
-import { APP_TAG, FIGURE_TAG, PANEL_TAG, placePanelTag } from './tags'
+import { APP_TAG, FIGURE_TAG, PANEL_TAG, placeFigureTag, placePanelTag } from './tags'
 
 export {
   CONTRACTS,
@@ -250,6 +250,7 @@ export function register(
   figureTagName: string = FIGURE_TAG,
 ): boolean {
   placePanelTag(tagName)
+  placeFigureTag(figureTagName)
   const panel = define(tagName, () =>
     tagName === PANEL_TAG ? SbmlsimPanelElement : defineCustomElement(SbmlsimPanel),
   )

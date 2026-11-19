@@ -40,3 +40,24 @@ export function placedPanelTag(): string {
 export function placePanelTag(tagName: string): void {
   placed = tagName
 }
+
+/** The tag the shells place the figure of their model under, the one `register` was called with last. */
+let placedFigure: string = FIGURE_TAG
+
+/**
+ * Get the tag a shell places its figure under.
+ *
+ * @returns the tag of the figure as `register` registered it
+ */
+export function placedFigureTag(): string {
+  return placedFigure
+}
+
+/**
+ * Set the tag a shell places its figure under.
+ *
+ * @param tagName the tag the figure is registered under
+ */
+export function placeFigureTag(tagName: string): void {
+  placedFigure = tagName
+}

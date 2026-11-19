@@ -168,6 +168,7 @@ import {
   failureKind,
 } from './client'
 import type { FailureKind } from './client'
+import { figureOf, showsFigure, shownPanels as shownOf } from './contract'
 import type {
   AppDeclaration,
   AppPage,
@@ -182,7 +183,7 @@ import { cardLevels } from './columns'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
 import { drawableKnob, keepControlKeys, ownValue, sameValue, snapValue, validValue } from './knob'
-import { placedPanelTag } from './tags'
+import { placedFigureTag, placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
 type ThemeName = 'auto' | 'light' | 'dark'
@@ -211,6 +212,12 @@ const props = defineProps({
   model: { type: String, default: '' },
   /** The id of the page which is shown, the first page of the app without. */
   page: { type: String, default: '' },
+  /**
+   * The ids of the panels of the page which are shown, comma separated; absent for the panels
+   * the page declares as shown. The shell writes it when a reader clicks the figure and the
+   * page may set it, as it may set `page`; an empty value is a page with no panel shown.
+   */
+  selection: { type: String, default: undefined },
   /** Which values of the tokens are used: `auto` (the default), `light` or `dark`. */
   theme: { type: String as PropType<ThemeName>, default: 'auto' },
   /**
@@ -434,6 +441,97 @@ const heads = computed<Map<string, PanelSummary>>(() => {
   )
 })
 
+/** The figure of the app, `null` without one and on a page which does not show it. */
+const figure = computed(() => {
+  const declared = app.value
+  const page = current.value
+  return declared === null || page === null || !showsFigure(page) ? null : figureOf(declared)
+})
+
+/**
+ * The ids of the panels of the page which are shown, in the order the page lists them: the
+ * attribute `selection` or, absent, the panels the page declares as shown. A page without the
+ * figure shows every panel it lists. An id the page does not list is nothing to place.
+ */
+const placed = computed<string[]>(() => {
+  const page = current.value
+  if (page === null) {
+    return []
+  }
+  if (figure.value === null) {
+    return page.panels
+  }
+  const chosen =
+    props.selection === undefined
+      ? shownOf(page)
+      : props.selection.split(',').filter((id) => id !== '')
+  return page.panels.filter((id) => chosen.includes(id))
+})
+
+/** The panels a key path opens which the page lists: what a click on it toggles. */
+function opensOf(key: string): string[] {
+  const listed = current.value?.panels ?? []
+  return (figure.value?.panels[key] ?? []).filter((id) => listed.includes(id))
+}
+
+/**
+ * The key paths of the figure every panel of which is on screen, drawn marked. A key only partly
+ * on screen is not marked, and neither is a decoration, which opens nothing.
+ */
+const marked = computed<string[]>(() =>
+  Object.keys(figure.value?.panels ?? {}).filter((key) => {
+    const opens = opensOf(key)
+    return opens.length > 0 && opens.every((id) => placed.value.includes(id))
+  }),
+)
+
+/**
+ * The name of each key path of the figure, the only human name the drawing has since its svg
+ * carries no title: the title of the panel a key opens, of the first one for a key which opens
+ * several.
+ */
+const labels = computed<Record<string, string>>(() =>
+  Object.fromEntries(
+    Object.keys(figure.value?.panels ?? {}).flatMap((key) => {
+      const first = opensOf(key)[0]
+      const title = first === undefined ? undefined : heads.value.get(first)?.title
+      return title === undefined || title === '' ? [] : [[key, title]]
+    }),
+  ),
+)
+
+/**
+ * Toggle the panels of the key path a reader clicked on the figure, and say so.
+ *
+ * A key every panel of which is shown removes them, any other adds the ones missing. Two keys
+ * may open the same panel; a click on a key which is shown removes exactly the panels of that
+ * key, even if another shown key shares one of them, so the click does what its key says and
+ * the other key is then only partly shown and no longer marked.
+ *
+ * @param event the `sbmlsim-figure-select` of the figure
+ */
+function pick(event: Event): void {
+  const key = (event as CustomEvent<{ key: string }>).detail.key
+  const opens = opensOf(key)
+  if (opens.length === 0) {
+    return
+  }
+  const off = opens.every((id) => placed.value.includes(id))
+  const next = (current.value?.panels ?? []).filter((id) =>
+    off
+      ? placed.value.includes(id) && !opens.includes(id)
+      : placed.value.includes(id) || opens.includes(id),
+  )
+  host?.setAttribute('selection', next.join(','))
+  host?.dispatchEvent(
+    new CustomEvent('sbmlsim-selection', {
+      detail: { panels: next },
+      bubbles: true,
+      composed: true,
+    }),
+  )
+}
+
 /**
  * Get the attribute `values` of a panel of the page.
  *
@@ -526,6 +624,7 @@ const panelLevel = computed<number>(() => {
  * keep placing the panel they were built with.
  */
 const panelTag = placedPanelTag()
+const figureTag = placedFigureTag()
 
 /** The link of the DOI, `null` for an app which declares none. */
 const doiLink = computed<string | null>(() => {
@@ -796,6 +895,8 @@ function show(id: string): void {
   if (id === current.value?.id) {
     return
   }
+  // the clicks of the page which is left mean nothing on the one which is shown
+  host?.removeAttribute('selection')
   host?.setAttribute('page', id)
   const title = app.value?.pages.find((one) => one.id === id)?.title ?? id
   announced.value = `Showing ${title}`
@@ -933,53 +1034,66 @@ onBeforeUnmount(() => {
       <p v-if="switchFailure !== null" class="error" role="alert">
         {{ FAILURE_MESSAGES[switchFailure] }} {{ SWITCH_MESSAGE }}
       </p>
-      <section
-        ref="grid"
-        :key="current.id"
-        class="grid"
-        :class="{
-          switching: switching,
-          failed: switchFailure !== null,
-          small: current.size === 'small',
-        }"
-        :aria-busy="switchCaption !== '' ? 'true' : 'false'"
-        :aria-label="current.title"
-        @sbmlsim-result="collect"
-        @sbmlsim-error="dropFailed"
-      >
-        <div v-for="one in current.panels" :key="one" class="cell">
-          <component
-            :is="panelTag"
-            auto
-            :endpoint="props.endpoint"
-            :model="props.model"
-            :panel="one"
-            :theme="props.theme"
-            :timeout="props.timeout"
-            :draws="props.draws"
-            :heading-level="panelLevel"
-            :size="current.size === 'small' ? 'small' : 'regular'"
-            :variant="variantOfPanels"
-            :values.attr="valuesOf(one)"
-            :head.attr="headOf(one)"
-            :inert="switching"
-            :aria-hidden.attr="switching ? 'true' : undefined"
-          ></component>
-          <div class="reserve" aria-hidden="true">
-            <div
-              v-if="(heads.get(one)?.title ?? '') !== '' || (heads.get(one)?.subtitle ?? '') !== ''"
-              class="reserve-head"
-            >
-              <div v-if="(heads.get(one)?.title ?? '') !== ''" class="reserve-title">
-                {{ heads.get(one)?.title }}
-              </div>
-              <div v-if="(heads.get(one)?.subtitle ?? '') !== ''" class="reserve-subtitle">
-                {{ heads.get(one)?.subtitle }}
+      <div class="stage" :class="{ figured: figure !== null }">
+        <component
+          :is="figureTag"
+          v-if="figure !== null"
+          class="figure"
+          :figure.prop="figure"
+          :marked.prop="marked"
+          :labels.prop="labels"
+          @sbmlsim-figure-select="pick"
+        ></component>
+        <section
+          ref="grid"
+          :key="current.id"
+          class="grid"
+          :class="{
+            switching: switching,
+            failed: switchFailure !== null,
+            small: current.size === 'small',
+          }"
+          :aria-busy="switchCaption !== '' ? 'true' : 'false'"
+          :aria-label="current.title"
+          @sbmlsim-result="collect"
+          @sbmlsim-error="dropFailed"
+        >
+          <div v-for="one in placed" :key="one" class="cell">
+            <component
+              :is="panelTag"
+              auto
+              :endpoint="props.endpoint"
+              :model="props.model"
+              :panel="one"
+              :theme="props.theme"
+              :timeout="props.timeout"
+              :draws="props.draws"
+              :heading-level="panelLevel"
+              :size="current.size === 'small' ? 'small' : 'regular'"
+              :variant="variantOfPanels"
+              :values.attr="valuesOf(one)"
+              :head.attr="headOf(one)"
+              :inert="switching"
+              :aria-hidden.attr="switching ? 'true' : undefined"
+            ></component>
+            <div class="reserve" aria-hidden="true">
+              <div
+                v-if="
+                  (heads.get(one)?.title ?? '') !== '' || (heads.get(one)?.subtitle ?? '') !== ''
+                "
+                class="reserve-head"
+              >
+                <div v-if="(heads.get(one)?.title ?? '') !== ''" class="reserve-title">
+                  {{ heads.get(one)?.title }}
+                </div>
+                <div v-if="(heads.get(one)?.subtitle ?? '') !== ''" class="reserve-subtitle">
+                  {{ heads.get(one)?.subtitle }}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
       <p class="live" aria-live="polite">{{ announced }}</p>
       <footer class="footer">
         <p v-if="app.citation !== ''" class="citation">{{ app.citation }}</p>
@@ -1481,6 +1595,31 @@ onBeforeUnmount(() => {
   --_card-pad: 12px;
 
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+/* the figure of a model beside the grid of its panels; the grid takes the rest of the row */
+.stage.figured {
+  display: grid;
+  grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.figure {
+  position: sticky;
+  top: 16px;
+  min-width: 0;
+}
+
+/* on a narrow shell the figure is above the grid */
+@container (max-width: 720px) {
+  .stage.figured {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .figure {
+    position: static;
+  }
 }
 
 /* a figure keeps the room on a phone, where the card is nearly the screen */

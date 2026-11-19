@@ -78,24 +78,26 @@ The panel exposes three parts for `::part()`: `panel` (the whole panel, whose he
 
 ### Attributes
 
-| attribute       | default | what it is                                                                                                                                                                                                              |
-| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`      | empty   | the endpoint the app and its panels talk to; empty is the origin of the page, `local:<name>` a function of the page                                                                                                     |
-| `model`         | empty   | the id of the model, as the endpoint serves it                                                                                                                                                                          |
-| `page`          | empty   | the id of the page which is shown, the first page without or for an unknown id; the shell sets it when a reader switches the page                                                                                       |
-| `theme`         | `auto`  | `auto` (the colour scheme of the page), `light` or `dark`, passed to every panel                                                                                                                                        |
-| `timeout`       | `8000`  | the milliseconds one request is given, passed to every panel                                                                                                                                                            |
-| `draws`         | absent  | the draws of the uncertainty every panel of the page asks for, absent for the number each of them declares; one control of a page moves the bands of its figures together, and every panel runs again on a change of it |
-| `heading-level` | `1`     | the level the title of the app is drawn at; its panels are drawn one level below it                                                                                                                                     |
+| attribute       | default | what it is                                                                                                                                                                                                                          |
+| --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | empty   | the endpoint the app and its panels talk to; empty is the origin of the page, `local:<name>` a function of the page                                                                                                                 |
+| `model`         | empty   | the id of the model, as the endpoint serves it                                                                                                                                                                                      |
+| `page`          | empty   | the id of the page which is shown, the first page without or for an unknown id; the shell sets it when a reader switches the page                                                                                                   |
+| `selection`     | absent  | the ids of the panels of the page which are shown, comma separated, on a page which shows the figure of the model; absent is the panels the page declares as shown, empty none; the shell writes it when a reader clicks the figure |
+| `theme`         | `auto`  | `auto` (the colour scheme of the page), `light` or `dark`, passed to every panel                                                                                                                                                    |
+| `timeout`       | `8000`  | the milliseconds one request is given, passed to every panel                                                                                                                                                                        |
+| `draws`         | absent  | the draws of the uncertainty every panel of the page asks for, absent for the number each of them declares; one control of a page moves the bands of its figures together, and every panel runs again on a change of it             |
+| `heading-level` | `1`     | the level the title of the app is drawn at; its panels are drawn one level below it                                                                                                                                                 |
 
 The shell has no methods: it starts itself when it is connected and is driven by its attributes alone.
 
 ### Events
 
-| event           | `detail`            | when                                                                                                        |
-| --------------- | ------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `sbmlsim-page`  | `{ page }`          | a reader switched the page; not when the page sets the attribute itself                                     |
-| `sbmlsim-error` | `{ kind, message }` | the app could not be read (an endpoint which is down, a model without an app, a payload of another version) |
+| event               | `detail`            | when                                                                                                                                                                                         |
+| ------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sbmlsim-page`      | `{ page }`          | a reader switched the page; not when the page sets the attribute itself                                                                                                                      |
+| `sbmlsim-selection` | `{ panels }`        | a reader clicked the figure: the ids of the panels now shown, in the order of the page; not when the page sets the attribute itself, and a switch of the page drops the selection without it |
+| `sbmlsim-error`     | `{ kind, message }` | the app could not be read (an endpoint which is down, a model without an app, a payload of another version)                                                                                  |
 
 The events of its panels (`sbmlsim-result`, `sbmlsim-error`) bubble out of the shell as well. `sbmlsim-page` lets a deployment give its pages addresses and answer the back button by setting `page` again:
 
@@ -112,6 +114,7 @@ addEventListener('popstate', () => app.setAttribute('page', location.hash.slice(
 - **It draws the app of the model.** The title and the subtitle, the navigation of the pages (none for an app of one page), the switcher of the variants (none for fewer than two), the grid of the panels of the page, as many columns as fit panels of at least 480 px (280 px and a small figure for a page of `size` `small`, many readouts side by side), and the provenance footer: the citation, the DOI and the licenses of the app and the versions which simulated what is shown.
 - **A knob the panels of a page share is one control.** It is drawn once above the grid and every panel which declares it follows it (through its `values`), so every plot of the page is of the state the controls show.
 - **A page may name scenarios.** A page with `scenarios` draws a select labelled `Example` which sets every knob a scenario names in one state.
+- **A page may show the figure of the model.** A page with `figure` draws the `<sbmlsim-figure>` of the app beside its grid. The grid holds the panels of the selection, which starts as the panels the page declares as shown; a click on a part of the drawing adds the panels it opens and a second click removes them, and the drawing marks the parts every panel of which is shown. The panels stay in the order the page lists them, whatever order they were clicked in. Two parts may open the same panel; a click on a shown part removes exactly its own panels, and the other part, now only partly shown, is no longer marked. A part is named, to a screen reader, by the title of the panel it opens.
 - **A page change swaps the panels.** The panels of the page which is left are frozen and removed, the ones of the page which is shown start themselves.
 - **It follows the variant.** A switch of the variant reads the app again in it and passes it to every panel as its `variant`, holding the figures of the variant before, dimmed, until the new ones are drawn.
 - **A failure leaves one line**, in the voice of the panel, and no navigation, grid or footer.

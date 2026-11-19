@@ -1534,3 +1534,133 @@ describe('the draws of the uncertainty of a page', () => {
     }
   })
 })
+
+describe('the figure of an app', () => {
+  /** An app whose page shows the figure, with a panel for the liver and one for the kidney. */
+  function appWithFigure(more: Partial<AppDeclaration> = {}): Given {
+    return app({
+      variants: [],
+      pages: [
+        {
+          id: 'pageA',
+          title: 'Page A',
+          panels: ['glimepiride', 'm1', 'li_gli', 'ki_gli', 'ki_m1'],
+          scenarios: [],
+          figure: true,
+          shown: ['glimepiride', 'm1'],
+        },
+      ],
+      figure: {
+        svg: '<svg viewBox="0 0 10 10"><g data-k="li"></g></svg>',
+        title: 'The body',
+        credit: '',
+        panels: {
+          'li/sub:gli': ['li_gli'],
+          ki: ['ki_gli', 'ki_m1'],
+          'ki/sub:gli': ['ki_gli'],
+          frame: [],
+        },
+      },
+      ...more,
+    })
+  }
+
+  /** The ids of the panels the shell placed, in the order of the grid. */
+  function placedPanels(element: AppElement): string[] {
+    return panels(element)
+  }
+
+  /** The figure element of the shell. */
+  function figureOf(element: AppElement): HTMLElement & {
+    marked: string[]
+    labels: Record<string, string>
+  } {
+    return part(element, 'sbmlsim-figure') as never
+  }
+
+  /** Click a key path of the figure, as the element reports it. */
+  async function clickKey(element: AppElement, key: string): Promise<void> {
+    figureOf(element).dispatchEvent(
+      new CustomEvent('sbmlsim-figure-select', { detail: { key }, bubbles: true, composed: true }),
+    )
+    await settled()
+  }
+
+  it('places the panels the page shows before anything is clicked', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    expect(placedPanels(element)).toEqual(['glimepiride', 'm1'])
+  })
+
+  it('adds the panels of a clicked key and removes them when it is clicked again', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    await clickKey(element, 'li/sub:gli')
+    expect(placedPanels(element)).toEqual(['glimepiride', 'm1', 'li_gli'])
+    expect(element.getAttribute('selection')).toBe('glimepiride,m1,li_gli')
+    await clickKey(element, 'li/sub:gli')
+    expect(placedPanels(element)).toEqual(['glimepiride', 'm1'])
+  })
+
+  it('places the panels in the order the page declares them, whatever order they were clicked in', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    await clickKey(element, 'ki')
+    await clickKey(element, 'li/sub:gli')
+    expect(placedPanels(element)).toEqual(['glimepiride', 'm1', 'li_gli', 'ki_gli', 'ki_m1'])
+  })
+
+  it('tells the page the selection with the panels in page order', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    const heard: string[][] = []
+    element.addEventListener('sbmlsim-selection', (event) => {
+      heard.push((event as CustomEvent<{ panels: string[] }>).detail.panels)
+    })
+    await clickKey(element, 'ki')
+    expect(heard).toEqual([['glimepiride', 'm1', 'ki_gli', 'ki_m1']])
+  })
+
+  it('reads the attribute selection, which the page may set', async () => {
+    declared = appWithFigure()
+    const element = await shell({ selection: 'li_gli' })
+    expect(placedPanels(element)).toEqual(['li_gli'])
+    element.setAttribute('selection', '')
+    await settled()
+    expect(placedPanels(element)).toEqual([])
+  })
+
+  it('marks the keys every panel of which is shown and names them by their panels', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    expect(figureOf(element).marked).toEqual([])
+    await clickKey(element, 'ki')
+    expect(figureOf(element).marked).toEqual(['ki', 'ki/sub:gli'])
+    expect(figureOf(element).labels.ki).toBe('Title of ki_gli')
+    expect(figureOf(element).labels.frame).toBeUndefined()
+  })
+
+  it('removes exactly the panels of the key clicked when another shown key shares one', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    await clickKey(element, 'ki')
+    await clickKey(element, 'ki/sub:gli')
+    expect(placedPanels(element)).toEqual(['glimepiride', 'm1', 'ki_m1'])
+    expect(figureOf(element).marked).toEqual([])
+  })
+
+  it('ignores a decoration and a key whose panels the page does not list', async () => {
+    declared = appWithFigure()
+    const element = await shell()
+    await clickKey(element, 'frame')
+    await clickKey(element, 'nowhere')
+    expect(placedPanels(element)).toEqual(['glimepiride', 'm1'])
+    expect(element.getAttribute('selection')).toBeNull()
+  })
+
+  it('renders a page without a figure as it did', async () => {
+    const element = await shell()
+    expect(placedPanels(element)).toEqual(['panelA'])
+    expect(element.shadowRoot.querySelector('sbmlsim-figure')).toBeNull()
+  })
+})
