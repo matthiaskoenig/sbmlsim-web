@@ -82,11 +82,12 @@ test.describe('the glimepiride example', () => {
     const cmax = parameter(page, 'Cmax')
     await expect(cell(cmax, 2).locator('.pk-point')).not.toHaveText('…', { timeout: 30_000 })
 
-    // the control of the draws is what the panels declare: 16 of a sample of 64
-    const draws = page.locator('#pk-draws select')
+    // the draws are one number and its one control is the field of the settings card of the app:
+    // the table has none of its own and follows the draws the panels ran with
+    await expect(page.locator('#pk-draws')).toHaveCount(0)
+    const draws = page.locator('sbmlsim-app input.draws')
     await expect(draws).toBeVisible()
     await expect(draws).toHaveValue('16')
-    expect(await draws.locator('option').allTextContents()).toEqual(['none', '8', '16', '32', '64'])
 
     // every figure of the app shades the band of those draws under its curve
     await expect(page.locator('sbmlsim-app .curve-band').first()).toBeAttached({
@@ -99,6 +100,8 @@ test.describe('the glimepiride example', () => {
     await expect(peak.locator('.pk-spread')).toContainText('±', { timeout: 60_000 })
     await expect(peak.locator('svg.pk-box rect')).toHaveCount(4)
     await expect(peak).toHaveAttribute('title', /16 draws: median/)
+    // and the coefficient of variation of the draws, the standard deviation over their mean
+    await expect(peak.locator('.pk-cv')).toContainText(/^CV \d/)
     const note = page.locator('#pk-parameters .pk-note')
     await expect(note).toContainText('standard deviation of 16 draws')
     await expect(note).toContainText('90.0 % band')
@@ -108,11 +111,32 @@ test.describe('the glimepiride example', () => {
     expect(spread).toBeLessThan(await value(cmax, 0))
 
     // a reader who asks for more draws gets them, and for none gets no band at all
-    await draws.selectOption('32')
+    await draws.fill('32')
+    await draws.dispatchEvent('change')
     await expect(note).toContainText('standard deviation of 32 draws', { timeout: 60_000 })
-    await draws.selectOption('0')
-    await expect(note).toContainText('pick the draws above')
+    await draws.fill('0')
+    await draws.dispatchEvent('change')
+    await expect(note).toContainText('set the draws in the settings above the panels', {
+      timeout: 60_000,
+    })
     await expect(peak.locator('.pk-spread')).toHaveCount(0)
     await expect(page.locator('sbmlsim-app .curve-band')).toHaveCount(0, { timeout: 60_000 })
+  })
+
+  test('takes the table away while the app shows its information', async ({ page }) => {
+    await page.goto(PAGE)
+    const cmax = parameter(page, 'Cmax')
+    await expect(cell(cmax, 2).locator('.pk-point')).not.toHaveText('…', { timeout: 30_000 })
+    const table = page.locator('#pk-parameters')
+    await expect(table).toBeVisible()
+
+    // the table is of the plasma curves above it, which the information view does not show
+    await page.locator('sbmlsim-app [part="information-tab"]').click()
+    await expect(table).toBeHidden()
+
+    // and it comes back with the next page the reader opens
+    await page.locator('sbmlsim-app button.tab:not(.information-tab)').first().click()
+    await expect(table).toBeVisible()
+    await expect(cell(cmax, 2).locator('.pk-point')).not.toHaveText('…')
   })
 })

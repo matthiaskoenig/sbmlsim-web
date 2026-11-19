@@ -20,13 +20,19 @@
 //    (`PanelClient.simulate` with `draws`, one point, where they travel), analyses all of them
 //    in one batch of the kernel and reduces that table to the statistics of every parameter
 //    (`summarize` of the kernel, no statistic of this page). The cell then carries the value of
-//    the model, the standard deviation of the draws and the box of their spread.
+//    the model, the standard deviation of the draws, their coefficient of variation and the box
+//    of their spread.
 //
-// The reader picks the draws (`#pk-draws`), the page holds the panels of the app to the same
-// number (`draws` of `<sbmlsim-app>`), and the declaration of the panel says what that number
+// The draws are one number and the page has one control of it, the draws field of the settings
+// card of the app: the table analyses the very draws the figures shade, so a second field would
+// be a second number which could disagree with the first. The page reads the number the panels
+// ran with from `sbmlsim-result` and follows it, and the declaration of the panel says what it
 // may be: the draws of the sample are the most the endpoint can answer, and the draws a request
 // runs are the first of them, so the band and the boxes settle as the number goes up rather
 // than jumping.
+//
+// The table is a reader of the plasma curves above it, so it goes while the app shows its
+// information view (`sbmlsim-page`) and comes back with the next page the reader opens.
 //
 // The curves carry a molar concentration (`µM` of the model) and the knob carries a dose in mg,
 // so the dose travels into the analysis as an amount of substance (`Mr_gli` of the model,
@@ -40,6 +46,9 @@ import { createRuntime } from './pkpdutils-core/loader.mjs'
 
 /** The molar mass of glimepiride, `Mr_gli` of the model, in g/mol. */
 export const MOLAR_MASS = 490.616
+
+/** The id of the information view of the app, the value of its `page` attribute. */
+const INFORMATION_PAGE = 'information'
 
 /** The model and the endpoint of the page, the ones `register.mjs` registers. */
 const MODEL = 'glimepiride'
@@ -143,7 +152,7 @@ export const KERNEL_UNITS = {
  * The kernel answers every statistic of every column and a host takes the ones it wants
  * (`pkpd_summarize`), so these are the names of the blocks this page reads out of the payload.
  */
-export const STATISTICS = ['sd', 'median', 'q25', 'q75', 'min', 'max', 'count']
+export const STATISTICS = ['sd', 'cv', 'median', 'q25', 'q75', 'min', 'max', 'count']
 
 /** The flags of the analysis by their bit, `NCAFlag` of pkpdutils. */
 const FLAGS = [
@@ -189,20 +198,22 @@ let failure = ''
 /** The uncertainty the panels declare, `null` for a model which declares none. */
 let declared = null
 
-/** The draws the reader asked for, the number of the declaration until they do. */
+/** The draws the panels of the app ran with, the number of the declaration until they report. */
 let draws = 0
 
 /** What the draws of the table came from: the fit, the level of the band and what failed. */
 let provenance = null
 
+/** Whether a panel reported its draws, which the declaration then no longer decides. */
+let heard = false
+
 /** The timer of the draws of the position which is shown. */
 let timer = null
 
-/** The table, the note, the control of the draws and the app element of the page. */
+/** The section of the table, the table and the note of the page. */
+let section = null
 let table = null
 let note = null
-let control = null
-let app = null
 
 /**
  * The runtime of the kernel, created on the first call and kept for every later one.
@@ -430,23 +441,6 @@ export function format(value, percent) {
 }
 
 /**
- * The draws a reader may pick, the powers of two the sample of the endpoint holds.
- *
- * @param {number} most the draws of the sample, `PanelUncertainty.max_draws`
- * @returns {number[]} the numbers of the control, `0` (no band) first and `most` last
- */
-export function drawChoices(most) {
-  const choices = [0]
-  for (let n = 8; n < most; n *= 2) {
-    choices.push(n)
-  }
-  if (most > 0) {
-    choices.push(most)
-  }
-  return choices
-}
-
-/**
  * The spread of the draws of a cell, relative to their median, in percent.
  *
  * The box of a cell says how wide the draws of that parameter are and not how large it is - the
@@ -579,6 +573,7 @@ function boxTitle(parameter, statistics) {
   const show = (value) => format(value, parameter.percent)
   return (
     `${String(statistics.count)} draws: median ${show(statistics.median)}, ` +
+    `coefficient of variation ${format(100 * statistics.cv)} %, ` +
     `half of them between ${show(statistics.q25)} and ${show(statistics.q75)}, ` +
     `all of them between ${show(statistics.min)} and ${show(statistics.max)} ${parameter.unit}`
   )
@@ -625,6 +620,10 @@ function valueCell(parameter, analyte) {
   spread.className = 'pk-spread'
   spread.textContent = `± ${format(statistics.sd, parameter.percent)}`
   line.append(spread)
+  const variation = document.createElement('span')
+  variation.className = 'pk-cv'
+  variation.textContent = `CV ${format(100 * statistics.cv)} %`
+  line.append(variation)
   const box = relativeBox(statistics, held.parameters[names[0]])
   if (box !== null) {
     cell.title = boxTitle(parameter, statistics)
@@ -713,14 +712,15 @@ function drawsLine(scale) {
   if (draws === 0 || provenance === null) {
     return declared === null
       ? ''
-      : 'The parameters are the model at its own parameters; pick the draws above to see what ' +
-          'the uncertainty of the fit does to them.'
+      : 'The parameters are the model at its own parameters; set the draws in the settings above ' +
+          'the panels to see what the uncertainty of the fit does to them.'
   }
   const level = `${format(100 * provenance.level)} %`
   const lost = provenance.failed.length
   return (
     `± is the standard deviation of ${String(provenance.draws)} draws of the ten parameters of ` +
-    `${provenance.fit}, the very draws the figures shade as their ${level} band. The box of a ` +
+    `${provenance.fit}, the very draws the figures shade as their ${level} band, and CV is that ` +
+    `standard deviation over the mean of the draws. The box of a ` +
     `cell is those draws against their own median, the bar their middle half and the whisker ` +
     `the ones within one and a half of it, on one axis of ± ${format(scale)} % for the whole ` +
     `table; the line is the value beside it, and the cell says the rest.` +
@@ -867,59 +867,75 @@ async function take(event) {
 }
 
 /**
- * Build the control of the draws out of what the panels declare.
+ * Follow the draws the panels of the app ran with.
  *
- * The declaration says what a reader may ask for - the sample of the endpoint is the most - so
- * the page writes no number of its own, and a model which declares no uncertainty keeps no
- * control: there is nothing to turn up.
+ * The draws field of the app is the one control of the number, so a change of it reaches this
+ * page as the draws of the next run of a panel. The spread of the draws before is gone until the
+ * new ones are back.
+ *
+ * @param {Event} event the `sbmlsim-result` of a panel
+ */
+function followDraws(event) {
+  const detail = event.detail ?? {}
+  if (!ANALYTES.some((one) => one.panel === detail.panel) || !Number.isFinite(detail.draws)) {
+    return
+  }
+  const asked = Math.max(
+    0,
+    declared === null ? detail.draws : Math.min(detail.draws, declared.max_draws),
+  )
+  if (asked === draws) {
+    return
+  }
+  draws = asked
+  provenance = null
+  for (const held of rows.values()) {
+    held.statistics = null
+  }
+  render()
+  if (shown !== '') {
+    scheduleDraws(shown, JSON.parse(shown))
+  }
+}
+
+/**
+ * Read what the panels declare of the uncertainty: the most draws the endpoint can answer.
+ *
+ * The page writes no number of its own, and a model which declares no uncertainty has no draws
+ * to take.
  *
  * @returns {Promise<void>}
  */
 async function readDeclaration() {
-  if (control === null) {
-    return
-  }
   const client = new globalThis.sbmlsimWeb.PanelClient(ENDPOINT, DRAWS_TIMEOUT)
   const panel = await client.panel(MODEL, ANALYTES[0].panel)
   declared = panel.simulation.uncertainty ?? null
-  if (declared === null) {
-    control.hidden = true
-    return
+  if (declared !== null && !heard) {
+    draws = Math.max(0, Math.min(declared.draws, declared.max_draws))
   }
-  draws = Math.max(0, Math.min(declared.draws, declared.max_draws))
-  const select = control.querySelector('select')
-  for (const choice of drawChoices(declared.max_draws)) {
-    const option = document.createElement('option')
-    option.value = String(choice)
-    option.textContent = choice === 0 ? 'none' : String(choice)
-    option.selected = choice === draws
-    select.append(option)
-  }
-  select.addEventListener('change', () => {
-    draws = Number(select.value)
-    // the figures shade the draws of the reader and the table states them
-    if (app !== null) {
-      app.draws = draws
-    }
-    provenance = null
-    for (const held of rows.values()) {
-      held.statistics = null
-    }
-    render()
-    if (shown !== '') {
-      scheduleDraws(shown, JSON.parse(shown))
-    }
-  })
-  control.hidden = false
   render()
+  // a position which was shown before the declaration was read has its draws still to take
+  if (shown !== '') {
+    scheduleDraws(shown, JSON.parse(shown))
+  }
+}
+
+/**
+ * Show the table beside the pages of the app and not beside its information view.
+ *
+ * @param {Event} event the `sbmlsim-page` of the app, whose `detail` is `{ page }`
+ */
+function followPage(event) {
+  if (section !== null) {
+    section.hidden = event.detail?.page === INFORMATION_PAGE
+  }
 }
 
 /** Find the table of the page and follow what the panels of the app draw. */
 function start() {
+  section = document.querySelector('#pk-parameters')
   table = document.querySelector('#pk-parameters table')
   note = document.querySelector('#pk-parameters .pk-note')
-  control = document.querySelector('#pk-draws')
-  app = document.querySelector('sbmlsim-app')
   if (table === null) {
     return
   }
@@ -927,12 +943,14 @@ function start() {
   document.addEventListener('sbmlsim-shown', (event) => {
     void take(event)
   })
+  document.addEventListener('sbmlsim-result', (event) => {
+    heard = true
+    followDraws(event)
+  })
+  document.addEventListener('sbmlsim-page', followPage)
   readDeclaration().catch(() => {
-    // a page whose endpoint does not answer its declaration keeps no control of the draws: the
-    // panels of the app say the same thing in their own lines
-    if (control !== null) {
-      control.hidden = true
-    }
+    // a page whose endpoint does not answer its declaration takes the draws the panels report:
+    // the panels of the app say the same thing in their own lines
   })
 }
 

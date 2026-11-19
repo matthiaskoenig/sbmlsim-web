@@ -22,7 +22,6 @@ The whole-body PBPK model of glimepiride and its metabolites M1 and M2 as an app
       <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
       <p class="pk-lead">Of the simulated plasma curves above, computed in this page by the kernel of <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.</p>
     </div>
-    <label class="pk-draws" id="pk-draws" hidden>draws of the fit <select aria-label="draws of the uncertainty of the fit"></select></label>
   </div>
   <table></table>
   <p class="pk-note"></p>
@@ -81,7 +80,7 @@ The three rows under the rule are what the analysis stood on. A whole-body model
 
 ## The uncertainty of the fit
 
-The ten parameters of the model which were fitted are known to a distribution and not to a number, and the SBML of the model carries those distributions (the `distrib` package, written from the records of the adopted fit). The panels declare a sample of them, so every curve of this page is drawn with the band of its draws - the 5th to the 95th percentile of the draws at every output time - and the control beside the table says how many draws a reader wants: the sample holds 64, a request runs the first 16 of them, and the figures and the table answer the same draws.
+The ten parameters of the model which were fitted are known to a distribution and not to a number, and the SBML of the model carries those distributions (the `distrib` package, written from the records of the adopted fit). The panels declare a sample of them, so every curve of this page is drawn with the band of its draws - the 5th to the 95th percentile of the draws at every output time - and the draws field of the settings above the panels says how many draws a reader wants: the sample holds 64, a request runs the first 16 of them. That field is the one control of the number: the table analyses the very draws the figures shade, so it follows the number the panels ran with and has no field of its own. Every cell carries the standard deviation of its draws and their coefficient of variation, the standard deviation over their mean.
 
 The draws are the uncertainty of the fit and no variability of a population: every draw is the patient of the knobs, with the parameters of one draw of that fit, so a band is what the data the model was fitted to leaves open about this patient and not what two patients would differ by.
 
