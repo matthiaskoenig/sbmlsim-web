@@ -90,8 +90,8 @@
  * the controls of its page, and the panels are placed with the app. The
  * controls are listed in the order the first panel which declares one lists
  * them, start at the declared default, start there again whenever the page is
- * shown, as the knobs of its panels do, and have a Reset of their own, which
- * can be pressed while one of them is away from its default.
+ * shown, as the knobs of its panels do; the Reset of the page puts them back
+ * with the rest of the card.
  *
  * Every panel a shared knob sets gets the attribute `values`, a JSON object of
  * exactly the shared knobs which set it, written again on every movement of a

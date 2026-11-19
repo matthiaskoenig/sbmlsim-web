@@ -102,7 +102,7 @@ export type {
 export { APP_TAG, FIGURE_TAG, PANEL_TAG }
 
 /**
- * `<sbmlsim-panel>` as a page sees it: an element with its three methods, which
+ * `<sbmlsim-panel>` as a page sees it: an element with its methods, which
  * `document.querySelector('sbmlsim-panel')` gives a TypeScript host.
  */
 export interface SbmlsimPanelHTMLElement extends HTMLElement {
@@ -112,6 +112,13 @@ export interface SbmlsimPanelHTMLElement extends HTMLElement {
   freeze(): void
   /** Put every knob back to the value its declaration states. */
   reset(): void
+  /**
+   * Set the scale of the y axis as a click on the switch of the panel does, where its curves
+   * share one scale.
+   *
+   * @param on whether the axis is logarithmic
+   */
+  setLog(on: boolean): void
   /**
    * The answer of the last simulation of this panel, a copy, or `null`.
    *
@@ -181,7 +188,8 @@ declare global {
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
  * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant`, `values`,
- * `draws` and `auto` and the methods `activate()`, `freeze()` and `reset()`. It dispatches
+ * `draws`, `auto`, `log`, `head` and `size` and the methods `activate()`, `freeze()`,
+ * `reset()` and `setLog()`. It dispatches
  * `sbmlsim-error` when a request failed and `sbmlsim-result`, with the
  * `provenance` and the `spec_hash` of the answer, when a simulation succeeded:
  * never for a failure and never for a stored fallback, which is no simulation.
@@ -193,10 +201,10 @@ export const SbmlsimPanelElement = elementClass<SbmlsimPanelHTMLElement>(
 /**
  * The class of `<sbmlsim-app>`, the shell of the app of a model.
  *
- * It carries the attributes `endpoint`, `model`, `page`, `theme`, `timeout`,
+ * It carries the attributes `endpoint`, `model`, `page`, `selection`, `theme`, `timeout`,
  * `draws` and `heading-level`, and it dispatches `sbmlsim-error` when the app could not be
- * read and `sbmlsim-page`, with the id of the page, when a reader switches the
- * page. It places the panels under the tag `register` was called with, so the
+ * read, `sbmlsim-page`, with the id of the page, when a reader switches the
+ * page, and `sbmlsim-selection`, with the ids of the panels shown, when the selection changes. It places the panels under the tag `register` was called with, so the
  * panel has to be registered under it where the shell is used.
  */
 export const SbmlsimAppElement = elementClass<SbmlsimAppHTMLElement>(
