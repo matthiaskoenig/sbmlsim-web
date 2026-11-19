@@ -85,6 +85,12 @@ async function showAll(dose) {
   for (const panel of ['glimepiride', 'm1', 'm2']) {
     await show(panel, figure)
   }
+  // every panel is analysed in a promise of its own and a column which has not come back yet
+  // carries the ellipsis, so the table of the three is written once none of them is pending;
+  // waiting a turn of the event loop per panel is a claim about the machine and not about this
+  await vi.waitFor(() => {
+    expect(table().flat()).not.toContain('…')
+  })
 }
 
 /**
