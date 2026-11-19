@@ -1969,10 +1969,16 @@ describe('the figure of an app', () => {
       await settled()
       expect(simulations().length).toBeGreaterThan(before)
       // the page switch of the scale and the Reset reach the panels as well
-      const toggle = (id: string): HTMLInputElement =>
-        (
-          element.shadowRoot.querySelector(`w-panel[panel="${id}"]`) as unknown as AppElement
-        ).shadowRoot.querySelector<HTMLInputElement>('.toggle input')!
+      const toggle = (id: string): HTMLInputElement => {
+        const panel = element.shadowRoot.querySelector(`w-panel[panel="${id}"]`)
+        const box = (panel as unknown as AppElement).shadowRoot.querySelector<HTMLInputElement>(
+          '.toggle input',
+        )
+        if (box === null) {
+          throw new Error('no switch')
+        }
+        return box
+      }
       ;(part(element, '.settings input[type=checkbox]') as HTMLInputElement).click()
       await settled()
       expect(toggle('glimepiride').checked).toBe(true)
