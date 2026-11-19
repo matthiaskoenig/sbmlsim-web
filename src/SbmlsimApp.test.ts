@@ -1972,7 +1972,7 @@ describe('the figure of an app', () => {
       const toggle = (id: string): HTMLInputElement =>
         (
           element.shadowRoot.querySelector(`w-panel[panel="${id}"]`) as unknown as AppElement
-        ).shadowRoot.querySelector<HTMLInputElement>('.toggle input') as HTMLInputElement
+        ).shadowRoot.querySelector<HTMLInputElement>('.toggle input')!
       ;(part(element, '.settings input[type=checkbox]') as HTMLInputElement).click()
       await settled()
       expect(toggle('glimepiride').checked).toBe(true)
