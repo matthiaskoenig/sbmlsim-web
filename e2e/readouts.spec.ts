@@ -169,6 +169,22 @@ function scans(recorded: string[]): string[] {
   ]
 }
 
+/**
+ * Open the example with the drawing and press every key which shows a panel it does not show,
+ * the extra panel among them, then wait for the five panels and return what the pool ran.
+ */
+async function selectEveryKey(page: Page, extraEnd?: number): Promise<string[]> {
+  await stage(page, true, extraEnd)
+  await page.goto(PAGE)
+  await expect(page.locator('sbmlsim-app sbmlsim-panel')).toHaveCount(1)
+  // the plasma is shown already, a press on it would take it away, and the liver is the
+  // metabolites again: every other key is pressed
+  for (const name of ['m1', 'm2', 'urine', EXTRA]) {
+    await key(page, name).locator('rect').click()
+  }
+  return runs(page, 5)
+}
+
 test.describe('the readouts of a drawing', () => {
   test('the panes of a selection ask the pool for the scan the declared panels do', async ({
     page,
@@ -183,24 +199,25 @@ test.describe('the readouts of a drawing', () => {
     const scan = scans(declared)
     expect(scan).toHaveLength(1)
 
-    await stage(page, true)
-    await page.goto(PAGE)
-    await expect(page.locator('sbmlsim-app sbmlsim-panel')).toHaveCount(1)
-    // the plasma is shown already, a press on it would take it away, and the liver is the
-    // metabolites again: every other key is pressed, the extra panel among them
-    for (const name of ['m1', 'm2', 'urine', EXTRA]) {
-      await key(page, name).locator('rect').click()
-    }
-    const selected = await runs(page, 5)
+    const selected = await selectEveryKey(page)
 
     // a panel of the selection which asked for another end, or other points, would be another
     // scan of the model: every request of the pool is the scan of the declared panels
     expect(scans(selected)).toEqual(scan)
     // and the points the four declared panels ask for are asked for as often as the page itself
     // does (its panels grid over different knobs, so a few points are shared between two runs),
-    // which assumes that sharing is deterministic; the copy of the second panel adds none, its
-    // run is the one of the second panel
+    // which assumes that sharing is deterministic. The copy of the second panel adds nothing to
+    // this comparison, its run is the one of the second panel: what shows that it really ran is
+    // the wait of `runs` for its drawn path and band
     expect([...selected].sort()).toEqual([...declared].sort())
+  })
+
+  test('sees a panel which asks for another end of the simulation', async ({ page }) => {
+    // the detector of the test above: the extra panel with the end 1500 instead of 3000 is a
+    // second scan of the model, and the scans the pool recorded are no longer one
+    const selected = await selectEveryKey(page, 1500)
+    expect(scans(selected)).toHaveLength(2)
+    expect(scans(selected).some((one) => one.includes('1500'))).toBe(true)
   })
 
   test('a click on a place adds its panes and a second click removes them', async ({ page }) => {
