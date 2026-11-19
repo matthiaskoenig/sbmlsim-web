@@ -105,7 +105,7 @@ async function stage(page: Page, figure: boolean, extraEnd?: number): Promise<vo
       copy.run.end = extraEnd ?? copy.run.end
       answer.panels[EXTRA_PANEL] = copy
       const first = answer.app.pages[0]
-      if (first === undefined || first.panels[0] === undefined) {
+      if (first?.panels[0] === undefined) {
         throw new Error('the example has no page')
       }
       first.panels.push(EXTRA_PANEL)
