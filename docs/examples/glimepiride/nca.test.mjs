@@ -314,7 +314,14 @@ describe('the draws of the uncertainty', () => {
     expect(peak.title).toContain('8 draws: median')
     expect(peak.title).toContain('coefficient of variation')
     // the coefficient of variation is the standard deviation over the mean of the draws
-    expect(peak.querySelector('.pk-cv').textContent).toMatch(/^CV \d/)
+    // the draws of the stub are the curve times 1 + 0.1 sin(draw + 1), so the peak of the draws
+    // varies as those factors do: the sample standard deviation over the mean, in percent
+    const factors = Array.from({ length: 8 }, (_, draw) => 1 + 0.1 * Math.sin(draw + 1))
+    const mean = factors.reduce((sum, one) => sum + one, 0) / factors.length
+    const sd = Math.sqrt(
+      factors.reduce((sum, one) => sum + (one - mean) ** 2, 0) / (factors.length - 1),
+    )
+    expect(peak.querySelector('.pk-cv').textContent).toBe(`CV ${page.format(100 * (sd / mean))} %`)
     // the time of the peak is the same in every draw of a scaled curve, so its spread is 0
     expect(cell('tmax', 2).querySelector('.pk-spread').textContent).toBe('± 0.00')
     // the metabolites carry no clearance of the dose, so that cell carries no box either
@@ -325,6 +332,36 @@ describe('the draws of the uncertainty', () => {
     expect(note).toContain('fit test')
     expect(note).toContain('90.0 % band')
     expect(note).toMatch(/axis of ± \d/)
+  })
+
+  it('says it is computing while the draws are in flight and states them once back', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    ran(16)
+    // the draws are asked for and not yet back: the note must not say there are none
+    expect(noteText()).toContain('Computing the 16 draws')
+    expect(noteText()).not.toContain('set the draws')
+    await settle()
+    expect(noteText()).toContain('standard deviation of 16 draws')
+  })
+
+  it('drops the loop of draws a new number superseded', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    asked.length = 0
+    ran(16)
+    // the loop of 16 is on its way when the number moves again
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    ran(8)
+    await settle()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    // whatever ran of the superseded loop, the table states the draws of the last number only
+    expect(noteText()).toContain('standard deviation of 8 draws')
+    expect(cell('Cmax', 2).title).toContain('8 draws: median')
+    expect(cell('Cmax', 3).title).toContain('8 draws: median')
+    expect(cell('Cmax', 4).title).toContain('8 draws: median')
   })
 
   it('asks for the draws the panels ran with', async () => {
@@ -485,6 +522,18 @@ describe('the statistics of the draws', () => {
     const statistics = page.statisticsOf({ header: { statistics: ['sd'], width: 0 }, values: [] })
     expect(statistics.cmax.median).toBeNaN()
     expect(statistics.cmax.sd).toBeNaN()
+  })
+})
+
+describe('the coefficient of variation of a cell', () => {
+  it('is a percentage of the fraction the kernel answers', () => {
+    expect(page.variationText(0.1)).toBe('CV 10.0 %')
+    expect(page.variationText(0.0123)).toBe('CV 1.23 %')
+  })
+
+  it('is a dash and no dangling percent sign where there is none', () => {
+    expect(page.variationText(Number.NaN)).toBe('CV –')
+    expect(page.variationText(Number.POSITIVE_INFINITY)).toBe('CV –')
   })
 })
 

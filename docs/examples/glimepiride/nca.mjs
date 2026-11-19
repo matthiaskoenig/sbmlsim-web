@@ -204,6 +204,12 @@ let draws = 0
 /** What the draws of the table came from: the fit, the level of the band and what failed. */
 let provenance = null
 
+/** The loop of the draws which counts, so a superseded one is dropped. */
+let generation = 0
+
+/** Whether the last loop of the draws ended without any draw, the draws asked for or not. */
+let emptyDraws = false
+
 /** Whether a panel reported its draws, which the declaration then no longer decides. */
 let heard = false
 
@@ -385,6 +391,8 @@ async function analyse(analyte, figure) {
     flags: result.column('flags')?.[0] ?? 0,
     wrong,
     statistics: null,
+    // the window the curve was analysed over, which the note states instead of a number of its own
+    span: [figure.x?.[0] ?? Number.NaN, figure.x?.at(-1) ?? Number.NaN],
   })
 }
 
@@ -396,16 +404,25 @@ async function analyse(analyte, figure) {
  *
  * @param {object} analyte the analyte of `ANALYTES`
  * @param {Record<string, number>} values the values of the knobs of the panel
+ * @param {number} wanted the draws to ask for, the number of the loop and not the one of now
+ * @param {() => boolean} current whether the loop is still the one which counts, checked after
+ *   every await so a superseded loop writes nothing
  * @returns {Promise<object | null>} the uncertainty of the answer, `null` for an answer which
- *   carries none
+ *   carries none or a loop which is no longer current
  */
-async function analyseDraws(analyte, values) {
-  const answer = await client.simulate(MODEL, analyte.panel, { values, draws })
+async function analyseDraws(analyte, values, wanted, current) {
+  const answer = await client.simulate(MODEL, analyte.panel, { values, draws: wanted })
+  if (!current()) {
+    return null
+  }
   const curves = answer.uncertainty?.curves?.[analyte.curve]
   if (curves === undefined || curves.length === 0) {
     return answer.uncertainty ?? null
   }
   const run = await runtime()
+  if (!current()) {
+    return null
+  }
   const amount = (1000 * (values.dose ?? 0)) / MOLAR_MASS
   // a draw which did not integrate is a row of nulls, which is a row of missing observations
   const result = run.analyze(
@@ -563,6 +580,18 @@ function boxFigure(box, scale) {
 }
 
 /**
+ * The coefficient of variation of a cell, as text.
+ *
+ * @param {number} cv the coefficient of variation, a fraction
+ * @returns {string} `CV 10.0 %`, and `CV –` where there is none (a mean of zero): a percent sign
+ *   without a number is no statement
+ */
+export function variationText(cv) {
+  const percent = format(100 * cv)
+  return percent === '–' ? 'CV –' : `CV ${percent} %`
+}
+
+/**
  * What a cell says about its draws, the title of the cell.
  *
  * @param {object} parameter the parameter of the row
@@ -573,7 +602,7 @@ function boxTitle(parameter, statistics) {
   const show = (value) => format(value, parameter.percent)
   return (
     `${String(statistics.count)} draws: median ${show(statistics.median)}, ` +
-    `coefficient of variation ${format(100 * statistics.cv)} %, ` +
+    `coefficient of variation ${variationText(statistics.cv).slice(3)}, ` +
     `half of them between ${show(statistics.q25)} and ${show(statistics.q75)}, ` +
     `all of them between ${show(statistics.min)} and ${show(statistics.max)} ${parameter.unit}`
   )
@@ -622,7 +651,7 @@ function valueCell(parameter, analyte) {
   line.append(spread)
   const variation = document.createElement('span')
   variation.className = 'pk-cv'
-  variation.textContent = `CV ${format(100 * statistics.cv)} %`
+  variation.textContent = variationText(statistics.cv)
   line.append(variation)
   const box = relativeBox(statistics, held.parameters[names[0]])
   if (box !== null) {
@@ -709,6 +738,13 @@ function listed(labels) {
  * @returns {string} the sentence, empty for a table without draws
  */
 function drawsLine(scale) {
+  if (draws > 0 && provenance === null && declared !== null) {
+    return emptyDraws
+      ? `The ${String(draws)} draws of the uncertainty of the fit were asked for and the ` +
+          'endpoint answered none, so the parameters are the model at its own parameters.'
+      : `Computing the ${String(draws)} draws of the uncertainty of the fit; until they are ` +
+          'back the parameters are the model at its own parameters.'
+  }
   if (draws === 0 || provenance === null) {
     return declared === null
       ? ''
@@ -717,8 +753,10 @@ function drawsLine(scale) {
   }
   const level = `${format(100 * provenance.level)} %`
   const lost = provenance.failed.length
+  // the provenance of the draws names the fit and the level and not how many parameters it
+  // varied, so the sentence does not claim a count: the page cannot check one
   return (
-    `± is the standard deviation of ${String(provenance.draws)} draws of the ten parameters of ` +
+    `± is the standard deviation of ${String(provenance.draws)} draws of the parameters of ` +
     `${provenance.fit}, the very draws the figures shade as their ${level} band, and CV is that ` +
     `standard deviation over the mean of the draws. The box of a ` +
     `cell is those draws against their own median, the bar their middle half and the whisker ` +
@@ -738,9 +776,15 @@ function renderNote(scale) {
     return
   }
   const amount = (1000 * dose) / MOLAR_MASS
+  // the window the rows were analysed over, as the panels drew it
+  const span = [...rows.values()].find((held) => Number.isFinite(held.span?.[1]))?.span
+  const window =
+    span === undefined
+      ? 'the simulated time'
+      : `the simulated ${format(span[0])} to ${format(span[1])} h`
   const lines = [
     `A single oral dose of ${format(dose)} mg glimepiride (${format(amount)} µmol, ` +
-      `M = ${MOLAR_MASS} g/mol), analysed over the simulated 0 to 50 h of this patient with ` +
+      `M = ${MOLAR_MASS} g/mol), analysed over ${window} of this patient with ` +
       `the linear up / log down trapezoid and the best fit of the terminal slope. CL/F and ` +
       `Vz/F are of glimepiride alone: a metabolite carries no dose of its own. A whole-body ` +
       `model keeps a slowly decaying terminal phase at the end of that window, so the rows ` +
@@ -785,10 +829,15 @@ async function takeDraws(key, values) {
   if (client === null) {
     client = new globalThis.sbmlsimWeb.PanelClient(ENDPOINT, DRAWS_TIMEOUT)
   }
+  // one generation per loop: moving the draws or the knobs starts another, and this one then
+  // writes nothing, so a table never mixes the draws of two loops under one note
+  generation += 1
+  const mine = generation
+  const wanted = draws
+  const current = () => mine === generation && key === shown && wanted === draws
   for (const analyte of ANALYTES) {
-    const uncertainty = await analyseDraws(analyte, values)
-    if (key !== shown) {
-      // the knobs moved while this ran: these draws are of the position before them
+    const uncertainty = await analyseDraws(analyte, values, wanted, current)
+    if (!current()) {
       return
     }
     if (uncertainty !== null) {
@@ -799,6 +848,11 @@ async function takeDraws(key, values) {
         failed: uncertainty.failed,
       }
     }
+    render()
+  }
+  if (provenance === null) {
+    // the loop is done and no answer carried draws: the note says so and not "computing"
+    emptyDraws = true
     render()
   }
 }
@@ -813,6 +867,9 @@ function scheduleDraws(key, values) {
   if (timer !== null) {
     clearTimeout(timer)
   }
+  // a loop which is running is of a position or a number which is gone
+  generation += 1
+  emptyDraws = false
   if (draws === 0 || declared === null) {
     return
   }

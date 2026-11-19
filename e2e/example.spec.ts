@@ -101,7 +101,6 @@ test.describe('the glimepiride example', () => {
       const inner =
         input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
       return { text, inner }
-      return { text, inner }
     })
     expect(room.inner).toBeGreaterThanOrEqual(room.text)
 
