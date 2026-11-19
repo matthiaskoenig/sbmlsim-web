@@ -830,13 +830,18 @@ test.describe('the app shell', () => {
       const row = (
         root: Locator,
         reset: string,
-      ): Promise<{ reset: number; selects: { left: number; right: number; centre: number }[] }> =>
+      ): Promise<{
+        reset: number
+        resetLeft: number
+        selects: { left: number; right: number; centre: number }[]
+      }> =>
         root.evaluate((element, selector) => {
           const scope = element.shadowRoot ?? element
           const centre = (box: DOMRect): number => (box.top + box.bottom) / 2
           const button = scope.querySelector(selector)
           return {
             reset: button === null ? Number.NaN : centre(button.getBoundingClientRect()),
+            resetLeft: button?.getBoundingClientRect().left ?? Number.NaN,
             selects: [...scope.querySelectorAll('select')].map((one) => {
               const box = one.getBoundingClientRect()
               return { left: box.left, right: box.right, centre: centre(box) }
@@ -900,6 +905,9 @@ test.describe('the app shell', () => {
           return { gap: (options?.top ?? 0) - Math.max(...bottoms), rowGap }
         })
         expect(Math.abs(gap.gap - gap.rowGap)).toBeLessThan(0.5)
+      } else {
+        // beside the selects on their line: after the last of them and not over it
+        expect(own.resetLeft).toBeGreaterThanOrEqual((ownDose?.right ?? Number.NaN) - 0.5)
       }
     })
   }
