@@ -123,6 +123,9 @@ function noteText() {
   return document.querySelector('#pk-parameters .pk-note').textContent
 }
 
+/** The answers of one number of draws the stub holds back until a promise settles, or `null`. */
+let hold = null
+
 /** The draws every request of the stub asked for, in the order they were sent. */
 const asked = []
 
@@ -177,6 +180,10 @@ class StubClient {
 
   async simulate(model, panel, body) {
     asked.push({ panel, draws: body.draws })
+    // a test holds the answers of one number of draws back to force the order they come in
+    if (hold !== null && body.draws === hold.draws) {
+      await hold.until
+    }
     return answerOf(panel, body)
   }
 }
@@ -346,18 +353,28 @@ describe('the draws of the uncertainty', () => {
     expect(noteText()).toContain('standard deviation of 16 draws')
   })
 
-  it('drops the loop of draws a new number superseded', async () => {
+  it('drops the loop of draws a new number superseded, even when it answers last', async () => {
     ran(8)
     await showAll(DOSE)
     await settle()
     asked.length = 0
+    let release
+    hold = { draws: 16, until: new Promise((resolve) => (release = resolve)) }
     ran(16)
-    // the loop of 16 is on its way when the number moves again
-    await new Promise((resolve) => setTimeout(resolve, 350))
+    // the loop of 16 is in flight, its first answer held back, when the number moves again
+    await vi.waitFor(() => {
+      expect(asked.some((one) => one.draws === 16)).toBe(true)
+    })
     ran(8)
     await settle()
+    await vi.waitFor(() => {
+      expect(noteText()).toContain('standard deviation of 8 draws')
+    })
+    // now the superseded loop answers, after the one which replaced it
+    hold = null
+    release()
     await new Promise((resolve) => setTimeout(resolve, 100))
-    // whatever ran of the superseded loop, the table states the draws of the last number only
+    // it writes nothing: the table states the draws of the last number only
     expect(noteText()).toContain('standard deviation of 8 draws')
     expect(cell('Cmax', 2).title).toContain('8 draws: median')
     expect(cell('Cmax', 3).title).toContain('8 draws: median')
