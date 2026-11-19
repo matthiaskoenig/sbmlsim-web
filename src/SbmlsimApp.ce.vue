@@ -169,6 +169,7 @@ import {
   failureKind,
 } from './client'
 import type { FailureKind } from './client'
+import type { AppFigure } from './contract'
 import { figureOf, showsFigure, shownPanels as shownOf } from './contract'
 import type {
   AppDeclaration,
@@ -513,6 +514,22 @@ function opensOf(key: string): string[] {
 }
 
 /**
+ * The figure as the page hands it to the drawing: the panels of every key cut to the ones this
+ * page lists, so a key which opens nothing here is drawn as a decoration, not as a control which
+ * does nothing.
+ */
+const figureOnPage = computed<AppFigure | null>(() => {
+  const one = figure.value
+  if (one === null) {
+    return null
+  }
+  return {
+    ...one,
+    panels: Object.fromEntries(Object.keys(one.panels).map((key) => [key, opensOf(key)])),
+  }
+})
+
+/**
  * The key paths of the figure every panel of which is on screen, drawn marked. A key only partly
  * on screen is not marked, and neither is a decoration, which opens nothing.
  */
@@ -561,12 +578,17 @@ function pick(event: Event): void {
       : placed.value.includes(id) || opens.includes(id),
   )
   host?.setAttribute('selection', next.join(','))
+  tellSelection(next)
+}
+
+/**
+ * Tell the page the panels it shows now.
+ *
+ * @param panels the ids of the panels shown
+ */
+function tellSelection(panels: string[]): void {
   host?.dispatchEvent(
-    new CustomEvent('sbmlsim-selection', {
-      detail: { panels: next },
-      bubbles: true,
-      composed: true,
-    }),
+    new CustomEvent('sbmlsim-selection', { detail: { panels }, bubbles: true, composed: true }),
   )
 }
 
@@ -663,13 +685,18 @@ const logState = computed<'all' | 'none' | 'mixed'>(() => {
   return known.every((one) => one) ? 'all' : 'mixed'
 })
 
+/** The draws the latest runs of the placed panels were made with, of the panels which ran. */
+const ranDraws = computed<number[]>(() =>
+  placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : [])),
+)
+
 /**
  * The draws in effect: the most the latest runs of the placed panels were made with, which is the
  * number a panel held to the sample of its endpoint ran and not the one it was asked for; before
  * any run the number the reader typed or the attribute asks for.
  */
 const drawsShown = computed<number | ''>(() => {
-  const ran = placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : []))
+  const ran = ranDraws.value
   return ran.length > 0 ? Math.max(...ran) : (drawsOfPanels.value ?? '')
 })
 
@@ -679,7 +706,7 @@ const drawsShown = computed<number | ''>(() => {
  * is drawn without its text (`unread`), so the card does not change its height when it answers.
  */
 const drawsKnown = computed<boolean>(() => {
-  const ran = placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : []))
+  const ran = ranDraws.value
   return ran.length === 0 || ran.some((one) => one > 0) || drawsAll.value !== undefined
 })
 
@@ -903,6 +930,19 @@ function adopt(declared: AppDeclaration, variant: string): void {
     }),
   )
   app.value = declared
+  // a selection which names no panel the page lists in this variant would draw a blank grid, so
+  // the page starts from what it declares as shown, as a change of the page does
+  const kept = props.selection
+  const now = current.value
+  if (
+    kept !== undefined &&
+    kept !== '' &&
+    now !== null &&
+    !kept.split(',').some((one) => now.panels.includes(one))
+  ) {
+    host?.removeAttribute('selection')
+    tellSelection(defaultPanels(now))
+  }
   shownVariant.value = variant
   switching.value = false
   switchFailure.value = null
@@ -977,7 +1017,7 @@ async function switchTo(variant: string): Promise<void> {
 
 /** Get the panels in the grid, the elements the shell itself placed. */
 function shownPanels(): HTMLElement[] {
-  return grid.value === null ? [] : [...grid.value.querySelectorAll<HTMLElement>('sbmlsim-panel')]
+  return grid.value === null ? [] : [...grid.value.querySelectorAll<HTMLElement>(panelTag)]
 }
 
 /**
@@ -1124,7 +1164,9 @@ watch(
  * @returns their ids
  */
 function defaultPanels(page: AppPage): string[] {
-  return showsFigure(page) ? page.panels.filter((id) => shownOf(page).includes(id)) : page.panels
+  return figure.value !== null
+    ? page.panels.filter((id) => shownOf(page).includes(id))
+    : page.panels
 }
 
 watch(
@@ -1153,14 +1195,15 @@ watch(
     if (!own && given !== undefined) {
       host?.removeAttribute('selection')
     }
-    if (before !== undefined && page !== null && figure.value !== null && !own) {
-      host?.dispatchEvent(
-        new CustomEvent('sbmlsim-selection', {
-          detail: { panels: defaultPanels(page) },
-          bubbles: true,
-          composed: true,
-        }),
-      )
+    // a page without the figure tells it too where a selection was set, so a host which mirrors
+    // the selection does not keep the value of the page left
+    if (
+      before !== undefined &&
+      page !== null &&
+      !own &&
+      (figure.value !== null || given !== undefined)
+    ) {
+      tellSelection(defaultPanels(page))
     }
   },
   { flush: 'pre' },
@@ -1344,7 +1387,7 @@ onBeforeUnmount(() => {
           :is="figureTag"
           v-if="figure !== null"
           class="figure"
-          :figure.prop="figure"
+          :figure.prop="figureOnPage"
           :marked.prop="marked"
           :labels.prop="labels"
           @sbmlsim-figure-select="pick"

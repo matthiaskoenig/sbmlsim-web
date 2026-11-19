@@ -1664,6 +1664,80 @@ describe('the figure of an app', () => {
     expect(element.getAttribute('selection')).toBeNull()
   })
 
+  it('draws a key which opens nothing on this page as a decoration, not as a control', async () => {
+    const given = appWithFigure()
+    const first = given.pages[0]
+    if (first === undefined || given.figure === null || given.figure === undefined) {
+      throw new Error('no page')
+    }
+    declared = {
+      ...given,
+      pages: [
+        first,
+        {
+          id: 'pageB',
+          title: 'Page B',
+          panels: ['panelB'],
+          scenarios: [],
+          figure: true,
+          shown: ['panelB'],
+        },
+      ],
+      figure: { ...given.figure, panels: { ...given.figure.panels, elsewhere: ['panelB'] } },
+    }
+    const element = await shell()
+    const handed = (
+      figureOf(element) as unknown as { figure: { panels: Record<string, string[]> } }
+    ).figure.panels
+    expect(handed.elsewhere).toEqual([])
+    expect(handed.ki).toEqual(['ki_gli', 'ki_m1'])
+    expect(figureOf(element).labels.elsewhere).toBeUndefined()
+    await clickKey(element, 'elsewhere')
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
+    expect(element.getAttribute('selection')).toBeNull()
+  })
+
+  it('tells the selection of a page without the figure, where one was set', async () => {
+    declared = appWithFigure(twoPages())
+    const element = await shell({ selection: 'li_gli' })
+    const heard: string[][] = []
+    element.addEventListener('sbmlsim-selection', (event) => {
+      heard.push((event as CustomEvent<{ panels: string[] }>).detail.panels)
+    })
+    element.setAttribute('page', 'pageB')
+    await settled()
+    expect(element.getAttribute('selection')).toBeNull()
+    expect(heard).toEqual([['panelB']])
+  })
+
+  it('starts from the shown panels when a switch of the variant leaves a selection no page lists', async () => {
+    const given = appWithFigure({ variants: VARIANTS })
+    const page = given.pages[0]
+    if (page === undefined) {
+      throw new Error('no page')
+    }
+    variantApps.variantB = {
+      ...given,
+      pages: [{ ...page, panels: ['x1', 'x2'], shown: ['x1'] }],
+      figure:
+        given.figure === undefined || given.figure === null
+          ? null
+          : { ...given.figure, panels: { x: ['x1'] } },
+    }
+    declared = given
+    const element = await shell({ selection: 'li_gli' })
+    const heard: string[][] = []
+    element.addEventListener('sbmlsim-selection', (event) => {
+      heard.push((event as CustomEvent<{ panels: string[] }>).detail.panels)
+    })
+    await choose(element, 'variantB')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(element.getAttribute('selection')).toBeNull()
+    expect(panels(element)).toEqual(['x1'])
+    expect(heard).toEqual([['x1']])
+  })
+
   it('renders a page without a figure as it did', async () => {
     const element = await shell()
     expect(panels(element)).toEqual(['panelA'])
@@ -1869,6 +1943,45 @@ describe('the figure of an app', () => {
     element.setAttribute('page', 'pageB')
     await settled()
     expect(element.shadowRoot.querySelector('sbmlsim-figure')).toBeNull()
+  })
+
+  it('reaches the panels under a renamed tag with the page reset and the information view', async () => {
+    expect(register('w-panel', 'w-app')).toBe(true)
+    try {
+      declared = appWithFigure()
+      hang = []
+      const element = document.createElement('w-app') as AppElement
+      element.setAttribute('endpoint', '/api-root')
+      element.setAttribute('model', 'modelA')
+      document.body.append(element)
+      await settled()
+      const signals = hang
+      hang = null
+      expect(element.shadowRoot.querySelectorAll('w-panel')).toHaveLength(2)
+      expect(signals.length).toBeGreaterThan(0)
+      // the information view freezes the panels, which stops their runs ...
+      tabs(element).at(-1)?.click()
+      await settled()
+      expect(signals.every((one) => one.aborted)).toBe(true)
+      const before = simulations().length
+      // ... and the page starts them again where they are still on screen
+      tabs(element)[0]?.click()
+      await settled()
+      expect(simulations().length).toBeGreaterThan(before)
+      // the page switch of the scale and the Reset reach the panels as well
+      const toggle = (id: string): HTMLInputElement =>
+        (
+          element.shadowRoot.querySelector(`w-panel[panel="${id}"]`) as unknown as AppElement
+        ).shadowRoot.querySelector<HTMLInputElement>('.toggle input') as HTMLInputElement
+      ;(part(element, '.settings input[type=checkbox]') as HTMLInputElement).click()
+      await settled()
+      expect(toggle('glimepiride').checked).toBe(true)
+      ;(part(element, '.settings button.reset') as HTMLButtonElement).click()
+      await settled()
+      expect(toggle('glimepiride').checked).toBe(false)
+    } finally {
+      register()
+    }
   })
 
   it('places the figure under the tag register was given', async () => {
