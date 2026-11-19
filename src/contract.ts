@@ -585,9 +585,46 @@ export interface AppFigure {
   /**
    * The panels a click opens, by the key path of the clicked element: the `data-k` attributes of
    * the drawing joined from the outside in with `/`, `li` or `li/sub:gli`. A key may open several
-   * panels, a group of units is split into one panel per unit.
+   * panels, a group of units is split into one panel per unit. An empty record is legitimate, a
+   * drawing of decoration alone: it is shown and selects nothing.
+   *
+   * The ids need not be ids of the panels of a page, and neither does `AppPage.shown`: the client
+   * reads them as they come and does not cross-validate. The service does, against the compiled
+   * model, and refuses an app whose figure names a panel no page lists, so a consumer may rely on
+   * the ids but treats one it cannot find as nothing to open.
    */
   panels: Record<string, string[]>
+}
+
+/**
+ * Get the figure of an app.
+ *
+ * @param app the app
+ * @returns its figure, `null` for an app without one, whether the payload spells `figure` as
+ *   `null` or lacks the key as one before the figure does
+ */
+export function figureOf(app: AppDeclaration): AppFigure | null {
+  return app.figure ?? null
+}
+
+/**
+ * Get whether a page shows the figure of the app.
+ *
+ * @param page the page
+ * @returns `false` for a page which says so or does not say
+ */
+export function showsFigure(page: AppPage): boolean {
+  return page.figure ?? false
+}
+
+/**
+ * Get the ids of the panels a page shows before any click on the figure.
+ *
+ * @param page the page
+ * @returns the ids, empty for a page which names none or does not say
+ */
+export function shownPanels(page: AppPage): string[] {
+  return page.shown ?? []
 }
 
 /** The size of the panels of a page, see `AppPage.size`. */

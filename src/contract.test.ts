@@ -7,6 +7,7 @@ import { PanelClient } from './client'
 import { CONTRACTS, ContractError, checkContract } from './contract'
 import type {
   AppDeclaration,
+  AppFigure,
   PanelDataResponse,
   PanelDeclaration,
   SimulateRequest,
@@ -198,6 +199,13 @@ const app: AppDeclaration = {
   figure: null,
 }
 
+const figure: AppFigure = {
+  svg: '<svg/>',
+  title: 'The model',
+  credit: '',
+  panels: { 'li/sub:gli': ['li_gli'] },
+}
+
 describe('the contracts', () => {
   it('names the version of each of them', () => {
     expect(CONTRACTS).toEqual({ panel: 'panel/1', data: 'paneldata/1', app: 'app/1' })
@@ -359,6 +367,10 @@ describe('the payloads of the service', () => {
     expect(keys(served.data)).toEqual(keys(data))
     expect(keys((served.data.series as unknown[])[0])).toEqual(keys(data.series[0]))
     expect(keys(served.app)).toEqual(keys(app))
-    expect(keys((served.app.pages as unknown[])[0])).toEqual(keys(app.pages[0]))
+    for (const page of served.app.pages as unknown[]) {
+      expect(keys(page)).toEqual(keys(app.pages[0]))
+    }
+    // the fixture is the app of a model without a figure, so the keys of one are pinned here
+    expect(keys(figure)).toEqual(['credit', 'panels', 'svg', 'title'])
   })
 })

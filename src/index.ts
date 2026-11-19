@@ -27,7 +27,14 @@ import SbmlsimApp from './SbmlsimApp.ce.vue'
 import SbmlsimPanel from './SbmlsimPanel.ce.vue'
 import { APP_TAG, PANEL_TAG, placePanelTag } from './tags'
 
-export { CONTRACTS, ContractError, checkContract } from './contract'
+export {
+  CONTRACTS,
+  ContractError,
+  checkContract,
+  figureOf,
+  shownPanels,
+  showsFigure,
+} from './contract'
 export type {
   AppDeclaration,
   AppFigure,

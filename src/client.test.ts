@@ -9,7 +9,8 @@ import {
   registerEndpoint,
 } from './client'
 import type { EndpointFetch, FailureKind } from './client'
-import type { PanelDeclaration, SimulateResponse } from './contract'
+import { figureOf, shownPanels, showsFigure } from './contract'
+import type { AppPage, PanelDeclaration, SimulateResponse } from './contract'
 
 // Every id below is a neutral one: a model, a panel, a knob, a curve and a
 // series are data of a payload and never of this library.
@@ -229,7 +230,35 @@ describe('the client of an endpoint', () => {
     expect(read.figure?.panels['li/sub:gli']).toEqual(['li_gli'])
     expect(read.pages[0]?.figure).toBe(true)
     expect(read.pages[0]?.shown).toEqual(['li_gli'])
+    // a drawing of decoration alone selects nothing and is still a figure
+    body = { ...app, figure: { ...figure, panels: {} } }
+    expect((await client.app('modelA')).figure?.panels).toEqual({})
+    // the client reads the ids as they come: the service checks them against the model
+    body = {
+      ...app,
+      pages: [{ ...app.pages[0], figure: true, shown: ['nowhere'] }],
+      figure: { ...figure, panels: { li: ['nowhere_else'] } },
+    }
+    const unchecked = await client.app('modelA')
+    expect(shownPanels(unchecked.pages[0]!)).toEqual(['nowhere'])
+    expect(figureOf(unchecked)?.panels.li).toEqual(['nowhere_else'])
+    // the accessors give two states where the payload has three
+    const plain = { ...app, pages: [{ ...app.pages[0] }] }
+    body = plain
+    const older = await client.app('modelA')
+    expect(figureOf(older)).toBeNull()
+    expect(showsFigure(older.pages[0]!)).toBe(false)
+    expect(shownPanels(older.pages[0]!)).toEqual([])
+    expect(figureOf(read)?.title).toBe('The model')
+    expect(showsFigure(read.pages[0]!)).toBe(true)
     for (const broken of [
+      { ...app, figure: [] },
+      { ...app, figure: { ...figure, panels: [] } },
+      { ...app, figure: { ...figure, svg: '' } },
+      { ...app, figure: { ...figure, svg: '  \n' } },
+      { ...app, figure: { ...figure, title: undefined } },
+      { ...app, figure: { ...figure, credit: undefined } },
+      { ...app, figure: { ...figure, panels: { li: [1] } } },
       { ...app, figure: { ...figure, svg: 1 } },
       { ...app, figure: { ...figure, panels: { li: 'li_gli' } } },
       { ...app, pages: [{ ...app.pages[0], figure: 'yes' }] },

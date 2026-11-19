@@ -474,6 +474,7 @@ function isFigure(value: unknown): boolean {
     value === null ||
     (isObject(value) &&
       typeof value.svg === 'string' &&
+      value.svg.trim() !== '' &&
       typeof value.title === 'string' &&
       typeof value.credit === 'string' &&
       isObject(value.panels) &&
