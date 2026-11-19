@@ -49,17 +49,20 @@ A readout id which the compiled model does not have: the build fails and names t
 ## File Structure
 
 **pkpdsim** (`/home/mkoenig/git/pkpdsim`, branch off `develop`)
+
 - Modify `src/pkpdsim/pbpk/visual/interactive.py`: `readouts(content)` beside `cards(content, volumes)`, the walk which knows the id convention.
 - Modify `src/pkpdsim/pbpk/archive.py:269-285`: write the sidecar beside each SVG.
 - Create `tests/pbpk/test_readouts.py`.
 
 **sbmlsim** (`/home/mkoenig/git/sbmlsim`, branch off `develop`)
+
 - Modify `src/sbmlsim/panel.py`: `AppFigure`, `App.figure`, `AppPage.figure`, `AppPage.shown`, `app_payload`, `app_from_payload`.
 - Create `src/sbmlsim/panel_figure.py`: `panels_from_figure`, the reader of `figurereadouts/1`.
 - Modify `src/sbmlsim/serve/runner.py:719` (`_check_app`): the ids a figure selects.
 - Create `tests/test_panel_figure.py`, modify `tests/test_panel.py`.
 
 **sbmlsim-web** (`/home/mkoenig/git/sbmlsim-web`, branch `interactive-readouts`)
+
 - Modify `src/contract.ts`: `AppFigure`, the two new `AppPage` fields.
 - Create `src/SbmlsimFigure.ce.vue` and `src/SbmlsimFigure.test.ts`: the figure element.
 - Modify `src/SbmlsimApp.ce.vue`: the figure beside the grid, the selection, the shared card, the information tab.
@@ -68,6 +71,7 @@ A readout id which the compiled model does not have: the build fails and names t
 - Create `e2e/readouts.spec.ts`.
 
 **pkdb_models** (`/home/mkoenig/git/pkdb_models-band`, branch off `develop`)
+
 - Modify `pkdb_models/models/glimepiride/panels.py` and `pkdb_models/models/glimepiride/__init__.py`.
 
 ---
@@ -75,10 +79,12 @@ A readout id which the compiled model does not have: the build fails and names t
 ### Task 1: The readouts of every key of a figure (pkpdsim)
 
 **Files:**
+
 - Modify: `src/pkpdsim/pbpk/visual/interactive.py` (beside `cards`, line 95)
 - Test: `tests/pbpk/test_readouts.py`
 
 **Interfaces:**
+
 - Consumes: `ModelContent` (`src/pkpdsim/pbpk/visual/content.py:111`, `ModelContent.of(definition)`), `OrganContent.parts: Mapping[str, str]` with the tissue forms `none`, `organ`, `merged`, `full`; `pkpdsim.pbpk.ids` (`species`, `unbound`, `flat`, `arm`, `arm_free`, `arm_blood`, `urine`, `urine_rate`, `feces`, `feces_rate`, `lumen_amount`); `ModelContent.processes` (`Process(kind, sid, organ, ...)`).
 - Produces: `Readout` and `ReadoutGroup` dataclasses and `readouts(content: ModelContent) -> dict[str, ReadoutGroup]`, keyed by the key path of the figure (`li`, `li/sub:gli`, `blood/txt:OBS: ...`).
 
@@ -142,10 +148,12 @@ git commit -m "The readouts of every key of a model figure"
 ### Task 2: The sidecar beside the SVG (pkpdsim)
 
 **Files:**
+
 - Modify: `src/pkpdsim/pbpk/visual/interactive.py` (the writer), `src/pkpdsim/pbpk/archive.py:269-285`
 - Test: `tests/pbpk/test_readouts.py`
 
 **Interfaces:**
+
 - Consumes: `readouts(content)` of Task 1; `model_figure(definition, path, sexes)` (`pbpk/figure.py:1253`) and `anatomy_figure(definition, path, *, sexes=...)` (`pbpk/visual/anatomy.py:899`), both called in `create_archive`.
 - Produces: `write_readouts(content: ModelContent, svg: Path) -> Path`, which writes `<svg stem>.readouts.json` beside the SVG, the payload `{"contract": "figurereadouts/1", "model": <sid>, "keys": {<path>: {"label": str, "readouts": [{"id", "label", "unit", "kind"}]}}}`.
 
@@ -195,10 +203,12 @@ git commit -m "The figure of a model writes the readouts of its keys beside it"
 ### Task 3: The figure of an app (sbmlsim)
 
 **Files:**
+
 - Modify: `src/sbmlsim/panel.py` (`AppPage` l.1081, `App` l.1186, `app_payload` l.1242, `app_from_payload` l.1266, `__all__`)
 - Test: `tests/test_panel.py`
 
 **Interfaces:**
+
 - Consumes: the pydantic style of the module, `_CONFIG = ConfigDict(extra="forbid", frozen=True)`, `_Text`, `APP_CONTRACT = "app/1"`, `ContractError`.
 - Produces: `AppFigure(svg: str, title: str, credit: str = "", panels: Mapping[str, tuple[str, ...]])`; `App.figure: AppFigure | None = None`; `AppPage.figure: bool = False`; `AppPage.shown: tuple[str, ...] = ()`.
 
@@ -258,10 +268,12 @@ git commit -m "An app carries the figure of its model"
 ### Task 4: The panels of a sidecar (sbmlsim)
 
 **Files:**
+
 - Create: `src/sbmlsim/panel_figure.py`
 - Test: `tests/test_panel_figure.py`, fixture `tests/data/figure/`
 
 **Interfaces:**
+
 - Consumes: `AppFigure` of Task 3, `Panel`, `PanelCurve`, `PanelSimulation` (`panel.py:617, 306, 537`), `ContractError`.
 - Produces: `panels_from_figure(svg: Path, readouts: Path, *, simulation: PanelSimulation, title: str, credit: str = "", prefix: str = "") -> tuple[dict[str, Panel], AppFigure]`.
 
@@ -319,10 +331,12 @@ git commit -m "The panels of the readouts of a figure"
 ### Task 5: The ids of a figure are checked against the model (sbmlsim)
 
 **Files:**
+
 - Modify: `src/sbmlsim/serve/runner.py:719` (`_check_app`)
 - Test: `tests/serve/test_app.py`
 
 **Interfaces:**
+
 - Consumes: `_check_app(entry)`, which already checks that the panels of the pages exist, and `curve_unit(model, curve)` (`runner.py:2252`), which resolves a curve id against the model and raises naming the curve.
 - Produces: nothing new; a registration which fails when a figure names a panel the app does not have, and a build which fails when a generated curve id is not a selection of the model.
 
@@ -370,10 +384,12 @@ git commit -m "A figure which selects a panel the app has not is refused"
 ### Task 6: The contract of the figure in the renderer (sbmlsim-web)
 
 **Files:**
+
 - Modify: `src/contract.ts` (`AppPage` l.546, `AppDeclaration` l.590)
 - Test: `src/contract.test.ts`, fixture `src/fixtures/contract.json`
 
 **Interfaces:**
+
 - Consumes: the payload of Task 3.
 - Produces: `AppFigure { svg: string; title: string; credit: string; panels: Record<string, string[]> }`, `AppPage.figure: boolean`, `AppPage.shown: string[]`, `AppDeclaration.figure: AppFigure | null`.
 
@@ -381,7 +397,10 @@ git commit -m "A figure which selects a panel the app has not is refused"
 
 ```ts
 it('reads an app whose declaration carries a figure', () => {
-  const declaration = { ...sample, figure: { svg: '<svg/>', title: 'The model', credit: '', panels: { 'li/sub:gli': ['li_gli'] } } }
+  const declaration = {
+    ...sample,
+    figure: { svg: '<svg/>', title: 'The model', credit: '', panels: { 'li/sub:gli': ['li_gli'] } },
+  }
   expect(appOf(declaration).figure?.panels['li/sub:gli']).toEqual(['li_gli'])
 })
 
@@ -414,10 +433,12 @@ git commit -m "The contract of the figure of an app"
 ### Task 7: The figure element (sbmlsim-web)
 
 **Files:**
+
 - Create: `src/SbmlsimFigure.ce.vue`, `src/SbmlsimFigure.test.ts`
 - Modify: `src/tags.ts`, `src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `AppFigure` of Task 6.
 - Produces: the element `<sbmlsim-figure>` with the properties `figure: AppFigure | null` and `marked: string[]`, which emits `sbmlsim-figure-select` with `detail: { key: string }`; `FIGURE_TAG` in `src/tags.ts`.
 
@@ -469,10 +490,12 @@ git commit -m "The figure of a model is an element which reports what was clicke
 ### Task 8: The app selects its panes from the figure (sbmlsim-web)
 
 **Files:**
+
 - Modify: `src/SbmlsimApp.ce.vue` (props l.207, `show(id)` l.795, the grid)
 - Test: `src/SbmlsimApp.test.ts`
 
 **Interfaces:**
+
 - Consumes: `<sbmlsim-figure>` of Task 7, `AppPage.shown` and `AppDeclaration.figure` of Task 6.
 - Produces: the attribute `selection` (a comma separated list of panel ids) and the event `sbmlsim-selection` with `detail: { panels: string[] }` on `<sbmlsim-app>`.
 
@@ -525,10 +548,12 @@ git commit -m "The panes of an app are the selection of its figure"
 ### Task 9: The settings and information card (sbmlsim-web)
 
 **Files:**
+
 - Modify: `src/SbmlsimApp.ce.vue` (the shell, the footer ~l.134, `collect(event)` l.741), `src/SbmlsimPanel.ce.vue` (the `log` property beside `initialLog(declared)` l.1946)
 - Test: `src/SbmlsimApp.test.ts`
 
 **Interfaces:**
+
 - Consumes: the panel methods `reset` and `activate` (`SbmlsimPanel.ce.vue:3029`), the panel event `sbmlsim-result` (`detail: {provenance, spec_hash}`), `Provenance` (`contract.ts:401`: `engine`, `sbmlsim`, `seconds`, `created`, `model_sha256`).
 - Produces: a card above the grid with the logarithmic switch of every plot, the reset of the page, the draws control and the line of the last run; the information tab built from `title`, `subtitle`, `citation`, `doi`, `licenses` and `variants`.
 
@@ -581,10 +606,12 @@ git commit -m "One card for what every plot of a page shares"
 ### Task 10: The selection stays one scan (sbmlsim-web)
 
 **Files:**
+
 - Create: `e2e/readouts.spec.ts`
 - Test: the same file
 
 **Interfaces:**
+
 - Consumes: the inline endpoint of `sbmlsim-core` (`js/panels.mjs:370,555,708`), whose `Runs` cache is keyed by `[model, start, end, points, point list]` and joins a run in flight; the staged demo of `playwright.config.ts`.
 
 - [ ] **Step 1: Write the failing test**
@@ -626,10 +653,12 @@ git commit -m "A selection of twenty readouts is one scan of the model"
 ### Task 11: The documentation dashboard (sbmlsim-web)
 
 **Files:**
+
 - Modify: `docs/examples/glimepiride/nca.mjs:146`, `docs/examples/glimepiride/app.html:79-105`
 - Test: `docs/examples/glimepiride/nca.test.mjs`
 
 **Interfaces:**
+
 - Consumes: the kernel's `summarize`, which answers `cv` among its statistics.
 
 - [ ] **Step 1: Write the failing test**
@@ -668,10 +697,12 @@ git commit -m "The parameter table shows the coefficient of variation"
 **Blocked:** needs a released pkpdsim with Task 2 and a released sbmlsim with Tasks 3 to 5 which also vendors the sbmlsim-web release of Tasks 6 to 11 (`scripts/web_assets.py`, `VERSION`), because the `ty` hook and the CI of pkdb_models resolve both from `uv.lock` and the page it writes embeds the renderer. Do not start it before both releases are published and the floors are bumped.
 
 **Files:**
+
 - Modify: `pkdb_models/models/glimepiride/panels.py:380-498`, `pkdb_models/models/glimepiride/__init__.py:94-102`
 - Test: `tests/models/test_panels.py`
 
 **Interfaces:**
+
 - Consumes: `panels_from_figure` of Task 4, `AppFigure`, `AppPage.figure`, `AppPage.shown` of Task 3; the committed `models/output/models/glimepiride_body_body.svg` and the sidecar beside it.
 - Produces: `PANELS` with the generated groups beside the four declared panels, and `APP` with the figure.
 
