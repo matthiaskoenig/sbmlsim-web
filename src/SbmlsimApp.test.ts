@@ -1943,7 +1943,18 @@ describe('the settings and the information of an app', () => {
   /** Whether a placed panel draws its y axis logarithmic, from its own switch. */
   function logarithmic(element: AppElement, id: string): boolean {
     const panel = placed(element).find((one) => one.getAttribute('panel') === id)
-    return (panel?.shadowRoot?.querySelector('.toggle input')!).checked
+    return ownToggle(panel).checked
+  }
+
+  /** The switch of a panel of its own scale. */
+  function ownToggle(panel: PlacedPanel | undefined): HTMLInputElement {
+    const found = (
+      panel as unknown as AppElement | undefined
+    )?.shadowRoot.querySelector<HTMLInputElement>('.toggle input')
+    if (found === null || found === undefined) {
+      throw new Error('the panel has no switch of its scale')
+    }
+    return found
   }
 
   /** The figure element of the shell. */
@@ -1971,7 +1982,7 @@ describe('the settings and the information of an app', () => {
     expect(logarithmic(element, 'glimepiride')).toBe(false)
     expect(logarithmic(element, 'm1')).toBe(false)
     // a flip of the own switch of one panel is shown as a mixed page, and the click sets all
-    const own = placed(element)[0]?.shadowRoot?.querySelector('.toggle input')!
+    const own = ownToggle(placed(element)[0])
     own.checked = true
     own.dispatchEvent(new Event('change'))
     await settled()
@@ -2072,7 +2083,7 @@ describe('the settings and the information of an app', () => {
     expect(element.getAttribute('selection')).toBe('li_gli')
     expect(placed(element)[0]?.getAttribute('log')).toBeNull()
     expect(box.checked).toBe(false)
-    const own = placed(element)[0]?.shadowRoot?.querySelector('.toggle input')!
+    const own = ownToggle(placed(element)[0])
     own.checked = true
     own.dispatchEvent(new Event('change'))
     await settled()
