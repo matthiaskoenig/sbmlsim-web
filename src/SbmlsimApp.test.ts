@@ -1516,3 +1516,21 @@ describe('a page of small panels', () => {
     expect(part(element, 'sbmlsim-panel').getAttribute('size')).toBe('regular')
   })
 })
+
+describe('the draws of the uncertainty of a page', () => {
+  it('gives every panel of the page the number the app is given', async () => {
+    const element = await shell({ draws: '16' })
+    const placed = element.shadowRoot.querySelectorAll('sbmlsim-panel')
+    expect(placed.length).toBeGreaterThan(0)
+    for (const panel of placed) {
+      expect(panel.getAttribute('draws')).toBe('16')
+    }
+  })
+
+  it('writes no attribute at all without one, so every panel keeps what it declares', async () => {
+    const element = await shell()
+    for (const panel of element.shadowRoot.querySelectorAll('sbmlsim-panel')) {
+      expect(panel.hasAttribute('draws')).toBe(false)
+    }
+  })
+})

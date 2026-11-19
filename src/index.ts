@@ -32,6 +32,7 @@ export type {
   AppDeclaration,
   AppPage,
   AppVariant,
+  Band,
   ContractVersion,
   CurveScale,
   Grid,
@@ -51,6 +52,7 @@ export type {
   PanelSimulation,
   PanelSummary,
   PanelTexts,
+  PanelUncertainty,
   PanelsResponse,
   Provenance,
   Scenario,
@@ -59,6 +61,7 @@ export type {
   SimulateRequest,
   SimulateResponse,
   Status,
+  Uncertainty,
 } from './contract'
 export {
   DEFAULT_TIMEOUT,
@@ -70,8 +73,8 @@ export {
   registerEndpoint,
 } from './client'
 export type { EndpointFetch, FailureKind } from './client'
-export { interpolate } from './interpolate'
-export type { DrawnFigure } from './interpolate'
+export { interpolate, interpolateBands } from './interpolate'
+export type { DrawnBand, DrawnFigure } from './interpolate'
 export { canvasMeasure, fontOf } from './measure'
 export type { FigureFont } from './measure'
 export { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
@@ -83,6 +86,7 @@ export type {
   PlotSpec,
   Points,
   Series,
+  SeriesBand,
   TextMeasure,
 } from './plot'
 
@@ -153,8 +157,8 @@ declare global {
  * The class of `<sbmlsim-panel>`, a custom element with a shadow root.
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
- * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant`, `values`
- * and `auto` and the methods `activate()`, `freeze()` and `reset()`. It dispatches
+ * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant`, `values`,
+ * `draws` and `auto` and the methods `activate()`, `freeze()` and `reset()`. It dispatches
  * `sbmlsim-error` when a request failed and `sbmlsim-result`, with the
  * `provenance` and the `spec_hash` of the answer, when a simulation succeeded:
  * never for a failure and never for a stored fallback, which is no simulation.
@@ -166,8 +170,8 @@ export const SbmlsimPanelElement = elementClass<SbmlsimPanelHTMLElement>(
 /**
  * The class of `<sbmlsim-app>`, the shell of the app of a model.
  *
- * It carries the attributes `endpoint`, `model`, `page`, `theme`, `timeout` and
- * `heading-level`, and it dispatches `sbmlsim-error` when the app could not be
+ * It carries the attributes `endpoint`, `model`, `page`, `theme`, `timeout`,
+ * `draws` and `heading-level`, and it dispatches `sbmlsim-error` when the app could not be
  * read and `sbmlsim-page`, with the id of the page, when a reader switches the
  * page. It places the panels under the tag `register` was called with, so the
  * panel has to be registered under it where the shell is used.

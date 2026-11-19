@@ -2664,3 +2664,86 @@ describe('the precision of the tick labels', () => {
     SWEEP_TIMEOUT * 10,
   )
 })
+
+describe('the band of a curve', () => {
+  it('draws it as a closed polygon under the curve in its colour', () => {
+    const one = series(1, [1, 2, 3, 4])
+    const svg = plotSvg(
+      spec(0, { series: [{ ...one, band: { low: [0, 1, 2, 3], high: [2, 3, 4, 5] } }] }),
+    )
+    const band = /<path class="curve-band" data-series="curve1" style="([^"]*)" d="([^"]*)"/.exec(
+      svg,
+    )
+    expect(band).not.toBeNull()
+    // the fill is the colour of the curve, and nothing is stroked
+    const colour = /<path class="curve" data-series="curve1" style="stroke:([^;"]*)/.exec(svg)?.[1]
+    expect(band?.[1]).toBe(
+      `fill:${String(colour)};fill-opacity:var(--sbmlsim-band-opacity, 0.18);stroke:none`,
+    )
+    // the low end forward, the high end back, closed: one `M`, one `Z`, and
+    // two points per x of the figure
+    const d = band?.[2] ?? ''
+    expect(d.startsWith('M')).toBe(true)
+    expect(d.endsWith('Z')).toBe(true)
+    expect(d.match(/M/g)).toHaveLength(1)
+    expect(d.match(/[ML]/g)).toHaveLength(8)
+    // it is drawn before the curve, so the line is never covered by the shade
+    expect(svg.indexOf('class="curve-band"')).toBeLessThan(svg.indexOf('class="curve"'))
+  })
+
+  it('splits at a gap into one polygon per run of points', () => {
+    const one = series(1, [1, 2, 3, 4])
+    const svg = plotSvg(
+      spec(0, {
+        series: [{ ...one, band: { low: [0, Number.NaN, 2, 3], high: [2, 3, 4, 5] } }],
+      }),
+    )
+    const d =
+      /<path class="curve-band" data-series="curve1" style="[^"]*" d="([^"]*)"/.exec(svg)?.[1] ?? ''
+    // the first run is one point and no polygon, the second is two
+    expect(d.match(/M/g)).toHaveLength(1)
+    expect(d.match(/Z/g)).toHaveLength(1)
+    expect(d.match(/[ML]/g)).toHaveLength(4)
+  })
+
+  it('is no path at all for a band whose values cannot be drawn', () => {
+    const one = series(1, [1, 2, 3, 4])
+    const flat = plotSvg(
+      spec(0, {
+        series: [{ ...one, band: { low: [Number.NaN], high: [Number.NaN] } }],
+      }),
+    )
+    expect(flat).not.toContain('curve-band')
+    // and on a logarithmic axis a band at 0 is no point of it either
+    const logged = plotSvg(
+      spec(0, {
+        logY: true,
+        series: [{ ...one, band: { low: [0, 0, 0, 0], high: [2, 3, 4, 5] } }],
+      }),
+    )
+    expect(logged).not.toContain('curve-band')
+  })
+
+  it('holds the y axis open, as the values of the curve do', () => {
+    const plain = plotGeometry(spec(0, { series: [series(1, [1, 2, 3, 4])] }))
+    const banded = plotGeometry(
+      spec(0, {
+        series: [
+          { ...series(1, [1, 2, 3, 4]), band: { low: [0.5, 1, 2, 3], high: [8, 9, 10, 11] } },
+        ],
+      }),
+    )
+    // the axis is read through the pixels it gives: a band above the curve
+    // pushes the top of the curve down the box, one below it lifts its bottom
+    expect(banded.yAt(4)).toBeGreaterThan(plain.yAt(4))
+    expect(banded.yAt(1)).toBeLessThan(plain.yAt(1))
+    // a frame the caller declares is the frame, band or no band
+    const framed = plotGeometry(
+      spec(0, {
+        yLimits: { low: 0, high: 6 },
+        series: [{ ...series(1, [1, 2, 3, 4]), band: { low: [0.5], high: [100] } }],
+      }),
+    )
+    expect(framed.yAt(6)).toBe(plotGeometry(spec(0, { yLimits: { low: 0, high: 6 } })).yAt(6))
+  })
+})

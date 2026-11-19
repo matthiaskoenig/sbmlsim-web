@@ -208,6 +208,29 @@ export interface PanelDataDeclaration {
 }
 
 /** The simulation a panel runs, the same for every point of its grid. */
+/**
+ * The uncertainty of the parameters of the model of a panel, which its curves
+ * carry a band of.
+ *
+ * A model of a fit knows its parameters to an interval and not to a number,
+ * and the uncertainty record of the model says to which: a sample of draws of
+ * that record travels in the recipe of an endpoint, and this is what a
+ * declaration says about it. An endpoint runs the first `draws` of that sample
+ * (`SimulateRequest.draws`), which is what lets a reader turn the number up and
+ * down and what makes the band of a release reproducible - no engine draws
+ * anything of its own.
+ */
+export interface PanelUncertainty {
+  /** The draws a request runs when it names no number. */
+  draws: number
+  /** The draws the sample of the endpoint holds, the most a request may ask for. */
+  max_draws: number
+  /** The share of the draws the band covers, e.g. `0.9` for the 5th to the 95th percentile. */
+  level: number
+  /** The uncertainty record of the model the draws come from, e.g. the name of a fit. */
+  fit: string
+}
+
 export interface PanelSimulation {
   /** The variant of the model, `null` for the default variant of its project. */
   variant: string | null
@@ -225,6 +248,11 @@ export interface PanelSimulation {
    * evaluates them, it sends the knobs and the endpoint does.
    */
   derived: Record<string, string>
+  /**
+   * The uncertainty of its parameters its curves carry a band of; absent, as
+   * from a service before sbmlsim 0.30, for a panel which carries none.
+   */
+  uncertainty?: PanelUncertainty
 }
 
 /** The bounds of a declaration and of a request alike, which the endpoint states. */
@@ -305,6 +333,12 @@ export interface SimulateRequest {
   values?: Record<string, number>
   /** The points of a knob of the grid by its id; a knob of the grid takes no value. */
   grid?: Record<string, number>
+  /**
+   * The draws of the uncertainty of the panel to run next to the curves, the
+   * first ones of the sample of the endpoint; `0` or absent for a run without a
+   * band, and at most the `max_draws` of the declaration.
+   */
+  draws?: number
   /** The variant of the model to simulate; the one the panel declares without. */
   variant?: string
 }
@@ -374,6 +408,49 @@ export interface Grid {
   status: Status
 }
 
+/**
+ * The band of one curve of one point of a grid.
+ *
+ * The two percentiles of `Uncertainty.level` over the draws, point for point
+ * of `Grid.x`. A draw which did not integrate is left out of them, and a point
+ * of the grid which no draw integrated is a band of `null` values, as a curve
+ * of such a point is a row of `null`.
+ */
+export interface Band {
+  /** The low percentile, e.g. the 5th of a level of 0.9. */
+  low: (number | null)[]
+  /** The high percentile, e.g. the 95th of a level of 0.9. */
+  high: (number | null)[]
+}
+
+/**
+ * The uncertainty an answer carries: the draws which were run and what they say.
+ *
+ * The band travels for every point of the grid, so a reader who moves a knob of
+ * the grid sees the band move with the curve rather than behind it. The curves
+ * of the draws themselves travel for an answer of a single point only, where
+ * their size is bounded: a client which wants more than a band - the
+ * parameters of every draw, say - asks for the one position it wants them at.
+ */
+export interface Uncertainty {
+  /** The draws which were run, the first ones of the sample of the endpoint. */
+  draws: number
+  /** The uncertainty record of the model they come from, the `fit` of the declaration. */
+  fit: string
+  /** The share of the draws the band covers, the `level` of the declaration. */
+  level: number
+  /** The band of every curve by its id, one per point of the grid in the order of `Grid.curves`. */
+  band: Record<string, Band[]>
+  /**
+   * The curve of every draw by its id, one row per draw in the order of the
+   * sample; absent for an answer of more than one point, and a row of `null`
+   * for a draw which did not integrate.
+   */
+  curves?: Record<string, (number | null)[][]>
+  /** The flat indices, point by draw in C order, of the draws which did not integrate. */
+  failed: number[]
+}
+
 /** The answer of a simulation of a panel, the `panel/1` payload of a run. */
 export interface SimulateResponse extends Grid {
   /** The version of the payload, `CONTRACTS.panel`. */
@@ -384,6 +461,11 @@ export interface SimulateResponse extends Grid {
   units: Record<string, string | null>
   /** Where the curves come from. */
   provenance: Provenance
+  /**
+   * The uncertainty of the run, absent for a request which asked for no draw
+   * and for an endpoint which answers none.
+   */
+  uncertainty?: Uncertainty
 }
 
 /** One series of the study data of a panel, on the axis of its curve. */

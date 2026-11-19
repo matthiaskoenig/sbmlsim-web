@@ -3335,3 +3335,101 @@ describe('the size of the figure', () => {
     expect(height(other)).toBe(288)
   })
 })
+
+describe('the uncertainty of a panel', () => {
+  /**
+   * Build a declaration whose model carries an uncertainty.
+   *
+   * @param draws the draws a request without a number gets
+   * @param maxDraws the draws the sample of the endpoint holds
+   * @returns the declaration
+   */
+  function uncertain(draws = 4, maxDraws = 8): PanelDeclaration {
+    const declared = declaration()
+    return {
+      ...declared,
+      simulation: {
+        ...declared.simulation,
+        uncertainty: { draws, max_draws: maxDraws, level: 0.9, fit: 'fitA' },
+      },
+    }
+  }
+
+  /** The answer of a run whose curves carry a band of a tenth around every row. */
+  function banded(): SimulateResponse {
+    const answer = run()
+    const band = (rows: (number | null)[][]): { low: number[]; high: number[] }[] =>
+      rows.map((row) => ({
+        low: row.map((value) => 0.9 * (value ?? 0)),
+        high: row.map((value) => 1.1 * (value ?? 0)),
+      }))
+    return {
+      ...answer,
+      uncertainty: {
+        draws: 4,
+        fit: 'fitA',
+        level: 0.9,
+        band: {
+          curveA: band(answer.curves.curveA ?? []),
+          curveB: band(answer.curves.curveB ?? []),
+        },
+        failed: [],
+      },
+    }
+  }
+
+  it('asks for the draws its declaration states', async () => {
+    served.panel = () => Promise.resolve(uncertain())
+    served.simulate = () => Promise.resolve(banded())
+    await started()
+    expect(simulations()).toEqual([{ values: { knobA: 25 }, grid: { knobB: 3 }, draws: 4 }])
+  })
+
+  it('asks for the number the page gives it and never for more than the sample holds', async () => {
+    served.panel = () => Promise.resolve(uncertain())
+    served.simulate = () => Promise.resolve(banded())
+    await started({ draws: '2' })
+    expect(simulations().at(-1)?.draws).toBe(2)
+    calls = []
+    await started({ draws: '99' })
+    expect(simulations().at(-1)?.draws).toBe(8)
+    // no draw at all is a run without a band, which asks for none
+    calls = []
+    await started({ draws: '0' })
+    expect(simulations().at(-1)).toEqual({ values: { knobA: 25 }, grid: { knobB: 3 } })
+  })
+
+  it('asks for no draw of a panel whose model declares no uncertainty', async () => {
+    await started({ draws: '8' })
+    expect(simulations().at(-1)).toEqual({ values: { knobA: 25 }, grid: { knobB: 3 } })
+  })
+
+  it('shades the band of the position the knobs stand at and hands it out', async () => {
+    served.panel = () => Promise.resolve(uncertain())
+    served.simulate = () => Promise.resolve(banded())
+    const element = await started()
+    expect(figure(element)).toContain('<path class="curve-band" data-series="curveA"')
+    // the knob stands at its default, the last point of the axis, whose row is
+    // the last one: a tenth below and above it
+    const last = AXIS_VALUES.length - 1
+    const row = banded().curves.curveA?.[last] ?? []
+    expect(element.drawn()?.bands.curveA).toEqual({
+      low: row.map((value) => 0.9 * (value ?? 0)),
+      high: row.map((value) => 1.1 * (value ?? 0)),
+    })
+    // and the band moves with the knob, out of the grid and without a run
+    move(control(element, 'knobB'), '0.2', 'change')
+    await nextTick()
+    expect(element.drawn()?.bands.curveA?.low).toEqual(
+      (banded().curves.curveA?.[0] ?? []).map((value) => 0.9 * (value ?? 0)),
+    )
+    expect(simulations()).toHaveLength(1)
+  })
+
+  it('draws no band for an answer which carries no uncertainty', async () => {
+    served.panel = () => Promise.resolve(uncertain())
+    const element = await started()
+    expect(figure(element)).not.toContain('curve-band')
+    expect(element.drawn()?.bands).toEqual({})
+  })
+})

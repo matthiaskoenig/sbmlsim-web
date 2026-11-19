@@ -7,7 +7,7 @@
  * dom - so it is the same function in a page, in a test and in a worker.
  */
 
-import type { Grid, Provenance } from './contract'
+import type { Grid, Provenance, SimulateResponse } from './contract'
 
 /** One index of an axis and the weight it carries at a position. */
 interface AxisWeight {
@@ -125,6 +125,20 @@ function corners(grid: Grid, at: Record<string, number>): Corner[] {
 }
 
 /**
+ * The band of a drawn curve: the two ends of its range at the position the
+ * knobs stand at, over the times of the figure.
+ *
+ * `NaN` where the band has no value, as a curve of a drawn figure is `NaN`
+ * where it has none, so a renderer draws it without reading anything else.
+ */
+export interface DrawnBand {
+  /** The low end of the range, the low percentile of the draws. */
+  low: number[]
+  /** The high end of the range, the high percentile of the draws. */
+  high: number[]
+}
+
+/**
  * The figure a panel draws: one curve per id at the position its knobs stand at.
  *
  * It is what `drawn()` of a panel hands out, the grid of its last run read at the position of
@@ -138,6 +152,11 @@ export interface DrawnFigure {
   x: number[]
   /** One timecourse per curve id, over `x`, with `NaN` where a point did not integrate. */
   curves: Record<string, number[]>
+  /**
+   * The band of every curve which carries one, by the same id; empty for a run
+   * which asked for no draw and for an endpoint which answers none.
+   */
+  bands: Record<string, DrawnBand>
   /** The position the curves were read at, the value of every knob of the panel. */
   values: Record<string, number>
   /** The unit of `x` and of every curve, by its id, as the grid states them. */
@@ -166,11 +185,62 @@ export interface DrawnFigure {
  *   everywhere for a grid with an axis without values
  */
 export function interpolate(grid: Grid, at: Record<string, number>): Record<string, number[]> {
+  const read = reader(grid, at)
+  const curves: Record<string, number[]> = {}
+  for (const [id, rows] of Object.entries(grid.curves)) {
+    curves[id] = read(rows)
+  }
+  return curves
+}
+
+/**
+ * Interpolate the band of every curve of an answer at a position of its knobs.
+ *
+ * The band of a point of the grid is read exactly as the curve of that point
+ * is, which is what makes the two move together: the percentile of a position
+ * between two points of an axis is the interpolation of the percentiles of
+ * those points, the same approximation of the grid the nominal curve rests on.
+ *
+ * @param answer the answer of a run, whose `uncertainty` carries the bands
+ * @param at the position, as `interpolate` reads it
+ * @returns the band of every curve the answer carries one of, empty for an
+ *   answer without an uncertainty
+ */
+export function interpolateBands(
+  answer: SimulateResponse,
+  at: Record<string, number>,
+): Record<string, DrawnBand> {
+  const band = answer.uncertainty?.band
+  if (band === undefined) {
+    return {}
+  }
+  const read = reader(answer, at)
+  const bands: Record<string, DrawnBand> = {}
+  for (const [id, points] of Object.entries(band)) {
+    bands[id] = {
+      low: read(points.map((one) => one.low)),
+      high: read(points.map((one) => one.high)),
+    }
+  }
+  return bands
+}
+
+/**
+ * Get the function which reads one column of rows of a grid at a position.
+ *
+ * The corners of the position and the points which failed are read once, since
+ * they are the same for every curve and every band of one answer.
+ *
+ * @param grid the grid of a run
+ * @param at the position, as `interpolate` reads it
+ * @returns the function of the rows of one curve, which gives its values over
+ *   the times of the grid
+ */
+function reader(grid: Grid, at: Record<string, number>): (rows: (number | null)[][]) => number[] {
   const failed = new Set(grid.status.failed)
   const bounds = corners(grid, at)
   const columns = grid.x.length
-  const curves: Record<string, number[]> = {}
-  for (const [id, rows] of Object.entries(grid.curves)) {
+  return (rows) => {
     const values: number[] = []
     for (let column = 0; column < columns; column += 1) {
       let total = 0
@@ -185,7 +255,6 @@ export function interpolate(grid: Grid, at: Record<string, number>): Record<stri
       }
       values.push(ok ? total : Number.NaN)
     }
-    curves[id] = values
+    return values
   }
-  return curves
 }
