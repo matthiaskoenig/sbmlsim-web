@@ -204,12 +204,12 @@ test.describe('the readouts of a drawing', () => {
     // a panel of the selection which asked for another end, or other points, would be another
     // scan of the model: every request of the pool is the scan of the declared panels
     expect(scans(selected)).toEqual(scan)
-    // and the points the four declared panels ask for are asked for as often as the page itself
-    // does (its panels grid over different knobs, so a few points are shared between two runs),
-    // which assumes that sharing is deterministic. The copy of the second panel adds nothing to
-    // this comparison, its run is the one of the second panel: what shows that it really ran is
-    // the wait of `runs` for its drawn path and band
-    expect([...selected].sort()).toEqual([...declared].sort())
+    // and the distinct simulations are the ones of the declared page. The count of calls is not
+    // compared: a point two panels ask for reaches the pool twice when the second asks after the
+    // first run has finished, and once when it joins the run in flight, which is a matter of
+    // timing. The copy of the second panel adds nothing here, its run is the one of the second
+    // panel: what shows that it really ran is the wait of `runs` for its drawn path and band
+    expect(new Set(selected)).toEqual(new Set(declared))
   })
 
   test('sees a panel which asks for another end of the simulation', async ({ page }) => {
