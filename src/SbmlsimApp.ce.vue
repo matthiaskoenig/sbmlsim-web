@@ -750,7 +750,8 @@ function adopt(declared: AppDeclaration, variant: string): void {
   shownVariant.value = variant
   switching.value = false
   switchFailure.value = null
-  awaiting.value = new Set(page?.panels ?? [])
+  // only the panels on screen answer, the ones of the page which are not selected are not mounted
+  awaiting.value = new Set(placed.value)
 }
 
 /**
@@ -844,8 +845,8 @@ function collect(event: Event): void {
   const provenance = (event as CustomEvent<{ provenance?: Provenance }>).detail.provenance
   if (provenance !== undefined) {
     // keyed by the panel the shell placed, which a failure of it is dropped by
-    const placed = event.target instanceof Element ? event.target.getAttribute('panel') : null
-    answers.value = { ...answers.value, [placed ?? provenance.panel]: provenance }
+    const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
+    answers.value = { ...answers.value, [id ?? provenance.panel]: provenance }
     settle(event)
   }
 }
@@ -909,16 +910,62 @@ function show(id: string): void {
   )
 }
 
+/**
+ * The panels a page shows before any click: the ones it declares as shown, in the order it lists
+ * them, and every panel for a page without the figure.
+ *
+ * @param page the page
+ * @returns their ids
+ */
+function defaultPanels(page: AppPage): string[] {
+  return showsFigure(page) ? page.panels.filter((id) => shownOf(page).includes(id)) : page.panels
+}
+
 watch(
   () => current.value?.id,
-  () => {
+  (_id, before) => {
     freezeShown()
     answers.value = {}
     awaiting.value = new Set()
     resetShared()
+    // the clicks on the figure belong to the page they were made on, so whatever changed the
+    // page (a tab, the `page` attribute of a history entry, a shared address) starts the new
+    // page from the panels it declares as shown; a `selection` which names panels of the new
+    // page alone was set for it and stays
+    const page = current.value
+    const given = props.selection
+    const own =
+      given !== undefined &&
+      given !== '' &&
+      page !== null &&
+      given.split(',').every((one) => page.panels.includes(one))
+    if (!own && given !== undefined) {
+      host?.removeAttribute('selection')
+    }
+    if (before !== undefined && page !== null && figure.value !== null && !own) {
+      host?.dispatchEvent(
+        new CustomEvent('sbmlsim-selection', {
+          detail: { panels: defaultPanels(page) },
+          bubbles: true,
+          composed: true,
+        }),
+      )
+    }
   },
   { flush: 'pre' },
 )
+
+// a panel which leaves the screen answers no more: a switch of the variant does not await it
+// and the footer does not name its versions
+watch(placed, (now) => {
+  const on = new Set(now)
+  if ([...awaiting.value].some((id) => !on.has(id))) {
+    awaiting.value = new Set([...awaiting.value].filter((id) => on.has(id)))
+  }
+  if (Object.keys(answers.value).some((id) => !on.has(id))) {
+    answers.value = Object.fromEntries(Object.entries(answers.value).filter(([id]) => on.has(id)))
+  }
+})
 
 watch(chosen, (variant) => {
   void switchTo(variant)
@@ -1597,28 +1644,39 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
 }
 
-/* the figure of a model beside the grid of its panels; the grid takes the rest of the row */
+/*
+ * The figure of a model is above the grid, centred and at most 900px wide. A model drawing is
+ * dense and wide: its labels are unreadable in a thumbnail and a reader cannot aim at an organ
+ * he cannot read, so the figure takes the side column only where the column is at least 560px
+ * wide. No viewport unit: the app is embedded in a frame whose height is set from its content.
+ */
 .stage.figured {
   display: grid;
-  grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 
 .figure {
-  position: sticky;
-  top: 16px;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 900px;
   min-width: 0;
+  margin: 0 auto;
 }
 
-/* on a narrow shell the figure is above the grid */
-@container (max-width: 720px) {
+/* a column of 560px, the grid beside it keeps the room of one card of 480px: 560 + 16 + 480
+   in the content of a shell of 16px padding */
+@container (min-width: 1088px) {
   .stage.figured {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 560px minmax(0, 1fr);
   }
 
   .figure {
-    position: static;
+    position: sticky;
+    top: 16px;
+    margin: 0;
   }
 }
 

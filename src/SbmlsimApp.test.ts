@@ -1565,11 +1565,6 @@ describe('the figure of an app', () => {
     })
   }
 
-  /** The ids of the panels the shell placed, in the order of the grid. */
-  function placedPanels(element: AppElement): string[] {
-    return panels(element)
-  }
-
   /** The figure element of the shell. */
   function figureOf(element: AppElement): HTMLElement & {
     marked: string[]
@@ -1589,17 +1584,17 @@ describe('the figure of an app', () => {
   it('places the panels the page shows before anything is clicked', async () => {
     declared = appWithFigure()
     const element = await shell()
-    expect(placedPanels(element)).toEqual(['glimepiride', 'm1'])
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
   })
 
   it('adds the panels of a clicked key and removes them when it is clicked again', async () => {
     declared = appWithFigure()
     const element = await shell()
     await clickKey(element, 'li/sub:gli')
-    expect(placedPanels(element)).toEqual(['glimepiride', 'm1', 'li_gli'])
+    expect(panels(element)).toEqual(['glimepiride', 'm1', 'li_gli'])
     expect(element.getAttribute('selection')).toBe('glimepiride,m1,li_gli')
     await clickKey(element, 'li/sub:gli')
-    expect(placedPanels(element)).toEqual(['glimepiride', 'm1'])
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
   })
 
   it('places the panels in the order the page declares them, whatever order they were clicked in', async () => {
@@ -1607,7 +1602,7 @@ describe('the figure of an app', () => {
     const element = await shell()
     await clickKey(element, 'ki')
     await clickKey(element, 'li/sub:gli')
-    expect(placedPanels(element)).toEqual(['glimepiride', 'm1', 'li_gli', 'ki_gli', 'ki_m1'])
+    expect(panels(element)).toEqual(['glimepiride', 'm1', 'li_gli', 'ki_gli', 'ki_m1'])
   })
 
   it('tells the page the selection with the panels in page order', async () => {
@@ -1624,10 +1619,10 @@ describe('the figure of an app', () => {
   it('reads the attribute selection, which the page may set', async () => {
     declared = appWithFigure()
     const element = await shell({ selection: 'li_gli' })
-    expect(placedPanels(element)).toEqual(['li_gli'])
+    expect(panels(element)).toEqual(['li_gli'])
     element.setAttribute('selection', '')
     await settled()
-    expect(placedPanels(element)).toEqual([])
+    expect(panels(element)).toEqual([])
   })
 
   it('marks the keys every panel of which is shown and names them by their panels', async () => {
@@ -1645,7 +1640,7 @@ describe('the figure of an app', () => {
     const element = await shell()
     await clickKey(element, 'ki')
     await clickKey(element, 'ki/sub:gli')
-    expect(placedPanels(element)).toEqual(['glimepiride', 'm1', 'ki_m1'])
+    expect(panels(element)).toEqual(['glimepiride', 'm1', 'ki_m1'])
     expect(figureOf(element).marked).toEqual([])
   })
 
@@ -1654,13 +1649,173 @@ describe('the figure of an app', () => {
     const element = await shell()
     await clickKey(element, 'frame')
     await clickKey(element, 'nowhere')
-    expect(placedPanels(element)).toEqual(['glimepiride', 'm1'])
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
     expect(element.getAttribute('selection')).toBeNull()
   })
 
   it('renders a page without a figure as it did', async () => {
     const element = await shell()
-    expect(placedPanels(element)).toEqual(['panelA'])
+    expect(panels(element)).toEqual(['panelA'])
     expect(element.shadowRoot.querySelector('sbmlsim-figure')).toBeNull()
+  })
+
+  /** Switch the variant, as a reader does. */
+  async function choose(element: AppElement, variant: string): Promise<void> {
+    const select = part(element, '.variant-select') as HTMLSelectElement
+    select.value = variant
+    select.dispatchEvent(new Event('change'))
+    await settled()
+  }
+
+  /** The two variants a figured app may be switched between. */
+  const VARIANTS = [
+    { id: 'variantA', label: 'Variant A' },
+    { id: 'variantB', label: 'Variant B' },
+  ]
+
+  /** A second page, with no figure, for the tests which move between pages. */
+  const PLAIN = { id: 'pageB', title: 'Page B', panels: ['panelB'], scenarios: [] }
+
+  /** Get the page the figured app shows, with the second page after it. */
+  function twoPages(): Partial<AppDeclaration> {
+    const first = appWithFigure().pages[0]
+    if (first === undefined) {
+      throw new Error('no page')
+    }
+    return { pages: [first, PLAIN] }
+  }
+
+  it('adds only the missing panels of a key which is shown in part', async () => {
+    declared = appWithFigure()
+    const element = await shell({ selection: 'ki_m1' })
+    await clickKey(element, 'ki')
+    expect(panels(element)).toEqual(['ki_gli', 'ki_m1'])
+    expect(figureOf(element).marked).toEqual(['ki', 'ki/sub:gli'])
+  })
+
+  it('places no panel of a shown list which the page does not list', async () => {
+    const given = appWithFigure()
+    const page = given.pages[0]
+    if (page === undefined) {
+      throw new Error('no page')
+    }
+    declared = { ...given, pages: [{ ...page, shown: ['glimepiride', 'ghost'] }] }
+    const element = await shell()
+    expect(panels(element)).toEqual(['glimepiride'])
+  })
+
+  it('keeps the selection through a switch of the variant and clears the caption', async () => {
+    declared = appWithFigure({ variants: VARIANTS })
+    const element = await shell()
+    await clickKey(element, 'li/sub:gli')
+    await choose(element, 'variantB')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(panels(element)).toEqual(['glimepiride', 'm1', 'li_gli'])
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('')
+    expect(part(element, '.simulated').classList.contains('held')).toBe(false)
+    expect(part(element, '.grid').classList.contains('switching')).toBe(false)
+  })
+
+  it('does not await a panel which was deselected while a switch awaited it', async () => {
+    declared = appWithFigure({ variants: VARIANTS })
+    const element = await shell()
+    await clickKey(element, 'li/sub:gli')
+    let open: (() => void) | null = null
+    appGate = new Promise((resolve) => {
+      open = () => {
+        resolve()
+      }
+    })
+    await choose(element, 'variantB')
+    await clickKey(element, 'li/sub:gli')
+    ;(open as unknown as () => void)()
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('')
+    expect(part(element, '.simulated').classList.contains('held')).toBe(false)
+  })
+
+  it('names no version of a panel which left the screen', async () => {
+    declared = appWithFigure()
+    const element = await shell({ selection: 'glimepiride,li_gli' })
+    for (const [id, sha] of [
+      ['glimepiride', 'd'],
+      ['li_gli', 'e'],
+    ] as const) {
+      part(element, `sbmlsim-panel[panel="${id}"]`).dispatchEvent(
+        new CustomEvent('sbmlsim-result', {
+          detail: {
+            provenance: { ...run({}).provenance, panel: id, model_sha256: sha.repeat(64) },
+          },
+          bubbles: true,
+          composed: true,
+        }),
+      )
+    }
+    await settled()
+    expect(part(element, '.simulated').textContent).toContain('eeeeeeee')
+    await clickKey(element, 'li/sub:gli')
+    expect(part(element, '.simulated').textContent).not.toContain('eeeeeeee')
+    expect(part(element, '.simulated').textContent).toContain('dddddddd')
+  })
+
+  it('starts the other page from its own panels when a reader clicks its tab', async () => {
+    declared = appWithFigure(twoPages())
+    const element = await shell()
+    await clickKey(element, 'li/sub:gli')
+    const heard: string[][] = []
+    element.addEventListener('sbmlsim-selection', (event) => {
+      heard.push((event as CustomEvent<{ panels: string[] }>).detail.panels)
+    })
+    tabs(element)[1]?.click()
+    await settled()
+    expect(element.getAttribute('selection')).toBeNull()
+    expect(panels(element)).toEqual(['panelB'])
+    tabs(element)[0]?.click()
+    await settled()
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
+    expect(figureOf(element)).toBeDefined()
+    expect(heard.at(-1)).toEqual(['glimepiride', 'm1'])
+  })
+
+  it('starts the page from its own panels when the page attribute is set from outside', async () => {
+    declared = appWithFigure(twoPages())
+    const element = await shell({ selection: 'li_gli' })
+    const heard: string[][] = []
+    element.addEventListener('sbmlsim-selection', (event) => {
+      heard.push((event as CustomEvent<{ panels: string[] }>).detail.panels)
+    })
+    element.setAttribute('page', 'pageB')
+    await settled()
+    element.setAttribute('page', 'pageA')
+    await settled()
+    expect(element.getAttribute('selection')).toBeNull()
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
+    expect(heard.at(-1)).toEqual(['glimepiride', 'm1'])
+  })
+
+  it('draws the figure on the page which shows it and on no other', async () => {
+    declared = appWithFigure(twoPages())
+    const element = await shell({ page: 'pageB' })
+    expect(element.shadowRoot.querySelector('sbmlsim-figure')).toBeNull()
+    expect(panels(element)).toEqual(['panelB'])
+    element.setAttribute('page', 'pageA')
+    await settled()
+    expect(figureOf(element)).not.toBeNull()
+    element.setAttribute('page', 'pageB')
+    await settled()
+    expect(element.shadowRoot.querySelector('sbmlsim-figure')).toBeNull()
+  })
+
+  it('places the figure under the tag register was given', async () => {
+    expect(register('sbmlsim-panel', 'sbmlsim-app', 'x-body')).toBe(true)
+    try {
+      declared = appWithFigure()
+      const element = await shell()
+      expect(element.shadowRoot.querySelector('x-body')).not.toBeNull()
+    } finally {
+      register('sbmlsim-panel', 'sbmlsim-app', 'sbmlsim-figure')
+    }
   })
 })
