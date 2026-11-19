@@ -930,15 +930,16 @@ watch(
     resetShared()
     // the clicks on the figure belong to the page they were made on, so whatever changed the
     // page (a tab, the `page` attribute of a history entry, a shared address) starts the new
-    // page from the panels it declares as shown; a `selection` which names panels of the new
-    // page alone was set for it and stays
+    // page from the panels it declares as shown; a `selection` which was set for the new page
+    // stays: an empty one is nothing shown, and one which names at least one panel of the page
+    // stays whole, since the page drops an id it does not list (a renamed panel must not throw
+    // a shared address away)
     const page = current.value
     const given = props.selection
     const own =
       given !== undefined &&
-      given !== '' &&
       page !== null &&
-      given.split(',').every((one) => page.panels.includes(one))
+      (given === '' || given.split(',').some((one) => page.panels.includes(one)))
     if (!own && given !== undefined) {
       host?.removeAttribute('selection')
     }

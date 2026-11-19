@@ -1760,6 +1760,57 @@ describe('the figure of an app', () => {
     expect(part(element, '.simulated').textContent).toContain('dddddddd')
   })
 
+  it('keeps an empty selection at load as nothing shown and the listed ids of a stale one', async () => {
+    declared = appWithFigure(twoPages())
+    const empty = await shell({ selection: '' })
+    expect(panels(empty)).toEqual([])
+    expect(empty.getAttribute('selection')).toBe('')
+    const stale = await shell({ selection: 'li_gli,ghost' })
+    expect(panels(stale)).toEqual(['li_gli'])
+    expect(stale.getAttribute('selection')).toBe('li_gli,ghost')
+  })
+
+  it('keeps a selection through the page attribute when it names panels of the page', async () => {
+    declared = appWithFigure(twoPages())
+    const element = await shell({ page: 'pageB' })
+    element.setAttribute('selection', 'li_gli,ghost')
+    element.setAttribute('page', 'pageA')
+    await settled()
+    expect(panels(element)).toEqual(['li_gli'])
+    element.setAttribute('selection', 'ghost')
+    element.setAttribute('page', 'pageB')
+    await settled()
+    element.setAttribute('page', 'pageA')
+    await settled()
+    expect(element.getAttribute('selection')).toBeNull()
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
+  })
+
+  it('stops awaiting a panel which is deselected after the switch adopted the variant', async () => {
+    declared = appWithFigure({ variants: VARIANTS })
+    const element = await shell()
+    await clickKey(element, 'li/sub:gli')
+    hang = []
+    await choose(element, 'variantB')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await settled()
+    // the panels of the variant answer, except the one which stays out
+    for (const id of ['glimepiride', 'm1']) {
+      part(element, `sbmlsim-panel[panel="${id}"]`).dispatchEvent(
+        new CustomEvent('sbmlsim-result', {
+          detail: { provenance: { ...run({}).provenance, panel: id } },
+          bubbles: true,
+          composed: true,
+        }),
+      )
+    }
+    await settled()
+    expect(part(element, '.simulated').classList.contains('held')).toBe(true)
+    await clickKey(element, 'li/sub:gli')
+    expect(part(element, '.simulated').classList.contains('held')).toBe(false)
+    expect(part(element, '.variant .caption').textContent.trim()).toBe('')
+  })
+
   it('starts the other page from its own panels when a reader clicks its tab', async () => {
     declared = appWithFigure(twoPages())
     const element = await shell()
