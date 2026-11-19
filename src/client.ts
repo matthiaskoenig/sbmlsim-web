@@ -466,7 +466,7 @@ function isHeads(value: unknown): boolean {
  *
  * @param value the `figure` of the body, absent in a payload before the figure
  * @returns whether it is absent or `null` (no figure), or a figure with its
- *   svg, title, credit and the lists of panel ids a key path opens
+ *   non-blank svg, a non-blank title, a credit and the lists of panel ids a key path opens
  */
 function isFigure(value: unknown): boolean {
   return (
@@ -476,6 +476,7 @@ function isFigure(value: unknown): boolean {
       typeof value.svg === 'string' &&
       value.svg.trim() !== '' &&
       typeof value.title === 'string' &&
+      value.title.trim() !== '' &&
       typeof value.credit === 'string' &&
       isObject(value.panels) &&
       Object.values(value.panels).every(

@@ -573,7 +573,9 @@ export interface AppPage {
  * The figure of an app, the drawing of its model a reader clicks to open panels.
  *
  * The `svg` is trusted markup of the model package which assembles the app, the same origin as
- * the declarations of the panels, and is not sanitized.
+ * the declarations of the panels, and is not sanitized. Both ends refuse a blank drawing and a
+ * blank title: a figure which draws nothing cannot be told from a broken render. The client
+ * reads them as the service does, which was tightened in sbmlsim to match.
  */
 export interface AppFigure {
   /** The drawing as svg markup. */

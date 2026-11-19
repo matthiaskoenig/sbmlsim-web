@@ -79,7 +79,7 @@ function serve(answer: (url: string, init: RequestInit | undefined) => Promise<R
 /** Get the one item of a list, which the test knows has one. */
 function only<T>(items: T[]): T {
   const [item] = items
-  if (item === undefined) throw new Error('no item')
+  if (item === undefined) throw new Error('the list has no item, the test expects one')
   return item
 }
 
@@ -264,6 +264,8 @@ describe('the client of an endpoint', () => {
       { ...app, figure: { ...figure, svg: '' } },
       { ...app, figure: { ...figure, svg: '  \n' } },
       { ...app, figure: { ...figure, title: undefined } },
+      { ...app, figure: { ...figure, title: '' } },
+      { ...app, figure: { ...figure, title: ' \t\n' } },
       { ...app, figure: { ...figure, credit: undefined } },
       { ...app, figure: { ...figure, panels: { li: [1] } } },
       { ...app, figure: { ...figure, svg: 1 } },
