@@ -279,6 +279,10 @@ const answers = ref<Record<string, Provenance>>({})
 const logAll = ref<boolean | undefined>(undefined)
 /** The draws the reader set for every plot of the page, `undefined` while the attribute `draws` rules. */
 const drawsAll = ref<number | undefined>(undefined)
+/** The scale of the y axis of every panel, by the id of the panel, as the panels announce it. */
+const scales = ref<Record<string, boolean>>({})
+/** The draws the latest run of every panel was asked for, by the id of the panel. */
+const used = ref<Record<string, number>>({})
 /** Whether the information tab is shown in place of the panels of the page. */
 const information = ref(false)
 /** What the live region says, the page which was switched to; empty until a reader switches. */
@@ -375,13 +379,12 @@ const levels = computed(() => cardLevels(sharedKnobs.value.length, scenarios.val
 
 /**
  * The columns of the grid of the card at every level, as custom properties: the
- * columns of the knobs and, where the Reset has one of its own, `auto`.
+ * columns of the knobs.
  */
 const levelStyle = computed<Record<string, string>>(() =>
   Object.fromEntries(
     levels.value.flatMap((level, index): [string, string][] => [
       [`--_columns-${String(index + 1)}`, String(level.columns)],
-      ...(level.reset ? [[`--_reset-${String(index + 1)}`, 'auto'] as [string, string]] : []),
     ]),
   ),
 )
@@ -436,13 +439,6 @@ function pickScenario(id: string): void {
     ...Object.entries(picked.values).filter(([knob]) => knobs.has(knob)),
   ])
 }
-
-/** Whether every shared knob of the page is at its declared default, which a reset changes nothing of. */
-const sharedAtDefaults = computed<boolean>(() =>
-  sharedKnobs.value.every(
-    (one) => (ownValue(shared.value, one.knob.id) ?? one.knob.default) === one.knob.default,
-  ),
-)
 
 /** The heads of the panels of the page by the id of the panel, as the service states them in the app. */
 const heads = computed<Map<string, PanelSummary>>(() => {
@@ -621,19 +617,43 @@ const logOfPanels = computed<'true' | 'false' | undefined>(() =>
   logAll.value === undefined ? undefined : logAll.value ? 'true' : 'false',
 )
 
-/** Whether the card has nothing to put back: no scale and no draws of the page, every shared knob at its default. */
-const settingsAtDefaults = computed<boolean>(
-  () => logAll.value === undefined && drawsAll.value === undefined && sharedAtDefaults.value,
-)
+/**
+ * The scale of the plots of the page: `all` where every placed panel which announced its axis is
+ * logarithmic, `none` where none is, `mixed` where they differ, so the switch shows the state
+ * the plots are in and not the one the reader last asked for.
+ */
+const logState = computed<'all' | 'none' | 'mixed'>(() => {
+  const known = placed.value.flatMap((id) =>
+    id in scales.value ? [scales.value[id] === true] : [],
+  )
+  if (known.length === 0 || known.every((one) => !one)) {
+    return 'none'
+  }
+  return known.every((one) => one) ? 'all' : 'mixed'
+})
+
+/** The draws of the plots which are shown: the reader's number, the attribute, else the run's. */
+const drawsShown = computed<number | ''>(() => {
+  const ran = placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : []))
+  return drawsOfPanels.value ?? (ran.length > 0 ? Math.max(...ran) : '')
+})
 
 /**
- * Take the logarithmic switch of the page, which sets the axis of every plot at once.
+ * Take the logarithmic switch of the page, which sets the axis of every plot at once: it turns
+ * them all off when they all are logarithmic and on otherwise. Where the panels differ, because
+ * a panel of two scales keeps its own axis, a second click turns them off.
  *
  * @param event the `change` event of the checkbox
  */
 function onLogAll(event: Event): void {
-  if (event.target instanceof HTMLInputElement) {
-    logAll.value = event.target.checked
+  if (!(event.target instanceof HTMLInputElement)) {
+    return
+  }
+  const on = logState.value === 'mixed' ? logAll.value !== true : logState.value !== 'all'
+  // the attribute is what a panel placed later and a reset start from
+  logAll.value = on
+  for (const one of shownPanels()) {
+    ;(one as HTMLElement & { setLog?: (on: boolean) => void }).setLog?.(on)
   }
 }
 
@@ -649,7 +669,7 @@ function onDrawsAll(event: Event): void {
   const asked = event.target.value.trim() === '' ? Number.NaN : Number(event.target.value)
   drawsAll.value = Number.isFinite(asked) ? Math.max(0, Math.trunc(asked)) : undefined
   // the field shows what rules, which is the attribute for a text which was no number
-  event.target.value = String(drawsOfPanels.value ?? '')
+  event.target.value = String(drawsShown.value)
 }
 
 /**
@@ -673,7 +693,8 @@ async function resetPage(): Promise<void> {
  */
 const runLine = computed<string>(() => {
   const latest = Object.values(answers.value).reduce<Provenance | null>(
-    (last, one) => (last === null || one.created > last.created ? one : last),
+    (last, one) =>
+      last === null || Date.parse(one.created) > Date.parse(last.created) ? one : last,
     null,
   )
   if (latest === null) {
@@ -928,7 +949,24 @@ function collect(event: Event): void {
     // keyed by the panel the shell placed, which a failure of it is dropped by
     const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
     answers.value = { ...answers.value, [id ?? provenance.panel]: provenance }
+    const draws = (event as CustomEvent<{ draws?: number }>).detail.draws
+    if (draws !== undefined) {
+      used.value = { ...used.value, [id ?? provenance.panel]: draws }
+    }
     settle(event)
+  }
+}
+
+/**
+ * Take the scale of the y axis a panel announced.
+ *
+ * @param event the `sbmlsim-scale` event of a panel
+ */
+function collectScale(event: Event): void {
+  const log = (event as CustomEvent<{ log?: boolean }>).detail.log
+  const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
+  if (id !== null && typeof log === 'boolean') {
+    scales.value = { ...scales.value, [id]: log }
   }
 }
 
@@ -1012,16 +1050,31 @@ function pickPage(id: string): void {
   show(id)
 }
 
-watch(information, (shownNow) => {
-  for (const one of shownPanels()) {
-    const panel = one as HTMLElement & { freeze?: () => void; activate?: () => void }
+/** The panels the information view froze, which it starts again where they are still on screen. */
+let frozenByInformation: (HTMLElement & { activate?: () => void })[] = []
+
+// after the patch, so a switch of the page from the information finds the panels of the old page
+// gone and starts none of them: only a panel which is still connected was frozen by the view and
+// is still the one shown
+watch(
+  information,
+  (shownNow) => {
     if (shownNow) {
-      panel.freeze?.()
-    } else {
-      panel.activate?.()
+      frozenByInformation = shownPanels()
+      for (const one of frozenByInformation) {
+        ;(one as HTMLElement & { freeze?: () => void }).freeze?.()
+      }
+      return
     }
-  }
-})
+    for (const one of frozenByInformation) {
+      if (one.isConnected) {
+        one.activate?.()
+      }
+    }
+    frozenByInformation = []
+  },
+  { flush: 'post' },
+)
 
 /**
  * The panels a page shows before any click: the ones it declares as shown, in the order it lists
@@ -1040,7 +1093,11 @@ watch(
     freezeShown()
     information.value = false
     answers.value = {}
+    scales.value = {}
+    used.value = {}
     awaiting.value = new Set()
+    logAll.value = undefined
+    drawsAll.value = undefined
     resetShared()
     // the clicks on the figure belong to the page they were made on, so whatever changed the
     // page (a tab, the `page` attribute of a history entry, a shared address) starts the new
@@ -1076,6 +1133,12 @@ watch(placed, (now) => {
   const on = new Set(now)
   if ([...awaiting.value].some((id) => !on.has(id))) {
     awaiting.value = new Set([...awaiting.value].filter((id) => on.has(id)))
+  }
+  if (Object.keys(scales.value).some((id) => !on.has(id))) {
+    scales.value = Object.fromEntries(Object.entries(scales.value).filter(([id]) => on.has(id)))
+  }
+  if (Object.keys(used.value).some((id) => !on.has(id))) {
+    used.value = Object.fromEntries(Object.entries(used.value).filter(([id]) => on.has(id)))
   }
   if (Object.keys(answers.value).some((id) => !on.has(id))) {
     answers.value = Object.fromEntries(Object.entries(answers.value).filter(([id]) => on.has(id)))
@@ -1114,8 +1177,8 @@ onBeforeUnmount(() => {
         <component :is="titleTag" class="title">{{ app.title }}</component>
         <p v-if="app.subtitle !== ''" class="subtitle">{{ app.subtitle }}</p>
       </header>
-      <div v-if="app.pages.length > 1 || variants.length > 0" class="bar">
-        <nav v-if="app.pages.length > 1" class="nav" part="nav" aria-label="Pages">
+      <div class="bar">
+        <nav class="nav" part="nav" aria-label="Pages">
           <button
             v-for="one in app.pages"
             :key="one.id"
@@ -1189,12 +1252,6 @@ onBeforeUnmount(() => {
             @input="moveShared(one.knob, $event)"
             @change="moveShared(one.knob, $event)"
           />
-          <!-- level with the first line of controls, the selects, and never below a slider -->
-          <div class="knobs-reset">
-            <div class="control-line">
-              <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
-            </div>
-          </div>
           <!-- hidden, so a screen reader hears the text once, as the description of its
                control, and not again after the controls; aria-describedby reads it -->
           <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
@@ -1214,25 +1271,34 @@ onBeforeUnmount(() => {
         part="information"
         :aria-label="INFORMATION_LABEL"
       >
-        <component :is="`h${String(panelLevel)}`" class="information-title">{{
-          app.title
-        }}</component>
-        <p v-if="app.subtitle !== ''" class="information-subtitle">{{ app.subtitle }}</p>
-        <p v-if="app.citation !== ''" class="citation">{{ app.citation }}</p>
-        <p v-if="doiLink !== null" class="facts">
+        <component
+          :is="`h${String(panelLevel)}`"
+          class="information-title"
+          part="information-title"
+          >{{ app.title }}</component
+        >
+        <p v-if="app.subtitle !== ''" class="information-subtitle" part="information-subtitle">
+          {{ app.subtitle }}
+        </p>
+        <p v-if="app.citation !== ''" class="citation" part="information-citation">
+          {{ app.citation }}
+        </p>
+        <p v-if="doiLink !== null" class="facts" part="information-doi">
           DOI <a :href="doiLink" target="_blank" rel="noopener">{{ doiText }}</a>
         </p>
-        <p v-if="app.licenses.length > 0" class="facts">License {{ app.licenses.join(', ') }}</p>
+        <p v-if="app.licenses.length > 0" class="facts" part="information-licenses">
+          License {{ app.licenses.join(', ') }}
+        </p>
         <template v-if="variants.length > 0">
           <p class="facts">Variants</p>
-          <ul class="information-variants">
+          <ul class="information-variants" part="information-variants">
             <li v-for="one in variants" :key="one.id">
               {{ one.label }}<template v-if="one.id === shownVariant"> (shown)</template>
             </li>
           </ul>
         </template>
         <p v-if="simulatedShown !== ''" class="simulated">{{ simulatedShown }}</p>
-        <p v-if="runLine !== ''" class="run">{{ runLine }}</p>
+        <p v-if="runLine !== ''" class="information-run" part="information-run">{{ runLine }}</p>
       </section>
       <div v-show="!information" class="stage" :class="{ figured: figure !== null }">
         <component
@@ -1247,7 +1313,12 @@ onBeforeUnmount(() => {
         <div class="main">
           <div class="settings" part="settings" role="group" aria-label="Settings of every plot">
             <label class="setting" part="settings-log">
-              <input type="checkbox" :checked="logAll === true" @change="onLogAll($event)" />
+              <input
+                type="checkbox"
+                :checked="logState === 'all'"
+                :indeterminate.prop="logState === 'mixed'"
+                @change="onLogAll($event)"
+              />
               <span>logarithmic y</span>
             </label>
             <label class="setting" part="settings-draws">
@@ -1258,13 +1329,15 @@ onBeforeUnmount(() => {
                 step="1"
                 inputmode="numeric"
                 class="draws"
-                :value="drawsOfPanels ?? ''"
+                part="settings-draws-input"
+                title="The draws of the uncertainty of every plot, 0 is no band; empty goes back to the attribute"
+                :value="drawsShown"
                 :disabled="switching"
                 @change="onDrawsAll($event)"
               />
             </label>
             <span class="setting-reset" part="settings-reset">
-              <ResetButton :disabled="switching" :idle="settingsAtDefaults" @reset="resetPage()" />
+              <ResetButton :disabled="switching" :idle="false" @reset="resetPage()" />
             </span>
             <p class="run" part="settings-run" :class="{ held: simulatedHeld }">{{ runLine }}</p>
           </div>
@@ -1280,6 +1353,7 @@ onBeforeUnmount(() => {
             :aria-busy="switchCaption !== '' ? 'true' : 'false'"
             :aria-label="current.title"
             @sbmlsim-result="collect"
+            @sbmlsim-scale="collectScale"
             @sbmlsim-error="dropFailed"
           >
             <div v-for="one in placed" :key="one" class="cell">
@@ -1321,7 +1395,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <p class="live" aria-live="polite">{{ announced }}</p>
-      <footer class="footer">
+      <footer v-show="!information" class="footer" part="footer">
         <p v-if="app.citation !== ''" class="citation">{{ app.citation }}</p>
         <p class="facts">
           <template v-if="doiLink !== null">
@@ -1623,17 +1697,6 @@ onBeforeUnmount(() => {
   grid-column-start: 1;
 }
 
-/* where the card holds two columns, the Reset takes the second column of the
- * line of the examples, beside their select and level with it, on a line which
- * has the room and uses it otherwise for nothing; in one column it follows the
- * knobs on a line of its own */
-@container knobs (width >= 416px) {
-  .knobs-grid > .scenario ~ .knobs-reset {
-    grid-row: 1 / span 2;
-    grid-column: 2;
-  }
-}
-
 /*
  * The rows a card spans are reserved before its panel has read anything, so a
  * card does not grow under the reader when the declaration and the first run
@@ -1881,6 +1944,10 @@ onBeforeUnmount(() => {
   margin: 0 0 0 auto;
   color: var(--_fg-soft);
   font-variant-numeric: tabular-nums;
+}
+
+.information-run {
+  color: var(--_fg-soft);
 }
 
 .run.held {

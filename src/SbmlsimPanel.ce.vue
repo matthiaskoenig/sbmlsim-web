@@ -1953,11 +1953,38 @@ function firstGridded(declared: PanelDeclaration): string | null {
  * @returns whether the axis starts logarithmic
  */
 function initialLog(declared: PanelDeclaration): boolean {
+  return askedLog(declared, props.log === undefined ? undefined : props.log === 'true')
+}
+
+/**
+ * Get the axis a panel takes when its host asks for one.
+ *
+ * One axis for curves of two scales cannot be asked for, so only a panel whose curves share one
+ * scale follows the host; every other panel keeps the axis its declaration gives it.
+ *
+ * @param declared the declaration of the panel
+ * @param asked the scale the host asks for, `undefined` for none
+ * @returns whether the axis is logarithmic
+ */
+function askedLog(declared: PanelDeclaration, asked: boolean | undefined): boolean {
   const curves = curvesOf(declared)
   const own = curves.length > 0 && curves.every((one) => one.scale === 'log')
-  // one axis for curves of two scales cannot be asked for: only a panel of one scale follows the host
   const alike = curves.length > 0 && curves.every((one) => one.scale === curves[0]?.scale)
-  return props.log !== undefined && alike ? props.log === 'true' : own
+  return asked !== undefined && alike ? asked : own
+}
+
+/**
+ * Set the scale of the y axis, as a click on the switch of the panel does, for a host which sets
+ * the axis of every panel at once (the page switch of an app). It differs from the attribute
+ * `log` in that it also moves a panel whose own switch was flipped since the attribute was set.
+ *
+ * @param on whether the axis is logarithmic
+ */
+function setLog(on: boolean): void {
+  const declared = declaration.value
+  if (declared !== null) {
+    logY.value = askedLog(declared, on)
+  }
 }
 
 /**
@@ -2163,6 +2190,7 @@ async function simulate(gridId: string | null): Promise<void> {
         detail: {
           panel: props.panel,
           provenance: answer.provenance,
+          draws: body.draws ?? 0,
           spec_hash: answer.spec_hash,
           values: sent,
         },
@@ -3047,7 +3075,29 @@ watch(
   { flush: 'post' },
 )
 
-defineExpose({ activate, freeze, reset, result, drawn })
+/*
+ * Announce the scale of the y axis whenever it is set, so a host which draws a switch of every
+ * panel (the shell of an app) shows the state the panels are in: the declared scale, a flip of
+ * the own switch of the panel, the scale a host asked for.
+ */
+watch(
+  [logY, declaration],
+  () => {
+    if (declaration.value === null) {
+      return
+    }
+    host?.dispatchEvent(
+      new CustomEvent('sbmlsim-scale', {
+        detail: { panel: props.panel, log: logY.value },
+        bubbles: true,
+        composed: true,
+      }),
+    )
+  },
+  { flush: 'post' },
+)
+
+defineExpose({ activate, freeze, reset, result, drawn, setLog })
 </script>
 
 <template>
