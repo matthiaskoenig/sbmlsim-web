@@ -11,7 +11,8 @@
           "renal_plasma",
           "renal_urine"
         ],
-        "scenarios": []
+        "scenarios": [],
+        "size": "regular"
       },
       {
         "id": "dose",
@@ -20,7 +21,8 @@
           "dose_plasma",
           "dose_urine"
         ],
-        "scenarios": []
+        "scenarios": [],
+        "size": "regular"
       },
       {
         "id": "patient",
@@ -54,7 +56,18 @@
               "dose": 12.5
             }
           }
-        ]
+        ],
+        "size": "regular"
+      },
+      {
+        "id": "dosing",
+        "title": "Dosing protocol",
+        "panels": [
+          "dosing_plasma",
+          "dosing_urine"
+        ],
+        "scenarios": [],
+        "size": "regular"
       }
     ],
     "variants": [],
@@ -294,6 +307,97 @@
             }
           ]
         }
+      ],
+      "dosing": [
+        {
+          "knob": {
+            "id": "dose",
+            "label": "dose",
+            "target": "PODOSE_hctz",
+            "unit": "mg",
+            "kind": "range",
+            "min": 12.5,
+            "max": 50,
+            "steps": 4,
+            "choices": [],
+            "default": 25
+          },
+          "panels": [
+            {
+              "id": "dosing_plasma",
+              "title": "Plasma concentration of repeated doses"
+            },
+            {
+              "id": "dosing_urine",
+              "title": "Urinary excretion of repeated doses"
+            }
+          ]
+        },
+        {
+          "knob": {
+            "id": "interval",
+            "label": "dosing",
+            "target": null,
+            "unit": "hr",
+            "kind": "choice",
+            "min": null,
+            "max": null,
+            "steps": 5,
+            "choices": [
+              {
+                "label": "single dose",
+                "value": 0
+              },
+              {
+                "label": "once daily",
+                "value": 24
+              },
+              {
+                "label": "twice daily",
+                "value": 12
+              },
+              {
+                "label": "three times daily",
+                "value": 8
+              }
+            ],
+            "default": 24
+          },
+          "panels": [
+            {
+              "id": "dosing_plasma",
+              "title": "Plasma concentration of repeated doses"
+            },
+            {
+              "id": "dosing_urine",
+              "title": "Urinary excretion of repeated doses"
+            }
+          ]
+        },
+        {
+          "knob": {
+            "id": "days",
+            "label": "days of dosing",
+            "target": null,
+            "unit": "day",
+            "kind": "range",
+            "min": 1,
+            "max": 3,
+            "steps": 3,
+            "choices": [],
+            "default": 3
+          },
+          "panels": [
+            {
+              "id": "dosing_plasma",
+              "title": "Plasma concentration of repeated doses"
+            },
+            {
+              "id": "dosing_urine",
+              "title": "Urinary excretion of repeated doses"
+            }
+          ]
+        }
       ]
     },
     "heads": {
@@ -331,6 +435,18 @@
           "id": "patient_urine",
           "title": "Urinary excretion of a patient",
           "subtitle": "the cumulative amount over the creatinine clearance of a patient"
+        }
+      ],
+      "dosing": [
+        {
+          "id": "dosing_plasma",
+          "title": "Plasma concentration of repeated doses",
+          "subtitle": "hydrochlorothiazide in plasma"
+        },
+        {
+          "id": "dosing_urine",
+          "title": "Urinary excretion of repeated doses",
+          "subtitle": "the cumulative amount of hydrochlorothiazide in the urine"
         }
       ]
     },
@@ -441,7 +557,9 @@
         "PODOSE_hctz": 0,
         "BW": 75
       },
-      "derived": {}
+      "derived": {},
+      "dosing": [],
+      "uncertainty": null
     },
     "limits": {
       "end": 10000,
@@ -483,7 +601,7 @@
   },
   "run": {
     "contract": "panel/1",
-    "spec_hash": "949befcb868a266d4f7478ac4624ba46a68b339de61611197fa07b39d0ffb5ac",
+    "spec_hash": "6bd552c8ceb02c6f9b62b547a4c8e3485a743caa9c1f1668fce3cfdde2baf556",
     "x": [
       0,
       28.8,
@@ -538,6 +656,7 @@
       "ok": true,
       "points": 3,
       "failed": []
-    }
+    },
+    "uncertainty": null
   }
 }
