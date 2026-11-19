@@ -232,41 +232,29 @@ onMounted(decorate)
 }
 
 /*
- * A path which is on screen is a crisp outline in the accent, of a kind the
- * hover never is: the stroke of the shapes of the element, a constant width on
- * the screen whatever the scale of the drawing. A control of the same element
- * which is not on screen keeps its own look.
+ * A path which is on screen is a halo in the accent around the element as a
+ * whole, two shadows so it reads at normal zoom, where the hover is a single
+ * soft neutral one: the two differ in colour, which is what tells the organ on
+ * screen from the one under the pointer. The mark must never depend on the
+ * kinds of shape children a group happens to contain. A `data-k` group is a
+ * label, an icon, a box and every arrow inside it, and anything applied per
+ * child, a stroke for one, repaints the internals of the drawing, so it stays
+ * a filter of the element, which leaves every stroke and fill as the model
+ * package drew it.
  */
-.drawing .k-marked:is(path, rect, circle, ellipse, polygon, polyline),
-.drawing
-  .k-marked
-  :is(path, rect, circle, ellipse, polygon, polyline):not(
-    .k-live:not(.k-marked),
-    .k-live:not(.k-marked) *
-  ) {
-  stroke: var(--_accent);
-  stroke-width: 3px;
-  vector-effect: non-scaling-stroke;
+.drawing .k-marked,
+.drawing .k-marked:hover {
+  filter: drop-shadow(0 0 2px var(--_accent)) drop-shadow(0 0 2px var(--_accent));
 }
 
-/* a filter is dropped where the colours are forced, so the mark and the hover are lines there */
+/* a filter is dropped where the colours are forced, so the mark and the hover are outlines there */
 @media (forced-colors: active) {
   .drawing .k-live:hover {
     outline: 1px dashed CanvasText;
   }
 
-  .drawing .k-marked:is(path, rect, circle, ellipse, polygon, polyline),
-  .drawing
-    .k-marked
-    :is(path, rect, circle, ellipse, polygon, polyline):not(
-      .k-live:not(.k-marked),
-      .k-live:not(.k-marked) *
-    ) {
-    stroke: Highlight;
-    stroke-width: 4px;
-  }
-
-  .drawing .k-marked {
+  .drawing .k-marked,
+  .drawing .k-marked:hover {
     outline: 3px solid Highlight;
     outline-offset: 1px;
   }

@@ -126,11 +126,11 @@ The drawing of a model, which a reader clicks to choose what the app shows: an o
 
 ### Properties
 
-| property | type                     | what it is                                                                                                                                                                  |
-| -------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `figure` | `AppFigure \| null`      | the figure of the app (`svg`, `title`, `credit`, `panels`); `null` draws nothing                                                                                            |
-| `marked` | `string[]`               | the key paths whose readouts are on screen, drawn as a crisp outline in the accent so the figure shows the state of the dashboard; a path which opens nothing is not marked |
-| `labels` | `Record<string, string>` | the names of the key paths, the accessible names of the controls (`aria-label`); the key path itself where there is none                                                    |
+| property | type                     | what it is                                                                                                                                                                      |
+| -------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `figure` | `AppFigure \| null`      | the figure of the app (`svg`, `title`, `credit`, `panels`); `null` draws nothing                                                                                                |
+| `marked` | `string[]`               | the key paths whose readouts are on screen, drawn as an accent halo around the element so the figure shows the state of the dashboard; a path which opens nothing is not marked |
+| `labels` | `Record<string, string>` | the names of the key paths, the accessible names of the controls (`aria-label`); the key path itself where there is none                                                        |
 
 A key path is the `data-k` attributes of an element and of its ancestors joined with `/` from the outside in, `li` or `li/sub:gli`; a `data-k` which contains a slash is therefore ambiguous. `figure.panels` maps a path to the panels it opens, and a path with an empty list is a decoration. A click reports the longest path of the clicked element which opens a panel, so a click on a decoration inside an organ reports the organ, and a click on an element with no such path reports nothing. The elements which open a panel are controls (`role="button"`, focusable, Enter and Space, `aria-pressed` for the marked state) and the nesting of them is deliberate, at most two deep: a chip inside an organ is its own control. The element draws what it is told and does not decide what a click does, so a click on a marked path is reported like any other.
 
