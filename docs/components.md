@@ -1,6 +1,6 @@
 # Components
 
-The package registers two custom elements when it is imported: `<sbmlsim-panel>`, one panel of a model, and `<sbmlsim-app>`, the app of a model, which places panels itself. Both have a shadow root, so the styles of the page cannot reach into them and theirs cannot leak into the page; the `--sbmlsim-*` tokens are the one hook from outside ([Embedding](embedding.md#theming)).
+The package registers three custom elements when it is imported: `<sbmlsim-panel>`, one panel of a model, `<sbmlsim-app>`, the app of a model, which places panels itself, and `<sbmlsim-figure>`, the drawing of a model as a control. All have a shadow root, so the styles of the page cannot reach into them and theirs cannot leak into the page; the `--sbmlsim-*` tokens are the one hook from outside ([Embedding](embedding.md#theming)).
 
 ## `<sbmlsim-panel>`
 
@@ -116,6 +116,36 @@ addEventListener('popstate', () => app.setAttribute('page', location.hash.slice(
 - **It follows the variant.** A switch of the variant reads the app again in it and passes it to every panel as its `variant`, holding the figures of the variant before, dimmed, until the new ones are drawn.
 - **A failure leaves one line**, in the voice of the panel, and no navigation, grid or footer.
 
+## `<sbmlsim-figure>`
+
+The drawing of a model, which a reader clicks to choose what the app shows: an organ of a PBPK model opens the timecourse of that organ. The drawing is the `svg` of the figure of the app declaration, inserted as markup. It is trusted markup of the model package which assembles the app, the same origin as the declarations and the model, and it is not sanitized.
+
+```html
+<sbmlsim-figure id="figure"></sbmlsim-figure>
+```
+
+### Properties
+
+| property | type                     | what it is                                                                                                                                                                  |
+| -------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `figure` | `AppFigure \| null`      | the figure of the app (`svg`, `title`, `credit`, `panels`); `null` draws nothing                                                                                            |
+| `marked` | `string[]`               | the key paths whose readouts are on screen, drawn as a crisp outline in the accent so the figure shows the state of the dashboard; a path which opens nothing is not marked |
+| `labels` | `Record<string, string>` | the names of the key paths, the accessible names of the controls (`aria-label`); the key path itself where there is none                                                    |
+
+A key path is the `data-k` attributes of an element and of its ancestors joined with `/` from the outside in, `li` or `li/sub:gli`; a `data-k` which contains a slash is therefore ambiguous. `figure.panels` maps a path to the panels it opens, and a path with an empty list is a decoration. A click reports the longest path of the clicked element which opens a panel, so a click on a decoration inside an organ reports the organ, and a click on an element with no such path reports nothing. The elements which open a panel are controls (`role="button"`, focusable, Enter and Space, `aria-pressed` for the marked state) and the nesting of them is deliberate, at most two deep: a chip inside an organ is its own control. The element draws what it is told and does not decide what a click does, so a click on a marked path is reported like any other.
+
+### Events
+
+| event                   | `detail`  | when                                                                 |
+| ----------------------- | --------- | -------------------------------------------------------------------- |
+| `sbmlsim-figure-select` | `{ key }` | a reader clicked or pressed a control; `key` is its path in `panels` |
+
+It bubbles and is composed.
+
+### Parts
+
+`figure` (the whole figure), `drawing` (the svg).
+
 ## Failure kinds
 
 The `kind` of `sbmlsim-error` is a short machine string, and the message is a fixed line per kind (`FAILURE_MESSAGES`), so nothing a server, a browser or a stack trace writes reaches the page:
@@ -136,16 +166,16 @@ A request which was stopped (`aborted`), superseded by a newer one or stopped by
 
 The module, and the global `sbmlsimWeb` of the IIFE bundle, export:
 
-| export                                                                                           | what it is                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register(tagName?, appTagName?)`                                                                | registers the elements under other tags (`sbmlsim-panel` and `sbmlsim-app` without); the shells place their panels under `tagName`; answers whether it registered anything |
-| `registerEndpoint(endpoint, fetcher)`                                                            | registers the function which answers an endpoint `local:<name>` inside the page ([Endpoints](endpoints.md#an-endpoint-inside-the-page))                                    |
-| `PANEL_TAG`, `APP_TAG`                                                                           | the default tags                                                                                                                                                           |
-| `SbmlsimPanelElement`, `SbmlsimAppElement`                                                       | the classes of the elements                                                                                                                                                |
-| `PanelClient`                                                                                    | the client of an endpoint, the one place which calls `fetch` or a registered function, with `app`, `panel`, `data`, `simulate` and `stored`                                |
-| `PanelRequestError`, `failureKind`, `FAILURE_MESSAGES`, `DEFAULT_TIMEOUT`, `LOCAL_PREFIX`        | the failures of a request, their lines, the default timeout and the prefix `local:`                                                                                        |
-| `CONTRACTS`, `checkContract`, `ContractError`                                                    | the versions of the contracts and their check                                                                                                                              |
-| `interpolate(grid, at)`                                                                          | reads a position between the points of a grid, multilinear and clamped                                                                                                     |
-| `plotSvg(spec)`, `plotGeometry(spec)`, `seriesColour`, `tableMeasure`, `canvasMeasure`, `fontOf` | the renderer of a figure as one inline SVG string and its geometry                                                                                                         |
+| export                                                                                           | what it is                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register(tagName?, appTagName?, figureTagName?)`                                                | registers the elements under other tags (`sbmlsim-panel`, `sbmlsim-app` and `sbmlsim-figure` without); the shells place their panels under `tagName`; answers whether it registered anything |
+| `registerEndpoint(endpoint, fetcher)`                                                            | registers the function which answers an endpoint `local:<name>` inside the page ([Endpoints](endpoints.md#an-endpoint-inside-the-page))                                                      |
+| `PANEL_TAG`, `APP_TAG`, `FIGURE_TAG`                                                             | the default tags                                                                                                                                                                             |
+| `SbmlsimPanelElement`, `SbmlsimAppElement`, `SbmlsimFigureElement`                               | the classes of the elements                                                                                                                                                                  |
+| `PanelClient`                                                                                    | the client of an endpoint, the one place which calls `fetch` or a registered function, with `app`, `panel`, `data`, `simulate` and `stored`                                                  |
+| `PanelRequestError`, `failureKind`, `FAILURE_MESSAGES`, `DEFAULT_TIMEOUT`, `LOCAL_PREFIX`        | the failures of a request, their lines, the default timeout and the prefix `local:`                                                                                                          |
+| `CONTRACTS`, `checkContract`, `ContractError`                                                    | the versions of the contracts and their check                                                                                                                                                |
+| `interpolate(grid, at)`                                                                          | reads a position between the points of a grid, multilinear and clamped                                                                                                                       |
+| `plotSvg(spec)`, `plotGeometry(spec)`, `seriesColour`, `tableMeasure`, `canvasMeasure`, `fontOf` | the renderer of a figure as one inline SVG string and its geometry                                                                                                                           |
 
 The types of every payload (`PanelDeclaration`, `SimulateResponse`, `AppDeclaration`, ...), `EndpointFetch` and the element types `SbmlsimPanelHTMLElement` and `SbmlsimAppHTMLElement` are exported for TypeScript.

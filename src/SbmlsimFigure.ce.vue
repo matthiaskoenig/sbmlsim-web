@@ -16,13 +16,16 @@
  * the map falls back to the group, and a click on an element without a key, or
  * one whose paths open nothing (a decoration), reports nothing. The elements
  * which open something are drawn as controls, a pointer, a focus ring and the
- * keys of a button, and the ones which open nothing are not. The paths in
+ * keys of a button, and the ones which open nothing are not. The nesting of
+ * controls is deliberate, a chip inside an organ is genuinely its own control,
+ * and at most two deep. A key path is joined with `/`, so a key which contains
+ * one is ambiguous. The paths in
  * `marked`, the readouts on screen, are drawn marked and say so as
  * `aria-pressed`, which is how the figure shows the state of the dashboard; the
  * element only draws what it is told and the app decides what a click does, so
  * a click on a marked path is reported like any other one.
  */
-import { computed, ref, useHost, watch } from 'vue'
+import { computed, onMounted, ref, useHost, watch } from 'vue'
 import type { PropType } from 'vue'
 
 import type { AppFigure } from './contract'
@@ -44,6 +47,11 @@ const props = defineProps({
   figure: { type: Object as PropType<AppFigure | null>, default: null },
   /** The key paths whose readouts are on screen, drawn marked. */
   marked: { type: Array as PropType<string[]>, default: () => [] },
+  /**
+   * The names of the key paths, which the drawing itself does not carry: the accessible name of
+   * a control, the key path where there is none.
+   */
+  labels: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
 })
 
 const host = useHost()
@@ -153,29 +161,30 @@ function decorate(): void {
     element.classList.toggle(MARKED, live && marked.has(path))
     if (live) {
       element.setAttribute('role', 'button')
+      element.setAttribute('aria-label', props.labels[path] ?? path)
       element.setAttribute('tabindex', '0')
       element.setAttribute('aria-pressed', marked.has(path) ? 'true' : 'false')
     } else {
-      for (const attribute of ['role', 'tabindex', 'aria-pressed']) {
+      for (const attribute of ['role', 'tabindex', 'aria-pressed', 'aria-label']) {
         element.removeAttribute(attribute)
       }
     }
   }
 }
 
-watch(() => [props.figure, props.marked] as const, decorate, {
-  flush: 'post',
-  immediate: true,
-  deep: true,
-})
+// shallow: the app replaces the three, and a deep watch would walk the whole svg string
+watch(() => [props.figure, props.marked, props.labels] as const, decorate, { flush: 'post' })
+
+onMounted(decorate)
 </script>
 
 <template>
-  <figure v-if="props.figure" class="figure">
+  <figure v-if="props.figure" class="figure" part="figure">
     <!-- eslint-disable vue/no-v-html -- trusted markup of the model package, see the comment above -->
     <div
       ref="drawing"
       class="drawing"
+      part="drawing"
       role="group"
       :aria-label="props.figure.title"
       @click="click"
@@ -212,8 +221,9 @@ watch(() => [props.figure, props.marked] as const, decorate, {
   cursor: pointer;
 }
 
+/* a pointer over a control is a soft glow of the text colour, a hint and no state */
 .drawing .k-live:hover {
-  filter: drop-shadow(0 0 1.5px var(--_accent));
+  filter: drop-shadow(0 0 3px var(--_fg-soft));
 }
 
 .drawing .k-live:focus-visible {
@@ -221,10 +231,45 @@ watch(() => [props.figure, props.marked] as const, decorate, {
   outline-offset: 2px;
 }
 
-/* a path which is on screen, in the accent of the page in both schemes */
-.drawing .k-marked,
-.drawing .k-marked:hover {
-  filter: drop-shadow(0 0 1.5px var(--_accent)) drop-shadow(0 0 1.5px var(--_accent));
+/*
+ * A path which is on screen is a crisp outline in the accent, of a kind the
+ * hover never is: the stroke of the shapes of the element, a constant width on
+ * the screen whatever the scale of the drawing. A control of the same element
+ * which is not on screen keeps its own look.
+ */
+.drawing .k-marked:is(path, rect, circle, ellipse, polygon, polyline),
+.drawing
+  .k-marked
+  :is(path, rect, circle, ellipse, polygon, polyline):not(
+    .k-live:not(.k-marked),
+    .k-live:not(.k-marked) *
+  ) {
+  stroke: var(--_accent);
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* a filter is dropped where the colours are forced, so the mark and the hover are lines there */
+@media (forced-colors: active) {
+  .drawing .k-live:hover {
+    outline: 1px dashed CanvasText;
+  }
+
+  .drawing .k-marked:is(path, rect, circle, ellipse, polygon, polyline),
+  .drawing
+    .k-marked
+    :is(path, rect, circle, ellipse, polygon, polyline):not(
+      .k-live:not(.k-marked),
+      .k-live:not(.k-marked) *
+    ) {
+    stroke: Highlight;
+    stroke-width: 4px;
+  }
+
+  .drawing .k-marked {
+    outline: 3px solid Highlight;
+    outline-offset: 1px;
+  }
 }
 
 .caption {

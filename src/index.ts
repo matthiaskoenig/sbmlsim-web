@@ -1,8 +1,8 @@
 /**
  * sbmlsim-web: the renderer of the interactive panels of an SBML model.
  *
- * Importing this module registers the custom elements `<sbmlsim-panel>`, `<sbmlsim-app>` and `<sbmlsim-figure>`, so a
- * page loads one script and writes one tag. The registration is a no-op where
+ * Importing this module registers the custom elements `<sbmlsim-panel>`, `<sbmlsim-app>` and
+ * `<sbmlsim-figure>`, so a page loads one script and writes one tag. The registration is a no-op where
  * the tag name is taken already, which is what a page which loads the library
  * twice does, and it does nothing at all where there is no `customElements` at
  * all, which is what node and a server side render are; `register(tagName)` is
@@ -141,6 +141,8 @@ export interface SbmlsimFigureHTMLElement extends HTMLElement {
   figure: AppFigure | null
   /** The key paths whose readouts are on screen, drawn marked. */
   marked: string[]
+  /** The names of the key paths, the accessible names of the controls; the key path without one. */
+  labels: Record<string, string>
 }
 
 /**
@@ -204,7 +206,7 @@ export const SbmlsimAppElement = elementClass<SbmlsimAppHTMLElement>(
 /**
  * The class of `<sbmlsim-figure>`, the drawing of a model as the control of its app.
  *
- * It carries the properties `figure` and `marked` and dispatches `sbmlsim-figure-select` with
+ * It carries the properties `figure`, `marked` and `labels` and dispatches `sbmlsim-figure-select` with
  * the `key` path of the element a reader clicked, where that opens a panel.
  */
 export const SbmlsimFigureElement = elementClass<SbmlsimFigureHTMLElement>(

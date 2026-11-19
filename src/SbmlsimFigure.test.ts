@@ -12,6 +12,7 @@ const SVG = `<svg viewBox="0 0 10 10">
   <g data-k="li" id="group"><rect data-k="sub:gli" id="chip"></rect><rect id="bare"></rect></g>
   <rect data-k="sub:out" id="outside"></rect>
   <rect data-k="frame" id="frame"></rect>
+  <g data-k="ki" id="kidney"><rect data-k="sub:gli" id="chip2"></rect><g data-k="deep"><rect data-k="leaf" id="leaf"></rect></g><rect data-k="mark" id="decor"></rect></g>
 </svg>`
 
 /** The figure of a test with the given map of panels. */
@@ -144,5 +145,76 @@ describe('the figure element', () => {
     element.figure = null
     await settled()
     expect(root(element).querySelector('svg')).toBeNull()
+  })
+
+  it('reports the chip inside a group whose key opens several panels', async () => {
+    const element = await figureElement({ li: ['li_a', 'li_b'], 'li/sub:gli': ['li_gli'] })
+    click(element, '#chip')
+    expect(selections).toEqual(['li/sub:gli'])
+  })
+
+  it('falls back to the group from a decoration nested in it', async () => {
+    const element = await figureElement({ ki: ['ki_all'], 'ki/mark': [] })
+    click(element, '#decor')
+    expect(selections).toEqual(['ki'])
+    expect(root(element).querySelector('#decor')?.classList.contains('k-live')).toBe(false)
+  })
+
+  it('reads a path of three levels', async () => {
+    const element = await figureElement({ 'ki/deep/leaf': ['leaf'], 'ki/deep': ['deep'] })
+    click(element, '#leaf')
+    expect(selections).toEqual(['ki/deep/leaf'])
+  })
+
+  it('tells the same child key under two groups apart', async () => {
+    const element = await figureElement({ 'li/sub:gli': ['in_li'], 'ki/sub:gli': ['in_ki'] }, [
+      'ki/sub:gli',
+    ])
+    click(element, '#chip')
+    click(element, '#chip2')
+    expect(selections).toEqual(['li/sub:gli', 'ki/sub:gli'])
+    expect([...root(element).querySelectorAll('.k-marked')].map((one) => one.id)).toEqual(['chip2'])
+  })
+
+  it('does not mark a path which opens nothing', async () => {
+    const element = await figureElement({ frame: [], li: ['li_all'] }, ['frame', 'li'])
+    expect(marked(element)).toEqual(['li'])
+  })
+
+  it('names a control by its label, and by its path without one', async () => {
+    const element = await figureElement({ li: ['li_all'], 'li/sub:gli': ['li_gli'] })
+    element.labels = { li: 'Liver' }
+    await settled()
+    expect(root(element).querySelector('#group')?.getAttribute('aria-label')).toBe('Liver')
+    expect(root(element).querySelector('#chip')?.getAttribute('aria-label')).toBe('li/sub:gli')
+    expect(root(element).querySelector('#frame')?.hasAttribute('aria-label')).toBe(false)
+  })
+
+  it('applies the marks again to a replaced drawing and to one which comes back', async () => {
+    const element = await figureElement({ li: ['li_all'] }, ['li'])
+    element.figure = {
+      ...figureOf({ li: ['li_all'] }),
+      svg: SVG.replace('id="group"', 'id="again"'),
+    }
+    await settled()
+    expect(marked(element)).toEqual(['li'])
+    expect(root(element).querySelector('#again')?.classList.contains('k-marked')).toBe(true)
+    element.figure = null
+    await settled()
+    expect(root(element).querySelector('svg')).toBeNull()
+    element.figure = figureOf({ li: ['li_all'] })
+    await settled()
+    expect(marked(element)).toEqual(['li'])
+    click(element, '#group')
+    expect(selections).toEqual(['li'])
+  })
+
+  it('draws a figure which is given before the element is in the page', async () => {
+    const element = document.createElement(FIGURE_TAG)
+    element.figure = figureOf({ li: ['li_all'] })
+    element.marked = ['li']
+    document.body.append(element)
+    await settled()
+    expect(marked(element)).toEqual(['li'])
   })
 })
