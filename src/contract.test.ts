@@ -88,6 +88,8 @@ const declaration: PanelDeclaration = {
     x_unit: 'hr',
     preinit: { paramA: 75.0 },
     derived: {},
+    dosing: [],
+    uncertainty: null,
   },
   limits: { end: 10000.0, points: 2000, knobs: 8, grid: 64, curves: 16 },
 }
@@ -123,6 +125,7 @@ const answer: SimulateResponse = {
     created: '2026-11-12T22:41:35.090689+00:00',
   },
   status: { ok: true, points: 3, failed: [] },
+  uncertainty: null,
 }
 
 const data: PanelDataResponse = {

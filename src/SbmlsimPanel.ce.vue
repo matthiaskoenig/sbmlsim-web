@@ -1957,8 +1957,10 @@ function initialLog(declared: PanelDeclaration): boolean {
  * the declaration and never for more than exist.
  */
 const requestedDraws = computed<number>(() => {
+  // a panel whose model carries no uncertainty is `null` on the service and
+  // nothing at all on one before sbmlsim 0.30
   const declared = declaration.value?.simulation.uncertainty
-  if (declared === undefined) {
+  if (declared === undefined || declared === null) {
     return 0
   }
   const wanted = props.draws

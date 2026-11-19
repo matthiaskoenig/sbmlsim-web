@@ -207,7 +207,6 @@ export interface PanelDataDeclaration {
   unit: string | null
 }
 
-/** The simulation a panel runs, the same for every point of its grid. */
 /**
  * The uncertainty of the parameters of the model of a panel, which its curves
  * carry a band of.
@@ -238,6 +237,26 @@ export interface PanelUncertainty {
   seed: number
 }
 
+/**
+ * A dosing protocol of a panel: the dose of a knob, repeated at an interval.
+ *
+ * The endpoint gives the doses, a renderer only shows what the knobs say. The
+ * first dose is the value of the knob `dose`, every further one adds it to the
+ * `target` at the multiples of the knob `interval` before the knob `duration`
+ * runs out, and an interval of 0 is a single dose.
+ */
+export interface PanelDosing {
+  /** The entity of the model the doses are added to, the target of the knob `dose`. */
+  target: string
+  /** The id of the knob of the dose. */
+  dose: string
+  /** The id of the knob of the interval between two doses, 0 for a single dose. */
+  interval: string
+  /** The id of the knob of the time the doses are given, `null` until the end of the run. */
+  duration: string | null
+}
+
+/** The simulation a panel runs, the same for every point of its grid. */
 export interface PanelSimulation {
   /** The variant of the model, `null` for the default variant of its project. */
   variant: string | null
@@ -256,10 +275,15 @@ export interface PanelSimulation {
    */
   derived: Record<string, string>
   /**
-   * The uncertainty of its parameters its curves carry a band of; absent, as
-   * from a service before sbmlsim 0.30, for a panel which carries none.
+   * The uncertainty of its parameters its curves carry a band of: `null` for a
+   * panel whose model carries none, absent from a service before sbmlsim 0.30.
    */
-  uncertainty?: PanelUncertainty
+  uncertainty?: PanelUncertainty | null
+  /**
+   * The dosing protocols of the panel, which the endpoint gives; empty for a
+   * panel which doses none, absent from a service before sbmlsim 0.28.
+   */
+  dosing?: PanelDosing[]
 }
 
 /** The bounds of a declaration and of a request alike, which the endpoint states. */
@@ -470,10 +494,10 @@ export interface SimulateResponse extends Grid {
   /** Where the curves come from. */
   provenance: Provenance
   /**
-   * The uncertainty of the run, absent for a request which asked for no draw
-   * and for an endpoint which answers none.
+   * The uncertainty of the run: `null` or absent for a request which asked for
+   * no draw and for an endpoint which answers none.
    */
-  uncertainty?: Uncertainty
+  uncertainty?: Uncertainty | null
 }
 
 /** One series of the study data of a panel, on the axis of its curve. */

@@ -3404,6 +3404,18 @@ describe('the uncertainty of a panel', () => {
     expect(simulations().at(-1)).toEqual({ values: { knobA: 25 }, grid: { knobB: 3 } })
   })
 
+  it('draws a panel whose declaration spells that uncertainty `null`, as a service does', async () => {
+    // the service of sbmlsim answers `uncertainty: null` for a panel whose
+    // model carries none, which is no declaration of a sample of no draws
+    const declared = declaration()
+    served.panel = () =>
+      Promise.resolve({ ...declared, simulation: { ...declared.simulation, uncertainty: null } })
+    const element = await started({ draws: '8' })
+    expect(simulations().at(-1)).toEqual({ values: { knobA: 25 }, grid: { knobB: 3 } })
+    expect(figure(element)).toContain('<path class="curve"')
+    expect(textOf(element, '.error')).toBe('')
+  })
+
   it('shades the band of the position the knobs stand at and hands it out', async () => {
     served.panel = () => Promise.resolve(uncertain())
     served.simulate = () => Promise.resolve(banded())

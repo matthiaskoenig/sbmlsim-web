@@ -2,7 +2,7 @@
  "contract": "panelbundle/1",
  "model": "glimepiride",
  "title": "Glimepiride PBPK model",
- "sbmlsim": "0.30.0",
+ "sbmlsim": "0.31.0",
  "answers": {
   "": {
    "app": {
@@ -663,7 +663,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -2208,7 +2208,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -3753,7 +3753,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -5298,7 +5298,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -7307,7 +7307,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -8852,7 +8852,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -10397,7 +10397,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -11942,7 +11942,7 @@
      "run": {
       "variant": "male",
       "model": "male-e7be5d18151e",
-      "model_sha256": "52cb6ba97dc18cdc188b48aebf2f196a6ab92491dd0c23f5305e53ac4a01c0b7",
+      "model_sha256": "25732c0232fa467d763c63e4826fdf939d5c19868fb5898df50f5d2a702db902",
       "start": 0.0,
       "end": 3000.0,
       "points": 500,
@@ -13488,5 +13488,5 @@
    }
   }
  },
- "created": "2026-11-19T00:58:00Z"
+ "created": "2026-11-19T08:21:29Z"
 }

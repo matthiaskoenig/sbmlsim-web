@@ -1,6 +1,6 @@
 {
-  "sbmlsim": "d681de4b7aee4fac06fc62fc0144926671ee386f",
-  "sbmlsim-core": "ccbc9ed3691f08597f27d2d0e9c53109029bb92d",
-  "pkdb_models": "6d59aa5353468d6fafc793b836ddfc30140f08ea",
+  "sbmlsim": "668566a18ffed7fbbfbd6a2ddd1c585c946708cf",
+  "sbmlsim-core": "1002ddca5410bb7505cf3c76777cb2bcace11d75",
+  "pkdb_models": "50c07e34f75be8a3b213a1cdfde6ad3bd2722b20",
   "pkpdutils-core": "0.7.0"
 }
