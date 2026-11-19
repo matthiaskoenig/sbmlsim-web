@@ -37,3 +37,6 @@ export function placedPanelTag(): string {
 export function placePanelTag(tagName: string): void {
   placed = tagName
 }
+
+/** The tag the figure of a model is registered under unless a page asks for another one. */
+export const FIGURE_TAG = 'sbmlsim-figure'
