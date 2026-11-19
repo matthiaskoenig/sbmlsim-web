@@ -2048,6 +2048,17 @@ describe('the settings and the information of an app', () => {
     }
   })
 
+  it('hides the draws control where no panel ran a draw and shows it again where one did', async () => {
+    declared = figured()
+    const element = await shell()
+    const label = part(element, '.settings [part=settings-draws]') as HTMLElement
+    // the panels of the stub declare no uncertainty and ran no draw
+    expect(label.style.display).toBe('none')
+    answer(element, 'glimepiride', { created: '2999-01-01T00:00:00+00:00' }, 16)
+    await settled()
+    expect(label.style.display).toBe('')
+  })
+
   it('shows the draws a panel ran with when it holds the number asked for to its sample', async () => {
     declared = figured()
     const element = await shell()

@@ -687,6 +687,7 @@ test.describe('the app shell', () => {
       'Dose',
       'Patient',
       'Dosing protocol',
+      'Information',
     ])
     await expect(app.locator('.nav .tab[aria-current=page]')).toHaveText('Renal impairment')
     await expect(app.locator('sbmlsim-panel')).toHaveCount(2)
@@ -821,7 +822,7 @@ test.describe('the app shell', () => {
   })
 
   for (const width of [390, 768, 1280]) {
-    test(`puts a Reset level with the selects of its row and the select of the examples as wide as the control under it at ${String(width)} px`, async ({
+    test(`puts the select of the examples as wide as the control under it and the options of a panel level with its selects at ${String(width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 900 })
@@ -843,7 +844,7 @@ test.describe('the app shell', () => {
           }
         }, reset)
       // the patient page: the examples, the clearance with its stops and its
-      // slider, the dose, and the Reset of the row
+      // slider, and the dose
       await page.goto('/demo/app.html')
       await page.evaluate(() => {
         const one = document.querySelector('sbmlsim-app')
@@ -852,17 +853,9 @@ test.describe('the app shell', () => {
       const app = page.locator('sbmlsim-app')
       await expect(app.locator('#scenario')).toBeVisible()
       await expect(app.locator('sbmlsim-panel').nth(1).locator('svg path').first()).toBeVisible()
-      const shell = await row(app, '.knobs .reset')
-      const [example, stops, dose] = shell.selects
-      // the Reset is centred on the line of the select of the examples, beside
-      // it, where the card holds two columns, and on a line of its own under the
-      // knobs where it holds one
-      if (width >= 768) {
-        expect(Math.abs(shell.reset - (example?.centre ?? Number.NaN))).toBeLessThan(0.5)
-      } else {
-        expect(shell.reset).toBeGreaterThan((dose?.centre ?? 0) + 12)
-      }
-      // and the select of the examples is as wide as the control under it
+      const shell = await row(app, '.knobs')
+      const [example, stops] = shell.selects
+      // the select of the examples is as wide as the control under it
       expect(Math.abs((example?.right ?? 0) - (stops?.right ?? 1))).toBeLessThan(0.5)
       expect(Math.abs((example?.left ?? 0) - (stops?.left ?? 1))).toBeLessThan(0.5)
       // a panel alone draws its options level with its selects as well
@@ -912,13 +905,13 @@ test.describe('the app shell', () => {
   }
 
   for (const width of [390, 470, 640, 768, 1280]) {
-    test(`puts the options and the Reset on the line of the selects, for one to four knobs, at ${String(width)} px`, async ({
+    test(`puts the options of a panel on the line of its selects and keeps the shared selects of a column alike, for one to four knobs, at ${String(width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 900 })
       /**
        * The problems of a row of controls: an item without a label (the
-       * options, the Reset) whose line has knobs and which is not centred on
+       * options of a panel) whose line has knobs and which is not centred on
        * the first select of that line, or whose line has none and which does
        * not start at the top of its line.
        */
@@ -964,11 +957,7 @@ test.describe('the app shell', () => {
         )
         const app = page.locator('sbmlsim-app')
         await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(count)
-        for (const one of await problems(app, '.knobs-grid', '.knobs-reset')) {
-          found.push(`shell ${String(count)}: ${one}`)
-        }
-        // the Reset takes no width from a select of its line: the selects of a
-        // column are as wide as each other, the last one under the others too
+        // the selects of a column are as wide as each other, the last one under the others too
         const columns = await app.evaluate((element) => {
           const widths = new Map<number, number[]>()
           for (const one of element.shadowRoot?.querySelectorAll('.knobs select') ?? []) {
@@ -1063,14 +1052,13 @@ test.describe('the app shell', () => {
     )
   }
 
-  /** The card of the shared controls as it is laid out: its grid, its knobs, the examples and the Reset. */
+  /** The card of the shared controls as it is laid out: its grid, its knobs and the examples. */
   interface Card {
     inner: number
     gap: number
     tracks: number[]
     knobs: { top: number; left: number; width: number; centre: number }[]
     scenario: { left: number; width: number; centre: number } | null
-    reset: { top: number; left: number; centre: number; width: number }
   }
 
   /** Read the card of the shared controls of an app. */
@@ -1086,7 +1074,6 @@ test.describe('the app shell', () => {
       const select = (one: Element): DOMRect =>
         (one.querySelector('select, .knob-row') ?? one).getBoundingClientRect()
       const scenario = grid.querySelector(':scope > .scenario')
-      const button = grid.querySelector('.knobs-reset button')?.getBoundingClientRect()
       return {
         inner: grid.clientWidth,
         gap: Number.parseFloat(style.columnGap),
@@ -1108,21 +1095,15 @@ test.describe('the app shell', () => {
                 width: select(scenario).width,
                 centre: centre(select(scenario)),
               },
-        reset: {
-          top: button?.top ?? Number.NaN,
-          left: button?.left ?? Number.NaN,
-          width: button?.width ?? Number.NaN,
-          centre: button === undefined ? Number.NaN : centre(button),
-        },
       }
     })
   }
 
   /**
    * The problems of a card against the rule of its columns: balanced rows of
-   * knobs at their natural width, the examples and the Reset on a line above.
+   * knobs at their natural width, the examples on a line above.
    */
-  function cardProblems(layout: Card, examples: boolean): string[] {
+  function cardProblems(layout: Card): string[] {
     const problems: string[] = []
     const count = layout.knobs.length
     const fit = Math.max(1, Math.floor((layout.inner + layout.gap) / (200 + layout.gap)))
@@ -1145,7 +1126,7 @@ test.describe('the app shell', () => {
       problems.push(`uneven lines ${lines.join(' + ')}`)
     }
     // every column of the knobs as wide as the card gives it up to 20rem: the
-    // columns of the longest line share the card, and the Reset narrows none
+    // columns of the longest line share the card
     const widths = [
       ...layout.knobs.map((one) => one.width),
       ...(layout.scenario ? [layout.scenario.width] : []),
@@ -1157,41 +1138,8 @@ test.describe('the app shell', () => {
         problems.push(`a select of ${String(width)} px, not ${String(natural)}`)
       }
     }
-    if (examples && layout.scenario !== null) {
-      if (fit >= 2) {
-        // beside the select of the examples, level with it
-        const off = layout.reset.centre - layout.scenario.centre
-        if (Math.abs(off) > 0.05) {
-          problems.push(`the Reset ${String(off)} px off the examples`)
-        }
-        const column = layout.scenario.left + natural + layout.gap
-        if (Math.abs(layout.reset.left - column) > 0.5) {
-          problems.push(`the Reset at ${String(layout.reset.left)}, not ${String(column)}`)
-        }
-      } else if (!(layout.reset.top > (layout.knobs.at(-1)?.centre ?? Infinity))) {
-        problems.push('the Reset not under the knobs')
-      }
-    } else {
-      // after the last knob, on its line or on one of its own, and never over a knob
-      const last = layout.knobs.at(-1)
-      if (last !== undefined) {
-        const beside = Math.abs(layout.reset.centre - last.centre) <= 0.05
-        const under = layout.reset.top > last.centre
-        if (!beside && !under) {
-          problems.push(
-            `the Reset ${String(layout.reset.centre - last.centre)} px off the last knob`,
-          )
-        }
-        if (beside && layout.reset.left < last.left + last.width + layout.gap - 0.5) {
-          problems.push('the Reset takes width from a knob')
-        }
-      }
-    }
     return problems
   }
-
-  /** The room of the Reset beside the columns of the knobs, `RESET_ROOM` of `columns.ts`. */
-  const RESET_ROOM = 80
 
   for (const width of [390, 640, 768, 1024, 1280]) {
     test(`balances the rows of the shared knobs at their natural width, whatever the root font of the page, at ${String(width)} px`, async ({
@@ -1202,8 +1150,8 @@ test.describe('the app shell', () => {
       // the patient page with its two knobs and grown to 3 to 7, with examples,
       // and the dose page, two knobs and no examples
       const pages = [
-        ...[2, 3, 4, 5, 6, 7].map((count) => ({ id: 'patient', count, examples: true })),
-        { id: 'dose', count: 2, examples: false },
+        ...[2, 3, 4, 5, 6, 7].map((count) => ({ id: 'patient', count })),
+        { id: 'dose', count: 2 },
       ]
       const knobs = { count: 2 }
       await patientKnobs(page, knobs)
@@ -1229,17 +1177,14 @@ test.describe('the app shell', () => {
           await expect(app.locator('.knobs .knob:not(.scenario)')).toHaveCount(one.count)
           const layout = await card(app)
           laid.push(layout)
-          for (const problem of cardProblems(layout, one.examples)) {
+          for (const problem of cardProblems(layout)) {
             found.push(`${root} ${one.id} ${String(one.count)}: ${problem}`)
-          }
-          if (layout.reset.width > RESET_ROOM) {
-            found.push(`${root} ${one.id}: a Reset of ${String(layout.reset.width)} px`)
           }
         }
         cards.set(root, laid)
       }
       expect(found).toEqual([])
-      // the same rows, columns, selects and Reset at every root font
+      // the same rows, columns and selects at every root font
       expect(cards.get('125%')).toEqual(cards.get('100%'))
       expect(cards.get('75%')).toEqual(cards.get('100%'))
     })
@@ -1511,15 +1456,14 @@ test.describe('the app shell', () => {
     })
   }
 
-  test('keeps the focus on a shared Reset it was pressed with', async ({ page }) => {
+  test('keeps the focus on the Reset of the page it was pressed with', async ({ page }) => {
     const app = await openApp(page)
     await app.locator('.knobs select').first().selectOption({ label: 'impaired' })
     const reset = app.locator('.settings button.reset')
     await reset.focus()
     await page.keyboard.press('Enter')
     await expect(app.locator('.knobs select').first()).toHaveValue('1')
-    await expect(reset).toHaveAttribute('aria-disabled', 'true')
-    // the focus is still on the button, which says it has nothing left to do
+    // the focus is still on the button, which the press did not move
     expect(
       await app.evaluate((element) => element.shadowRoot?.activeElement?.className ?? null),
     ).toBe('reset')

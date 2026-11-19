@@ -673,6 +673,16 @@ const drawsShown = computed<number | ''>(() => {
   return ran.length > 0 ? Math.max(...ran) : (drawsOfPanels.value ?? '')
 })
 
+/**
+ * Whether the draws control is drawn: not once every placed panel which ran reports no draw, which
+ * is a model with no uncertainty, where the control could only say zero. Before the first run it
+ * is drawn without its text (`unread`), so the card does not change its height when it answers.
+ */
+const drawsKnown = computed<boolean>(() => {
+  const ran = placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : []))
+  return ran.length === 0 || ran.some((one) => one > 0) || drawsAll.value !== undefined
+})
+
 const drawsField = useTemplateRef<HTMLInputElement>('drawsField')
 
 /** Show the draws in effect in the field, which Vue leaves alone where the value it computes did not change. */
@@ -1350,7 +1360,12 @@ onBeforeUnmount(() => {
               />
               <span>logarithmic y</span>
             </label>
-            <label class="setting" part="settings-draws">
+            <label
+              v-show="drawsKnown"
+              class="setting"
+              part="settings-draws"
+              :class="{ unread: drawsShown === '' }"
+            >
               <span>draws</span>
               <input
                 ref="drawsField"
@@ -1951,6 +1966,17 @@ onBeforeUnmount(() => {
   font-size: var(--_font-size-small);
 }
 
+/* the line of the controls is as tall as the tallest of them whether or not the draws field is
+   drawn, so hiding it moves nothing */
+.settings > :not(.run) {
+  box-sizing: border-box;
+  min-height: 24px;
+}
+
+.setting.unread {
+  visibility: hidden;
+}
+
 .setting {
   display: inline-flex;
   gap: 6px;
@@ -1970,8 +1996,10 @@ onBeforeUnmount(() => {
 }
 
 .run {
+  /* a line of its own at every width, so the answer of the first run adds no line to the card */
+  flex: 1 0 100%;
   min-height: 1.5em;
-  margin: 0 0 0 auto;
+  margin: 0;
   color: var(--_fg-soft);
   font-variant-numeric: tabular-nums;
 }
