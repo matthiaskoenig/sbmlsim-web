@@ -10,3 +10,6 @@ playwright-report/
 site/
 .cache/
 docs/assets/sbmlsim-web/
+
+# the scratch workspace of a subagent driven plan
+.superpowers/

@@ -519,6 +519,14 @@ const props = defineProps({
    * declares no uncertainty draws no band whatever it says.
    */
   draws: { type: Number, default: undefined },
+  /**
+   * The scale of the y axis the host asks for, `true` or `false`; absent is the scale the curves
+   * declare (`initialLog`). The shell of an app writes it for the logarithmic switch of its page:
+   * it is the axis the panel starts at and goes back to on a reset, and a change of it sets the
+   * axis, which the panel's own switch may change again. A panel whose curves do not share one
+   * scale keeps the axis its declaration gives it, whatever the host asks for.
+   */
+  log: { type: String as PropType<'true' | 'false'>, default: undefined },
   /** The milliseconds one request is given before it is stopped. */
   timeout: { type: Number, default: DEFAULT_TIMEOUT },
   /**
@@ -1938,14 +1946,45 @@ function firstGridded(declared: PanelDeclaration): string | null {
  * Get whether the y axis of a panel starts logarithmic.
  *
  * The axis is one, so it follows the curves only when every one of them asks
- * for it; the toggle is there for every other case.
+ * for it; the toggle is there for every other case. The host may ask for the
+ * axis of a panel whose curves all share one scale (`log`).
  *
  * @param declared the declaration of the panel
  * @returns whether the axis starts logarithmic
  */
 function initialLog(declared: PanelDeclaration): boolean {
+  return askedLog(declared, props.log === undefined ? undefined : props.log === 'true')
+}
+
+/**
+ * Get the axis a panel takes when its host asks for one.
+ *
+ * One axis for curves of two scales cannot be asked for, so only a panel whose curves share one
+ * scale follows the host; every other panel keeps the axis its declaration gives it.
+ *
+ * @param declared the declaration of the panel
+ * @param asked the scale the host asks for, `undefined` for none
+ * @returns whether the axis is logarithmic
+ */
+function askedLog(declared: PanelDeclaration, asked: boolean | undefined): boolean {
   const curves = curvesOf(declared)
-  return curves.length > 0 && curves.every((one) => one.scale === 'log')
+  const own = curves.length > 0 && curves.every((one) => one.scale === 'log')
+  const alike = curves.length > 0 && curves.every((one) => one.scale === curves[0]?.scale)
+  return asked !== undefined && alike ? asked : own
+}
+
+/**
+ * Set the scale of the y axis, as a click on the switch of the panel does, for a host which sets
+ * the axis of every panel at once (the page switch of an app). It differs from the attribute
+ * `log` in that it also moves a panel whose own switch was flipped since the attribute was set.
+ *
+ * @param on whether the axis is logarithmic
+ */
+function setLog(on: boolean): void {
+  const declared = declaration.value
+  if (declared !== null) {
+    logY.value = askedLog(declared, on)
+  }
 }
 
 /**
@@ -2151,6 +2190,7 @@ async function simulate(gridId: string | null): Promise<void> {
         detail: {
           panel: props.panel,
           provenance: answer.provenance,
+          draws: body.draws ?? 0,
           spec_hash: answer.spec_hash,
           values: sent,
         },
@@ -2919,6 +2959,15 @@ watch(
  * study data are untouched, so it is a run and no restart, and a frozen panel
  * owes it as it owes a movement of a knob.
  */
+watch(
+  () => props.log,
+  () => {
+    if (declaration.value !== null) {
+      logY.value = initialLog(declaration.value)
+    }
+  },
+)
+
 watch(requestedDraws, () => {
   if (declaration.value === null) {
     return
@@ -3026,7 +3075,29 @@ watch(
   { flush: 'post' },
 )
 
-defineExpose({ activate, freeze, reset, result, drawn })
+/*
+ * Announce the scale of the y axis whenever it is set, so a host which draws a switch of every
+ * panel (the shell of an app) shows the state the panels are in: the declared scale, a flip of
+ * the own switch of the panel, the scale a host asked for.
+ */
+watch(
+  [logY, declaration],
+  () => {
+    if (declaration.value === null) {
+      return
+    }
+    host?.dispatchEvent(
+      new CustomEvent('sbmlsim-scale', {
+        detail: { panel: props.panel, log: logY.value },
+        bubbles: true,
+        composed: true,
+      }),
+    )
+  },
+  { flush: 'post' },
+)
+
+defineExpose({ activate, freeze, reset, result, drawn, setLog })
 </script>
 
 <template>

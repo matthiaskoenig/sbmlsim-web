@@ -462,6 +462,44 @@ function isHeads(value: unknown): boolean {
 }
 
 /**
+ * Get whether the figure of an app can be read.
+ *
+ * @param value the `figure` of the body, absent in a payload before the figure
+ * @returns whether it is absent or `null` (no figure), or a figure with its
+ *   non-blank svg, a non-blank title, a credit and the lists of panel ids a key path opens
+ */
+function isFigure(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (isObject(value) &&
+      typeof value.svg === 'string' &&
+      value.svg.trim() !== '' &&
+      typeof value.title === 'string' &&
+      value.title.trim() !== '' &&
+      typeof value.credit === 'string' &&
+      isObject(value.panels) &&
+      Object.values(value.panels).every(
+        (ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string'),
+      ))
+  )
+}
+
+/**
+ * Get whether the figure fields of a page can be read.
+ *
+ * @param page a page of the body
+ * @returns whether `figure` is absent or a boolean and `shown` absent or a list of ids
+ */
+function isFigurePage(page: Record<string, unknown>): boolean {
+  return (
+    (page.figure === undefined || typeof page.figure === 'boolean') &&
+    (page.shown === undefined ||
+      (Array.isArray(page.shown) && page.shown.every((id) => typeof id === 'string')))
+  )
+}
+
+/**
  * Get whether the scenarios of a page can be read.
  *
  * @param value the `scenarios` of a page
@@ -515,12 +553,14 @@ function asApp(body: unknown): AppDeclaration {
       (page) =>
         typeof (page as Record<string, unknown>).title === 'string' &&
         Array.isArray((page as Record<string, unknown>).panels) &&
-        isScenarios((page as Record<string, unknown>).scenarios),
+        isScenarios((page as Record<string, unknown>).scenarios) &&
+        isFigurePage(page as Record<string, unknown>),
     ) ||
     !body.variants.every((one) => typeof (one as Record<string, unknown>).label === 'string') ||
     !isShared(body.shared) ||
     !isHeads(body.heads) ||
-    typeof body.variant !== 'string'
+    typeof body.variant !== 'string' ||
+    !isFigure(body.figure)
   ) {
     throw new PanelRequestError('body')
   }

@@ -12,7 +12,9 @@
           "renal_urine"
         ],
         "scenarios": [],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       },
       {
         "id": "dose",
@@ -22,7 +24,9 @@
           "dose_urine"
         ],
         "scenarios": [],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       },
       {
         "id": "patient",
@@ -57,7 +61,9 @@
             }
           }
         ],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       },
       {
         "id": "dosing",
@@ -67,7 +73,9 @@
           "dosing_urine"
         ],
         "scenarios": [],
-        "size": "regular"
+        "size": "regular",
+        "figure": false,
+        "shown": []
       }
     ],
     "variants": [],
@@ -76,6 +84,7 @@
     "licenses": [
       "CC BY-SA 4.0"
     ],
+    "figure": null,
     "shared": {
       "renal": [
         {
@@ -601,7 +610,7 @@
   },
   "run": {
     "contract": "panel/1",
-    "spec_hash": "6bd552c8ceb02c6f9b62b547a4c8e3485a743caa9c1f1668fce3cfdde2baf556",
+    "spec_hash": "0472915abf8917cd6748abfe60db60fb578fa5605cabd6420de7a71e0b7d4726",
     "x": [
       0,
       28.8,

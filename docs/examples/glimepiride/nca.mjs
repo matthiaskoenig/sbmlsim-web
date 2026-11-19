@@ -20,13 +20,19 @@
 //    (`PanelClient.simulate` with `draws`, one point, where they travel), analyses all of them
 //    in one batch of the kernel and reduces that table to the statistics of every parameter
 //    (`summarize` of the kernel, no statistic of this page). The cell then carries the value of
-//    the model, the standard deviation of the draws and the box of their spread.
+//    the model, the standard deviation of the draws, their coefficient of variation and the box
+//    of their spread.
 //
-// The reader picks the draws (`#pk-draws`), the page holds the panels of the app to the same
-// number (`draws` of `<sbmlsim-app>`), and the declaration of the panel says what that number
+// The draws are one number and the page has one control of it, the draws field of the settings
+// card of the app: the table analyses the very draws the figures shade, so a second field would
+// be a second number which could disagree with the first. The page reads the number the panels
+// ran with from `sbmlsim-result` and follows it, and the declaration of the panel says what it
 // may be: the draws of the sample are the most the endpoint can answer, and the draws a request
 // runs are the first of them, so the band and the boxes settle as the number goes up rather
 // than jumping.
+//
+// The table is a reader of the plasma curves above it, so it goes while the app shows its
+// information view (`sbmlsim-page`) and comes back with the next page the reader opens.
 //
 // The curves carry a molar concentration (`µM` of the model) and the knob carries a dose in mg,
 // so the dose travels into the analysis as an amount of substance (`Mr_gli` of the model,
@@ -40,6 +46,9 @@ import { createRuntime } from './pkpdutils-core/loader.mjs'
 
 /** The molar mass of glimepiride, `Mr_gli` of the model, in g/mol. */
 export const MOLAR_MASS = 490.616
+
+/** The id of the information view of the app, the value of its `page` attribute. */
+const INFORMATION_PAGE = 'information'
 
 /** The model and the endpoint of the page, the ones `register.mjs` registers. */
 const MODEL = 'glimepiride'
@@ -143,7 +152,7 @@ export const KERNEL_UNITS = {
  * The kernel answers every statistic of every column and a host takes the ones it wants
  * (`pkpd_summarize`), so these are the names of the blocks this page reads out of the payload.
  */
-export const STATISTICS = ['sd', 'median', 'q25', 'q75', 'min', 'max', 'count']
+export const STATISTICS = ['sd', 'cv', 'median', 'q25', 'q75', 'min', 'max', 'count']
 
 /** The flags of the analysis by their bit, `NCAFlag` of pkpdutils. */
 const FLAGS = [
@@ -189,20 +198,37 @@ let failure = ''
 /** The uncertainty the panels declare, `null` for a model which declares none. */
 let declared = null
 
-/** The draws the reader asked for, the number of the declaration until they do. */
+/** The draws the panels of the app ran with, the number of the declaration until they report. */
 let draws = 0
 
 /** What the draws of the table came from: the fit, the level of the band and what failed. */
 let provenance = null
 
+/** The loop of the draws which counts, so a superseded one is dropped. */
+let generation = 0
+
+/** Whether the loop of the draws is still running, one analyte answers after the other. */
+let pending = false
+
+/** Whether the last loop of the draws ended without any draw, the draws asked for or not. */
+let emptyDraws = false
+
+/** Whether a panel reported its draws, which the declaration then no longer decides. */
+let heard = false
+
+/**
+ * The panels the reader has on screen, `null` while the page has not been told: every one of
+ * them. A panel which left the grid has no curve above the table any more, so it has no column.
+ */
+let selected = null
+
 /** The timer of the draws of the position which is shown. */
 let timer = null
 
-/** The table, the note, the control of the draws and the app element of the page. */
+/** The section of the table, the table and the note of the page. */
+let section = null
 let table = null
 let note = null
-let control = null
-let app = null
 
 /**
  * The runtime of the kernel, created on the first call and kept for every later one.
@@ -374,6 +400,8 @@ async function analyse(analyte, figure) {
     flags: result.column('flags')?.[0] ?? 0,
     wrong,
     statistics: null,
+    // the window the curve was analysed over, which the note states instead of a number of its own
+    span: [figure.x?.[0] ?? Number.NaN, figure.x?.at(-1) ?? Number.NaN],
   })
 }
 
@@ -385,16 +413,25 @@ async function analyse(analyte, figure) {
  *
  * @param {object} analyte the analyte of `ANALYTES`
  * @param {Record<string, number>} values the values of the knobs of the panel
+ * @param {number} wanted the draws to ask for, the number of the loop and not the one of now
+ * @param {() => boolean} current whether the loop is still the one which counts, checked after
+ *   every await so a superseded loop writes nothing
  * @returns {Promise<object | null>} the uncertainty of the answer, `null` for an answer which
- *   carries none
+ *   carries none or a loop which is no longer current
  */
-async function analyseDraws(analyte, values) {
-  const answer = await client.simulate(MODEL, analyte.panel, { values, draws })
+async function analyseDraws(analyte, values, wanted, current) {
+  const answer = await client.simulate(MODEL, analyte.panel, { values, draws: wanted })
+  if (!current()) {
+    return null
+  }
   const curves = answer.uncertainty?.curves?.[analyte.curve]
   if (curves === undefined || curves.length === 0) {
     return answer.uncertainty ?? null
   }
   const run = await runtime()
+  if (!current()) {
+    return null
+  }
   const amount = (1000 * (values.dose ?? 0)) / MOLAR_MASS
   // a draw which did not integrate is a row of nulls, which is a row of missing observations
   const result = run.analyze(
@@ -427,23 +464,6 @@ export function format(value, percent) {
     return shown.toExponential(2)
   }
   return shown.toPrecision(3)
-}
-
-/**
- * The draws a reader may pick, the powers of two the sample of the endpoint holds.
- *
- * @param {number} most the draws of the sample, `PanelUncertainty.max_draws`
- * @returns {number[]} the numbers of the control, `0` (no band) first and `most` last
- */
-export function drawChoices(most) {
-  const choices = [0]
-  for (let n = 8; n < most; n *= 2) {
-    choices.push(n)
-  }
-  if (most > 0) {
-    choices.push(most)
-  }
-  return choices
 }
 
 /**
@@ -569,6 +589,28 @@ function boxFigure(box, scale) {
 }
 
 /**
+ * The coefficient of variation of a cell, as text.
+ *
+ * @param {number} cv the coefficient of variation, a fraction
+ * @returns {string} `CV 10.0 %`, and `CV –` where there is none (a mean of zero): a percent sign
+ *   without a number is no statement
+ */
+export function variationText(cv) {
+  return `CV ${variationValue(cv)}`
+}
+
+/**
+ * The value of a coefficient of variation, as text.
+ *
+ * @param {number} cv the coefficient of variation, a fraction
+ * @returns {string} `10.0 %`, and `–` where there is none
+ */
+function variationValue(cv) {
+  const percent = format(100 * cv)
+  return percent === '–' ? percent : `${percent} %`
+}
+
+/**
  * What a cell says about its draws, the title of the cell.
  *
  * @param {object} parameter the parameter of the row
@@ -579,6 +621,7 @@ function boxTitle(parameter, statistics) {
   const show = (value) => format(value, parameter.percent)
   return (
     `${String(statistics.count)} draws: median ${show(statistics.median)}, ` +
+    `coefficient of variation ${variationValue(statistics.cv)}, ` +
     `half of them between ${show(statistics.q25)} and ${show(statistics.q75)}, ` +
     `all of them between ${show(statistics.min)} and ${show(statistics.max)} ${parameter.unit}`
   )
@@ -625,6 +668,10 @@ function valueCell(parameter, analyte) {
   spread.className = 'pk-spread'
   spread.textContent = `± ${format(statistics.sd, parameter.percent)}`
   line.append(spread)
+  const variation = document.createElement('span')
+  variation.className = 'pk-cv'
+  variation.textContent = variationText(statistics.cv)
+  line.append(variation)
   const box = relativeBox(statistics, held.parameters[names[0]])
   if (box !== null) {
     cell.title = boxTitle(parameter, statistics)
@@ -648,7 +695,7 @@ function valueRow(parameter, waiting) {
   unit.className = 'pk-unit'
   unit.textContent = parameter.unit
   row.append(unit)
-  for (const analyte of ANALYTES) {
+  for (const analyte of ANALYTES.filter(onScreen)) {
     const { cell, box } = valueCell(parameter, analyte)
     if (box !== null) {
       waiting.push({ cell, box })
@@ -663,9 +710,17 @@ function render() {
   if (table === null) {
     return
   }
+  if (!ANALYTES.some(onScreen)) {
+    // every panel was removed: no table, and no note about draws nobody looks at
+    table.replaceChildren()
+    if (note !== null) {
+      note.textContent = 'Nothing to show: none of the plasma curves is on screen.'
+    }
+    return
+  }
   const head = document.createElement('thead')
   const headRow = document.createElement('tr')
-  for (const text of ['Parameter', 'Unit', ...ANALYTES.map((one) => one.label)]) {
+  for (const text of ['Parameter', 'Unit', ...ANALYTES.filter(onScreen).map((one) => one.label)]) {
     const cell = document.createElement('th')
     cell.scope = 'col'
     cell.textContent = text
@@ -710,17 +765,27 @@ function listed(labels) {
  * @returns {string} the sentence, empty for a table without draws
  */
 function drawsLine(scale) {
+  if (draws > 0 && (provenance === null || pending) && declared !== null) {
+    return emptyDraws
+      ? `The ${String(draws)} draws of the uncertainty of the fit were asked for and the ` +
+          'endpoint answered none, so the parameters are the model at its own parameters.'
+      : `Computing the ${String(draws)} draws of the uncertainty of the fit; until they are ` +
+          'back the parameters are the model at its own parameters.'
+  }
   if (draws === 0 || provenance === null) {
     return declared === null
       ? ''
-      : 'The parameters are the model at its own parameters; pick the draws above to see what ' +
-          'the uncertainty of the fit does to them.'
+      : 'The parameters are the model at its own parameters; set the draws in the settings above ' +
+          'the panels to see what the uncertainty of the fit does to them.'
   }
   const level = `${format(100 * provenance.level)} %`
   const lost = provenance.failed.length
+  // the provenance of the draws names the fit and the level and not how many parameters it
+  // varied, so the sentence does not claim a count: the page cannot check one
   return (
-    `± is the standard deviation of ${String(provenance.draws)} draws of the ten parameters of ` +
-    `${provenance.fit}, the very draws the figures shade as their ${level} band. The box of a ` +
+    `± is the standard deviation of ${String(provenance.draws)} draws of the parameters of ` +
+    `${provenance.fit}, the very draws the figures shade as their ${level} band, and CV is that ` +
+    `standard deviation over the mean of the draws. The box of a ` +
     `cell is those draws against their own median, the bar their middle half and the whisker ` +
     `the ones within one and a half of it, on one axis of ± ${format(scale)} % for the whole ` +
     `table; the line is the value beside it, and the cell says the rest.` +
@@ -738,9 +803,15 @@ function renderNote(scale) {
     return
   }
   const amount = (1000 * dose) / MOLAR_MASS
+  // the window the rows were analysed over, as the panels drew it
+  const span = [...rows.values()].find((held) => Number.isFinite(held.span?.[1]))?.span
+  const timespan =
+    span === undefined
+      ? 'the simulated time'
+      : `the simulated ${format(span[0])} to ${format(span[1])} h`
   const lines = [
     `A single oral dose of ${format(dose)} mg glimepiride (${format(amount)} µmol, ` +
-      `M = ${MOLAR_MASS} g/mol), analysed over the simulated 0 to 50 h of this patient with ` +
+      `M = ${MOLAR_MASS} g/mol), analysed over ${timespan} of this patient with ` +
       `the linear up / log down trapezoid and the best fit of the terminal slope. CL/F and ` +
       `Vz/F are of glimepiride alone: a metabolite carries no dose of its own. A whole-body ` +
       `model keeps a slowly decaying terminal phase at the end of that window, so the rows ` +
@@ -754,7 +825,7 @@ function renderNote(scale) {
   // the analytes which raised the same flags are one sentence: a model raises them for all
   // three as often as not, and three sentences of the same words are three times the reading
   const together = new Map()
-  for (const analyte of ANALYTES) {
+  for (const analyte of ANALYTES.filter(onScreen)) {
     const held = rows.get(analyte.panel)
     const raised = FLAGS.filter(([bit]) => ((held?.flags ?? 0) & bit) !== 0).map(([, text]) => text)
     if (raised.length > 0) {
@@ -785,21 +856,45 @@ async function takeDraws(key, values) {
   if (client === null) {
     client = new globalThis.sbmlsimWeb.PanelClient(ENDPOINT, DRAWS_TIMEOUT)
   }
-  for (const analyte of ANALYTES) {
-    const uncertainty = await analyseDraws(analyte, values)
-    if (key !== shown) {
-      // the knobs moved while this ran: these draws are of the position before them
-      return
-    }
-    if (uncertainty !== null) {
-      provenance = {
-        draws: uncertainty.draws,
-        fit: uncertainty.fit,
-        level: uncertainty.level,
-        failed: uncertainty.failed,
+  // one generation per loop: moving the draws or the knobs starts another, and this one then
+  // writes nothing, so a table never mixes the draws of two loops under one note
+  generation += 1
+  const mine = generation
+  const wanted = draws
+  const current = () => mine === generation && key === shown && wanted === draws
+  pending = true
+  try {
+    for (const analyte of ANALYTES) {
+      if (!onScreen(analyte)) {
+        continue
       }
+      const uncertainty = await analyseDraws(analyte, values, wanted, current)
+      if (!current()) {
+        return
+      }
+      if (uncertainty !== null) {
+        provenance = {
+          draws: uncertainty.draws,
+          fit: uncertainty.fit,
+          level: uncertainty.level,
+          failed: uncertainty.failed,
+        }
+      }
+      render()
     }
+    // the table is complete only now: until then an analyte may be back without its spread
+    pending = false
+    // the loop is done: if no answer carried draws the note says so and not "computing"
+    emptyDraws = provenance === null
     render()
+  } catch (bad) {
+    // the failure of a loop which was superseded is of draws nobody looks at any more, and the
+    // table the loop which replaced it computed is no failure
+    if (current()) {
+      pending = false
+      failure = bad instanceof Error ? bad.message : String(bad)
+      render()
+    }
   }
 }
 
@@ -813,15 +908,19 @@ function scheduleDraws(key, values) {
   if (timer !== null) {
     clearTimeout(timer)
   }
+  // a loop which is running is of a position or a number which is gone
+  generation += 1
+  if (emptyDraws) {
+    // the note of an empty loop is about the loop before this one
+    emptyDraws = false
+    render()
+  }
   if (draws === 0 || declared === null) {
     return
   }
   timer = setTimeout(() => {
     timer = null
-    takeDraws(key, values).catch((bad) => {
-      failure = bad instanceof Error ? bad.message : String(bad)
-      render()
-    })
+    void takeDraws(key, values)
   }, DRAWS_DELAY)
 }
 
@@ -835,9 +934,10 @@ function scheduleDraws(key, values) {
  * @returns {Promise<void>}
  */
 async function take(event) {
+  readPlaced(document.querySelector('sbmlsim-app'))
   const detail = event.detail ?? {}
   const analyte = ANALYTES.find((one) => one.panel === detail.panel)
-  if (analyte === undefined) {
+  if (analyte === undefined || !onScreen(analyte)) {
     return
   }
   const panel = event.composedPath()[0]
@@ -852,6 +952,7 @@ async function take(event) {
     shown = key
     dose = figure.values.dose ?? Number.NaN
     provenance = null
+    emptyDraws = false
   }
   try {
     await analyse(analyte, figure)
@@ -859,7 +960,11 @@ async function take(event) {
   } catch (bad) {
     failure = bad instanceof Error ? bad.message : String(bad)
   }
-  // a knob which moved while this analysis ran has cleared these rows already
+  // a knob which moved while this analysis ran has cleared these rows already, and a panel
+  // which the reader removed meanwhile has no column to come back to
+  if (!onScreen(analyte)) {
+    rows.delete(analyte.panel)
+  }
   if (key === shown) {
     render()
     scheduleDraws(key, { ...figure.values })
@@ -867,59 +972,135 @@ async function take(event) {
 }
 
 /**
- * Build the control of the draws out of what the panels declare.
+ * Whether the panel of an analyte is on screen.
  *
- * The declaration says what a reader may ask for - the sample of the endpoint is the most - so
- * the page writes no number of its own, and a model which declares no uncertainty keeps no
- * control: there is nothing to turn up.
+ * @param {{panel: string}} analyte the analyte
+ * @returns {boolean} `false` for a panel the reader removed from the grid
+ */
+function onScreen(analyte) {
+  return selected === null || selected.includes(analyte.panel)
+}
+
+/**
+ * Take the panels the app has placed, from its shadow root, where the page has not been told a
+ * selection yet: a page which declares `shown` hides an analyte from the start, with no event.
+ *
+ * @param {Element | null} host the app element
+ */
+function readPlaced(host) {
+  if (selected !== null || host?.shadowRoot == null) {
+    return
+  }
+  const placed = [...host.shadowRoot.querySelectorAll('sbmlsim-panel')].map(
+    (one) => one.getAttribute('panel') ?? '',
+  )
+  if (placed.length > 0) {
+    selected = placed
+  }
+}
+
+/**
+ * Follow the panels on screen: the column of a panel the reader removed is back at its
+ * placeholder, with its draws, and comes back with the panel.
+ *
+ * @param {Event} event the `sbmlsim-selection` of the app, whose `detail` is `{ panels }`
+ */
+function followSelection(event) {
+  const panels = event.detail?.panels
+  if (!Array.isArray(panels)) {
+    return
+  }
+  selected = panels
+  for (const analyte of ANALYTES) {
+    if (!onScreen(analyte)) {
+      rows.delete(analyte.panel)
+    }
+  }
+  render()
+}
+
+/**
+ * Follow the draws the panels of the app ran with.
+ *
+ * The draws field of the app is the one control of the number, so a change of it reaches this
+ * page as the draws of the next run of a panel. The spread of the draws before is gone until the
+ * new ones are back.
+ *
+ * @param {Event} event the `sbmlsim-result` of a panel
+ */
+function followDraws(event) {
+  const detail = event.detail ?? {}
+  if (!ANALYTES.some((one) => one.panel === detail.panel) || !Number.isFinite(detail.draws)) {
+    return
+  }
+  const asked = Math.max(
+    0,
+    declared === null ? detail.draws : Math.min(detail.draws, declared.max_draws),
+  )
+  if (asked === draws) {
+    return
+  }
+  draws = asked
+  provenance = null
+  emptyDraws = false
+  for (const held of rows.values()) {
+    held.statistics = null
+  }
+  render()
+  if (shown !== '') {
+    scheduleDraws(shown, JSON.parse(shown))
+  }
+}
+
+/**
+ * Read what the panels declare of the uncertainty: the most draws the endpoint can answer.
+ *
+ * The page writes no number of its own, and a model which declares no uncertainty has no draws
+ * to take.
  *
  * @returns {Promise<void>}
  */
 async function readDeclaration() {
-  if (control === null) {
-    return
-  }
   const client = new globalThis.sbmlsimWeb.PanelClient(ENDPOINT, DRAWS_TIMEOUT)
   const panel = await client.panel(MODEL, ANALYTES[0].panel)
   declared = panel.simulation.uncertainty ?? null
-  if (declared === null) {
-    control.hidden = true
-    return
+  if (declared !== null && !heard) {
+    draws = Math.max(0, Math.min(declared.draws, declared.max_draws))
   }
-  draws = Math.max(0, Math.min(declared.draws, declared.max_draws))
-  const select = control.querySelector('select')
-  for (const choice of drawChoices(declared.max_draws)) {
-    const option = document.createElement('option')
-    option.value = String(choice)
-    option.textContent = choice === 0 ? 'none' : String(choice)
-    option.selected = choice === draws
-    select.append(option)
-  }
-  select.addEventListener('change', () => {
-    draws = Number(select.value)
-    // the figures shade the draws of the reader and the table states them
-    if (app !== null) {
-      app.draws = draws
-    }
-    provenance = null
-    for (const held of rows.values()) {
-      held.statistics = null
-    }
-    render()
-    if (shown !== '') {
-      scheduleDraws(shown, JSON.parse(shown))
-    }
-  })
-  control.hidden = false
   render()
+  // a position which was shown before the declaration was read has its draws still to take
+  if (shown !== '') {
+    scheduleDraws(shown, JSON.parse(shown))
+  }
+}
+
+/**
+ * Show the table beside the pages of the app and not beside its information view.
+ *
+ * @param {Event} event the `sbmlsim-page` of the app, whose `detail` is `{ page }`
+ */
+function followPage(event) {
+  if (section !== null) {
+    section.hidden = event.detail?.page === INFORMATION_PAGE
+  }
+}
+
+/**
+ * Show or hide the table by the `page` attribute of the app.
+ *
+ * @param {Element} host the app element
+ */
+function followAttribute(host) {
+  if (section !== null) {
+    section.hidden = host.getAttribute('page') === INFORMATION_PAGE
+  }
 }
 
 /** Find the table of the page and follow what the panels of the app draw. */
 function start() {
+  section = document.querySelector('#pk-parameters')
   table = document.querySelector('#pk-parameters table')
   note = document.querySelector('#pk-parameters .pk-note')
-  control = document.querySelector('#pk-draws')
-  app = document.querySelector('sbmlsim-app')
   if (table === null) {
     return
   }
@@ -927,12 +1108,24 @@ function start() {
   document.addEventListener('sbmlsim-shown', (event) => {
     void take(event)
   })
+  document.addEventListener('sbmlsim-result', (event) => {
+    heard = true
+    followDraws(event)
+  })
+  document.addEventListener('sbmlsim-page', followPage)
+  document.addEventListener('sbmlsim-selection', followSelection)
+  // a page set from outside is no event of the reader, so the attribute the app reflects it in
+  // is watched as well
+  const host = document.querySelector('sbmlsim-app')
+  if (host !== null) {
+    followAttribute(host)
+    new MutationObserver(() => {
+      followAttribute(host)
+    }).observe(host, { attributes: true, attributeFilter: ['page'] })
+  }
   readDeclaration().catch(() => {
-    // a page whose endpoint does not answer its declaration keeps no control of the draws: the
-    // panels of the app say the same thing in their own lines
-    if (control !== null) {
-      control.hidden = true
-    }
+    // a page whose endpoint does not answer its declaration takes the draws the panels report:
+    // the panels of the app say the same thing in their own lines
   })
 }
 

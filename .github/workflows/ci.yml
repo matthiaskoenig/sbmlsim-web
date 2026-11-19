@@ -17,8 +17,11 @@ env:
   # (`python -m sbmlsim.serve`) serves the contracts this library speaks and the
   # example `examples.panels`, which is no part of its package, so the tests
   # need a checkout of its repository and not an install from PyPI. The pin
-  # moves with every release of sbmlsim the library is tested against.
-  SBMLSIM_REF: '0.31.0'
+  # moves with every release of sbmlsim the library is tested against. It is a
+  # commit of develop and not a tag while the declaration of a figure, which
+  # this library speaks, is merged but not released; it returns to a tag with
+  # the next release of sbmlsim.
+  SBMLSIM_REF: '69afb7ebb6bfa5109ed92f928ab6f904ba89b19e'
 
 jobs:
   build:

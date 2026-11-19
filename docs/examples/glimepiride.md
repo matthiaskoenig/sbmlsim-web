@@ -22,7 +22,6 @@ The whole-body PBPK model of glimepiride and its metabolites M1 and M2 as an app
       <h2 class="pk-head" id="pk-head">Pharmacokinetic parameters</h2>
       <p class="pk-lead">Of the simulated plasma curves above, computed in this page by the kernel of <a href="https://matthiaskoenig.github.io/pkpdutils/">pkpdutils</a>.</p>
     </div>
-    <label class="pk-draws" id="pk-draws" hidden>draws of the fit <select aria-label="draws of the uncertainty of the fit"></select></label>
   </div>
   <table></table>
   <p class="pk-note"></p>
@@ -81,17 +80,13 @@ The three rows under the rule are what the analysis stood on. A whole-body model
 
 ## The uncertainty of the fit
 
-The ten parameters of the model which were fitted are known to a distribution and not to a number, and the SBML of the model carries those distributions (the `distrib` package, written from the records of the adopted fit). The panels declare a sample of them, so every curve of this page is drawn with the band of its draws - the 5th to the 95th percentile of the draws at every output time - and the control beside the table says how many draws a reader wants: the sample holds 64, a request runs the first 16 of them, and the figures and the table answer the same draws.
+The ten parameters of the model which were fitted are known to a distribution and not to a number, and the SBML of the model carries those distributions (the `distrib` package, written from the records of the adopted fit). The panels declare a sample of them, so every curve of this page is drawn with the band of its draws - the 5th to the 95th percentile of the draws at every output time - and the draws field of the settings above the panels says how many draws a reader wants: the sample holds 64, a request runs the first 16 of them. That field is the one control of the number: the table analyses the very draws the figures shade, so it follows the number the panels ran with and has no field of its own. Every cell carries the standard deviation of its draws and their coefficient of variation, the standard deviation over their mean.
 
 The draws are the uncertainty of the fit and no variability of a population: every draw is the patient of the knobs, with the parameters of one draw of that fit, so a band is what the data the model was fitted to leaves open about this patient and not what two patients would differ by.
 
-The parameters of a shaded curve are a distribution of their own, which no band of a figure states: the 95th percentile of a concentration at every time is the curve of no draw, so its area is the area of no draw either. The page therefore asks the endpoint for the curves of the draws themselves - which travel for a request of one point, where their size is bounded - analyses all of them in one batch of the kernel and reduces that table to the statistics of every parameter with `summarize` of the same kernel, so no statistic is computed in this page. The cell then carries the value of the model, the standard deviation of the draws and the box of their spread against their own median, one axis for the whole table.
+The parameters of a shaded curve are a distribution of their own, which no band of a figure states: the 95th percentile of a concentration at every time is the curve of no draw, so its area is the area of no draw either. The page therefore asks the endpoint for the curves of the draws themselves - which travel for a request of one point, where their size is bounded - analyses all of them in one batch of the kernel and reduces that table to the statistics of every parameter with `summarize` of the same kernel, so no statistic is computed in this page. The cell then carries the value of the model, the standard deviation of the draws, their coefficient of variation (that deviation over the mean of the draws, in percent) and the box of their spread against their own median, one axis for the whole table.
 
 The two phases are what a reader sees: the curve the panel just drew is analysed at once, and the draws of that position follow a moment later. A movement of the dose costs no simulation of the panels, since the grid of their run covers it, but it does cost the runs of the draws, which are of the position itself; the page asks for them once the knobs come to rest.
-
-## Reference
-
-**A Digital Twin of Glimepiride for Personalized and Stratified Diabetes Treatment.** Michelle Elias, Matthias König (2025). Preprints 2025, 2025061264 (preprint). [doi:10.20944/preprints202506.1264.v1](https://doi.org/10.20944/preprints202506.1264.v1)
 
 ## Disclaimer
 
@@ -100,3 +95,7 @@ The software is provided **AS IS**, without warranty of any kind, express or imp
 This software is a **research proof-of-principle** and not fit for any clinical application. It is not intended to diagnose, treat, or inform medication dosing decisions. Always consult with qualified healthcare professionals for medical advice and treatment planning.
 
 The model is licensed under CC BY-SA 4.0 and the source code under MIT; `engine.wasm` contains SUNDIALS (BSD-3-Clause) and KLU (LGPL-2.1-or-later), whose [notices](glimepiride/sbmlsim-core/THIRD_PARTY.md) ship with it.
+
+## Reference
+
+**A Digital Twin of Glimepiride for Personalized and Stratified Diabetes Treatment.** Michelle Elias, Matthias König (2025). Preprints 2025, 2025061264 (preprint). [doi:10.20944/preprints202506.1264.v1](https://doi.org/10.20944/preprints202506.1264.v1)

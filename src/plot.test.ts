@@ -10,12 +10,13 @@ import type { PlotSpec, Points, Series, TextMeasure } from './plot'
 /**
  * The bound of time of one sweep of the renderer, in milliseconds. The
  * invariants are checked over sweeps of thousands of figures, cut into pieces
- * which take at most about half a second on an idle machine: a piece took up to
- * 1.8 s while another test suite kept every core of this machine of 20 busy (a
- * load of 15 to 24), so the bound is what such a machine stays within, and a
- * renderer about ten times slower is not.
+ * which take up to about 0.9 s on an idle machine. The sweeps are deterministic
+ * and only their duration depends on the machine: with a load of 120 busy
+ * processes on 20 cores, pieces took past the former 3 s and the suite failed
+ * with a timeout in a different sweep each time. A bound is there to stop a
+ * hang, not to time the renderer, so it is far above any loaded machine.
  */
-const SWEEP_TIMEOUT = 3_000
+const SWEEP_TIMEOUT = 30_000
 
 /** Build a series of `values` over four x, with a straight ramp as its values. */
 function series(index: number, values?: number[]): Series {

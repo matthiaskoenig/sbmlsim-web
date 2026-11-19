@@ -90,8 +90,8 @@
  * the controls of its page, and the panels are placed with the app. The
  * controls are listed in the order the first panel which declares one lists
  * them, start at the declared default, start there again whenever the page is
- * shown, as the knobs of its panels do, and have a Reset of their own, which
- * can be pressed while one of them is away from its default.
+ * shown, as the knobs of its panels do; the Reset of the page puts them back
+ * with the rest of the card.
  *
  * Every panel a shared knob sets gets the attribute `values`, a JSON object of
  * exactly the shared knobs which set it, written again on every movement of a
@@ -150,6 +150,7 @@
 
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -168,6 +169,8 @@ import {
   failureKind,
 } from './client'
 import type { FailureKind } from './client'
+import type { AppFigure } from './contract'
+import { figureOf, showsFigure, shownPanels as shownOf } from './contract'
 import type {
   AppDeclaration,
   AppPage,
@@ -182,7 +185,7 @@ import { cardLevels } from './columns'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
 import { drawableKnob, keepControlKeys, ownValue, sameValue, snapValue, validValue } from './knob'
-import { placedPanelTag } from './tags'
+import { placedFigureTag, placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
 type ThemeName = 'auto' | 'light' | 'dark'
@@ -195,6 +198,8 @@ const MOST_HEADING = 6
 const HASH_LENGTH = 8
 /** The separator of the parts of the footer. */
 const SEPARATOR = ' · '
+/** The digits of the seconds of the last run. */
+const RUN_DIGITS = 3
 /** The doi resolver a doi is linked to. */
 const DOI_RESOLVER = 'https://doi.org/'
 /** What a doi may be written with in front of its number. */
@@ -203,6 +208,10 @@ const DOI_PREFIX = /^https?:\/\/(?:dx\.)?doi\.org\//i
 const SWITCH_MESSAGE = 'The panels of the variant shown cannot be drawn.'
 /** The label of the select of the scenarios of a page, which are examples of its knobs. */
 const SCENARIO_LABEL = 'Example'
+/** The value of `page` which shows the information of the app, unless a page of the app has that id. */
+const INFORMATION_PAGE = 'information'
+/** The label of the information tab, the last entry of the tab row. */
+const INFORMATION_LABEL = 'Information'
 
 const props = defineProps({
   /** The endpoint of the service, empty is the origin of the page. */
@@ -211,6 +220,12 @@ const props = defineProps({
   model: { type: String, default: '' },
   /** The id of the page which is shown, the first page of the app without. */
   page: { type: String, default: '' },
+  /**
+   * The ids of the panels of the page which are shown, comma separated; absent for the panels
+   * the page declares as shown. The shell writes it when a reader clicks the figure and the
+   * page may set it, as it may set `page`; an empty value is a page with no panel shown.
+   */
+  selection: { type: String, default: undefined },
   /** Which values of the tokens are used: `auto` (the default), `light` or `dark`. */
   theme: { type: String as PropType<ThemeName>, default: 'auto' },
   /**
@@ -263,6 +278,16 @@ const awaiting = ref<ReadonlySet<string>>(new Set())
 const read = new Map<string, AppDeclaration>()
 /** The provenance of the latest answer of each panel of the page, by the id of the panel. */
 const answers = ref<Record<string, Provenance>>({})
+/** The scale of the y axis the reader set for every plot of the page, `undefined` while no one did. */
+const logAll = ref<boolean | undefined>(undefined)
+/** The draws the reader set for every plot of the page, `undefined` while the attribute `draws` rules. */
+const drawsAll = ref<number | undefined>(undefined)
+/** The scale of the y axis of every panel, by the id of the panel, as the panels announce it. */
+const scales = ref<Record<string, boolean>>({})
+/** The draws the latest run of every panel was asked for, by the id of the panel. */
+const used = ref<Record<string, number>>({})
+/** The id of the page which was shown last, which the information view keeps on screen under it. */
+const lastPage = ref('')
 /** What the live region says, the page which was switched to; empty until a reader switches. */
 const announced = ref('')
 
@@ -277,8 +302,37 @@ const shared = ref<Record<string, number>>({})
 /** The page which is shown: the one `page` names, else the first one. */
 const current = computed<AppPage | null>(() => {
   const pages = app.value?.pages ?? []
-  return pages.find((one) => one.id === props.page) ?? pages[0] ?? null
+  const named = pages.find((one) => one.id === props.page)
+  if (named !== undefined) {
+    return named
+  }
+  // the information is a value of `page` and no page of its own: the page which was shown
+  // before it stays the current one, so a switch to it and back moves nothing
+  return (
+    (props.page === INFORMATION_PAGE
+      ? pages.find((one) => one.id === lastPage.value)
+      : undefined) ??
+    pages[0] ??
+    null
+  )
 })
+
+/** Whether the information tab is shown in place of the panels of the page. */
+const information = computed<boolean>(
+  () =>
+    props.page === INFORMATION_PAGE &&
+    !(app.value?.pages ?? []).some((one) => one.id === props.page),
+)
+
+watch(
+  () => current.value?.id,
+  (id) => {
+    if (id !== undefined && !information.value) {
+      lastPage.value = id
+    }
+  },
+  { immediate: true },
+)
 
 /** The variants the reader switches between, empty for an app which has fewer than two. */
 const variants = computed(() => {
@@ -353,17 +407,16 @@ const scenarios = computed<Scenario[]>(() => current.value?.scenarios ?? [])
  * `--_columns-<fit>`, which the container query of the width of the card reads,
  * and the classes `start-<fit>` of the knobs which start a line at that width.
  */
-const levels = computed(() => cardLevels(sharedKnobs.value.length, scenarios.value.length > 0))
+const levels = computed(() => cardLevels(sharedKnobs.value.length))
 
 /**
  * The columns of the grid of the card at every level, as custom properties: the
- * columns of the knobs and, where the Reset has one of its own, `auto`.
+ * columns of the knobs.
  */
 const levelStyle = computed<Record<string, string>>(() =>
   Object.fromEntries(
     levels.value.flatMap((level, index): [string, string][] => [
       [`--_columns-${String(index + 1)}`, String(level.columns)],
-      ...(level.reset ? [[`--_reset-${String(index + 1)}`, 'auto'] as [string, string]] : []),
     ]),
   ),
 )
@@ -419,13 +472,6 @@ function pickScenario(id: string): void {
   ])
 }
 
-/** Whether every shared knob of the page is at its declared default, which a reset changes nothing of. */
-const sharedAtDefaults = computed<boolean>(() =>
-  sharedKnobs.value.every(
-    (one) => (ownValue(shared.value, one.knob.id) ?? one.knob.default) === one.knob.default,
-  ),
-)
-
 /** The heads of the panels of the page by the id of the panel, as the service states them in the app. */
 const heads = computed<Map<string, PanelSummary>>(() => {
   const page = current.value
@@ -433,6 +479,118 @@ const heads = computed<Map<string, PanelSummary>>(() => {
     (page === null ? [] : (app.value?.heads[page.id] ?? [])).map((one) => [one.id, one]),
   )
 })
+
+/** The figure of the app, `null` without one and on a page which does not show it. */
+const figure = computed(() => {
+  const declared = app.value
+  const page = current.value
+  return declared === null || page === null || !showsFigure(page) ? null : figureOf(declared)
+})
+
+/**
+ * The ids of the panels of the page which are shown, in the order the page lists them: the
+ * attribute `selection` or, absent, the panels the page declares as shown. A page without the
+ * figure shows every panel it lists. An id the page does not list is nothing to place.
+ */
+const placed = computed<string[]>(() => {
+  const page = current.value
+  if (page === null) {
+    return []
+  }
+  if (figure.value === null) {
+    return page.panels
+  }
+  const chosen =
+    props.selection === undefined
+      ? shownOf(page)
+      : props.selection.split(',').filter((id) => id !== '')
+  return page.panels.filter((id) => chosen.includes(id))
+})
+
+/** The panels a key path opens which the page lists: what a click on it toggles. */
+function opensOf(key: string): string[] {
+  const listed = current.value?.panels ?? []
+  return (figure.value?.panels[key] ?? []).filter((id) => listed.includes(id))
+}
+
+/**
+ * The figure as the page hands it to the drawing: the panels of every key cut to the ones this
+ * page lists, so a key which opens nothing here is drawn as a decoration, not as a control which
+ * does nothing.
+ */
+const figureOnPage = computed<AppFigure | null>(() => {
+  const one = figure.value
+  if (one === null) {
+    return null
+  }
+  return {
+    ...one,
+    panels: Object.fromEntries(Object.keys(one.panels).map((key) => [key, opensOf(key)])),
+  }
+})
+
+/**
+ * The key paths of the figure every panel of which is on screen, drawn marked. A key only partly
+ * on screen is not marked, and neither is a decoration, which opens nothing.
+ */
+const marked = computed<string[]>(() =>
+  Object.keys(figure.value?.panels ?? {}).filter((key) => {
+    const opens = opensOf(key)
+    return opens.length > 0 && opens.every((id) => placed.value.includes(id))
+  }),
+)
+
+/**
+ * The name of each key path of the figure, the only human name the drawing has since its svg
+ * carries no title: the title of the panel a key opens, of the first one for a key which opens
+ * several.
+ */
+const labels = computed<Record<string, string>>(() =>
+  Object.fromEntries(
+    Object.keys(figure.value?.panels ?? {}).flatMap((key) => {
+      const first = opensOf(key)[0]
+      const title = first === undefined ? undefined : heads.value.get(first)?.title
+      return title === undefined || title === '' ? [] : [[key, title]]
+    }),
+  ),
+)
+
+/**
+ * Toggle the panels of the key path a reader clicked on the figure, and say so.
+ *
+ * A key every panel of which is shown removes them, any other adds the ones missing. Two keys
+ * may open the same panel; a click on a key which is shown removes exactly the panels of that
+ * key, even if another shown key shares one of them, so the click does what its key says and
+ * the other key is then only partly shown and no longer marked.
+ *
+ * @param event the `sbmlsim-figure-select` of the figure
+ */
+function pick(event: Event): void {
+  const key = (event as CustomEvent<{ key: string }>).detail.key
+  const opens = opensOf(key)
+  if (opens.length === 0) {
+    return
+  }
+  const off = opens.every((id) => placed.value.includes(id))
+  const next = (current.value?.panels ?? []).filter((id) =>
+    off
+      ? placed.value.includes(id) && !opens.includes(id)
+      : placed.value.includes(id) || opens.includes(id),
+  )
+  host?.setAttribute('selection', next.join(','))
+  tellSelection(next)
+}
+
+/**
+ * Tell the page the panels it shows now.
+ *
+ * @param panels the ids of the panels shown
+ */
+function tellSelection(panels: string[]): void {
+  host?.dispatchEvent(
+    new CustomEvent('sbmlsim-selection', { detail: { panels }, bubbles: true, composed: true }),
+  )
+}
 
 /**
  * Get the attribute `values` of a panel of the page.
@@ -504,6 +662,129 @@ function resetShared(): void {
   shared.value = Object.fromEntries(sharedKnobs.value.map((one) => [one.knob.id, one.knob.default]))
 }
 
+/** The draws every panel is given: the reader's number, else the attribute of the app. */
+const drawsOfPanels = computed<number | undefined>(() => drawsAll.value ?? props.draws)
+
+/** The value the logarithmic attribute of every placed panel has, absent while no one set it. */
+const logOfPanels = computed<'true' | 'false' | undefined>(() =>
+  logAll.value === undefined ? undefined : logAll.value ? 'true' : 'false',
+)
+
+/**
+ * The scale of the plots of the page: `all` where every placed panel which announced its axis is
+ * logarithmic, `none` where none is, `mixed` where they differ, so the switch shows the state
+ * the plots are in and not the one the reader last asked for.
+ */
+const logState = computed<'all' | 'none' | 'mixed'>(() => {
+  const known = placed.value.flatMap((id) =>
+    id in scales.value ? [scales.value[id] === true] : [],
+  )
+  if (known.length === 0 || known.every((one) => !one)) {
+    return 'none'
+  }
+  return known.every((one) => one) ? 'all' : 'mixed'
+})
+
+/** The draws the latest runs of the placed panels were made with, of the panels which ran. */
+const ranDraws = computed<number[]>(() =>
+  placed.value.flatMap((id) => (id in used.value ? [used.value[id] ?? 0] : [])),
+)
+
+/**
+ * The draws in effect: the most the latest runs of the placed panels were made with, which is the
+ * number a panel held to the sample of its endpoint ran and not the one it was asked for; before
+ * any run the number the reader typed or the attribute asks for.
+ */
+const drawsShown = computed<number | ''>(() => {
+  const ran = ranDraws.value
+  return ran.length > 0 ? Math.max(...ran) : (drawsOfPanels.value ?? '')
+})
+
+/**
+ * Whether the draws control is drawn: not once every placed panel which ran reports no draw, which
+ * is a model with no uncertainty, where the control could only say zero. Before the first run it
+ * is drawn without its text (`unread`), so the card does not change its height when it answers.
+ */
+const drawsKnown = computed<boolean>(() => {
+  const ran = ranDraws.value
+  return ran.length === 0 || ran.some((one) => one > 0) || drawsAll.value !== undefined
+})
+
+const drawsField = useTemplateRef<HTMLInputElement>('drawsField')
+
+/** Show the draws in effect in the field, which Vue leaves alone where the value it computes did not change. */
+function syncDraws(): void {
+  if (drawsField.value !== null && drawsField.value.value !== String(drawsShown.value)) {
+    drawsField.value.value = String(drawsShown.value)
+  }
+}
+
+/**
+ * Take the logarithmic switch of the page, which sets the axis of every plot at once: it turns
+ * them all off when they all are logarithmic and on otherwise. Where the panels differ, because
+ * a panel of two scales keeps its own axis, a second click turns them off.
+ *
+ * @param event the `change` event of the checkbox
+ */
+function onLogAll(event: Event): void {
+  if (!(event.target instanceof HTMLInputElement)) {
+    return
+  }
+  const on = logState.value === 'mixed' ? logAll.value !== true : logState.value !== 'all'
+  // the attribute is what a panel placed later and a reset start from
+  logAll.value = on
+  for (const one of shownPanels()) {
+    ;(one as HTMLElement & { setLog?: (on: boolean) => void }).setLog?.(on)
+  }
+}
+
+/**
+ * Take the draws control of the page; an empty or invalid text goes back to the attribute.
+ *
+ * @param event the `change` event of the number input
+ */
+function onDrawsAll(event: Event): void {
+  if (!(event.target instanceof HTMLInputElement)) {
+    return
+  }
+  const asked = event.target.value.trim() === '' ? Number.NaN : Number(event.target.value)
+  drawsAll.value = Number.isFinite(asked) ? Math.max(0, Math.trunc(asked)) : undefined
+  // the field shows what is asked until the runs say what they used (`syncDraws`)
+  event.target.value = String(drawsOfPanels.value ?? drawsShown.value)
+}
+
+/**
+ * Put the page back as it was drawn: the shared knobs, the scale and the draws of the page, and
+ * the own controls of every panel. The selection stays.
+ */
+async function resetPage(): Promise<void> {
+  logAll.value = undefined
+  drawsAll.value = undefined
+  resetShared()
+  // the panels read the attributes this wrote before they reset themselves
+  await nextTick()
+  for (const one of shownPanels()) {
+    ;(one as HTMLElement & { reset?: () => void }).reset?.()
+  }
+}
+
+/**
+ * The line of the last run: its seconds and its engine, from the provenance the shell collects of
+ * every answer. The latest of the panels is the one which was created last.
+ */
+const runLine = computed<string>(() => {
+  const latest = Object.values(answers.value).reduce<Provenance | null>(
+    (last, one) =>
+      last === null || Date.parse(one.created) > Date.parse(last.created) ? one : last,
+    null,
+  )
+  if (latest === null) {
+    return ''
+  }
+  const seconds = Number(latest.seconds.toFixed(RUN_DIGITS))
+  return `Last run ${String(seconds)} s${SEPARATOR}${latest.engine}`
+})
+
 /** The level of the title of the app, within the levels HTML has. */
 const titleTag = computed<string>(() => {
   const asked = Math.round(props.headingLevel)
@@ -526,6 +807,7 @@ const panelLevel = computed<number>(() => {
  * keep placing the panel they were built with.
  */
 const panelTag = placedPanelTag()
+const figureTag = placedFigureTag()
 
 /** The link of the DOI, `null` for an app which declares none. */
 const doiLink = computed<string | null>(() => {
@@ -648,10 +930,24 @@ function adopt(declared: AppDeclaration, variant: string): void {
     }),
   )
   app.value = declared
+  // a selection which names no panel the page lists in this variant would draw a blank grid, so
+  // the page starts from what it declares as shown, as a change of the page does
+  const kept = props.selection
+  const now = current.value
+  if (
+    kept !== undefined &&
+    kept !== '' &&
+    now !== null &&
+    !kept.split(',').some((one) => now.panels.includes(one))
+  ) {
+    host?.removeAttribute('selection')
+    tellSelection(defaultPanels(now))
+  }
   shownVariant.value = variant
   switching.value = false
   switchFailure.value = null
-  awaiting.value = new Set(page?.panels ?? [])
+  // only the panels on screen answer, the ones of the page which are not selected are not mounted
+  awaiting.value = new Set(placed.value)
 }
 
 /**
@@ -721,7 +1017,7 @@ async function switchTo(variant: string): Promise<void> {
 
 /** Get the panels in the grid, the elements the shell itself placed. */
 function shownPanels(): HTMLElement[] {
-  return grid.value === null ? [] : [...grid.value.querySelectorAll<HTMLElement>('sbmlsim-panel')]
+  return grid.value === null ? [] : [...grid.value.querySelectorAll<HTMLElement>(panelTag)]
 }
 
 /**
@@ -745,9 +1041,27 @@ function collect(event: Event): void {
   const provenance = (event as CustomEvent<{ provenance?: Provenance }>).detail.provenance
   if (provenance !== undefined) {
     // keyed by the panel the shell placed, which a failure of it is dropped by
-    const placed = event.target instanceof Element ? event.target.getAttribute('panel') : null
-    answers.value = { ...answers.value, [placed ?? provenance.panel]: provenance }
+    const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
+    answers.value = { ...answers.value, [id ?? provenance.panel]: provenance }
+    const draws = (event as CustomEvent<{ draws?: number }>).detail.draws
+    if (draws !== undefined) {
+      used.value = { ...used.value, [id ?? provenance.panel]: draws }
+      void nextTick(syncDraws)
+    }
     settle(event)
+  }
+}
+
+/**
+ * Take the scale of the y axis a panel announced.
+ *
+ * @param event the `sbmlsim-scale` event of a panel
+ */
+function collectScale(event: Event): void {
+  const log = (event as CustomEvent<{ log?: boolean }>).detail.log
+  const id = event.target instanceof Element ? event.target.getAttribute('panel') : null
+  if (id !== null && typeof log === 'boolean') {
+    scales.value = { ...scales.value, [id]: log }
   }
 }
 
@@ -793,11 +1107,19 @@ function settle(event: Event): void {
  * @param id the id of the page
  */
 function show(id: string): void {
-  if (id === current.value?.id) {
+  const page = id === INFORMATION_PAGE ? null : current.value?.id
+  if (id === props.page || (id === page && !information.value)) {
     return
   }
+  if (id !== INFORMATION_PAGE && id !== current.value?.id) {
+    // the clicks of the page which is left mean nothing on the one which is shown
+    host?.removeAttribute('selection')
+  }
   host?.setAttribute('page', id)
-  const title = app.value?.pages.find((one) => one.id === id)?.title ?? id
+  const title =
+    id === INFORMATION_PAGE
+      ? INFORMATION_LABEL
+      : (app.value?.pages.find((one) => one.id === id)?.title ?? id)
   announced.value = `Showing ${title}`
   host?.dispatchEvent(
     new CustomEvent('sbmlsim-page', {
@@ -808,16 +1130,102 @@ function show(id: string): void {
   )
 }
 
+/** The panels the information view froze, which it starts again where they are still on screen. */
+let frozenByInformation: (HTMLElement & { activate?: () => void })[] = []
+
+// after the patch, so a switch of the page from the information finds the panels of the old page
+// gone and starts none of them: only a panel which is still connected was frozen by the view and
+// is still the one shown
+watch(
+  information,
+  (shownNow) => {
+    if (shownNow) {
+      frozenByInformation = shownPanels()
+      for (const one of frozenByInformation) {
+        ;(one as HTMLElement & { freeze?: () => void }).freeze?.()
+      }
+      return
+    }
+    for (const one of frozenByInformation) {
+      if (one.isConnected) {
+        one.activate?.()
+      }
+    }
+    frozenByInformation = []
+  },
+  { flush: 'post' },
+)
+
+/**
+ * The panels a page shows before any click: the ones it declares as shown, in the order it lists
+ * them, and every panel for a page without the figure.
+ *
+ * @param page the page
+ * @returns their ids
+ */
+function defaultPanels(page: AppPage): string[] {
+  return figure.value !== null
+    ? page.panels.filter((id) => shownOf(page).includes(id))
+    : page.panels
+}
+
 watch(
   () => current.value?.id,
-  () => {
+  (_id, before) => {
     freezeShown()
     answers.value = {}
+    scales.value = {}
+    used.value = {}
     awaiting.value = new Set()
+    logAll.value = undefined
+    drawsAll.value = undefined
     resetShared()
+    // the clicks on the figure belong to the page they were made on, so whatever changed the
+    // page (a tab, the `page` attribute of a history entry, a shared address) starts the new
+    // page from the panels it declares as shown; a `selection` which was set for the new page
+    // stays: an empty one is nothing shown, and one which names at least one panel of the page
+    // stays whole, since the page drops an id it does not list (a renamed panel must not throw
+    // a shared address away)
+    const page = current.value
+    const given = props.selection
+    const own =
+      given !== undefined &&
+      page !== null &&
+      (given === '' || given.split(',').some((one) => page.panels.includes(one)))
+    if (!own && given !== undefined) {
+      host?.removeAttribute('selection')
+    }
+    // a page without the figure tells it too where a selection was set, so a host which mirrors
+    // the selection does not keep the value of the page left
+    if (
+      before !== undefined &&
+      page !== null &&
+      !own &&
+      (figure.value !== null || given !== undefined)
+    ) {
+      tellSelection(defaultPanels(page))
+    }
   },
   { flush: 'pre' },
 )
+
+// a panel which leaves the screen answers no more: a switch of the variant does not await it
+// and the footer does not name its versions
+watch(placed, (now) => {
+  const on = new Set(now)
+  if ([...awaiting.value].some((id) => !on.has(id))) {
+    awaiting.value = new Set([...awaiting.value].filter((id) => on.has(id)))
+  }
+  if (Object.keys(scales.value).some((id) => !on.has(id))) {
+    scales.value = Object.fromEntries(Object.entries(scales.value).filter(([id]) => on.has(id)))
+  }
+  if (Object.keys(used.value).some((id) => !on.has(id))) {
+    used.value = Object.fromEntries(Object.entries(used.value).filter(([id]) => on.has(id)))
+  }
+  if (Object.keys(answers.value).some((id) => !on.has(id))) {
+    answers.value = Object.fromEntries(Object.entries(answers.value).filter(([id]) => on.has(id)))
+  }
+})
 
 watch(chosen, (variant) => {
   void switchTo(variant)
@@ -851,19 +1259,30 @@ onBeforeUnmount(() => {
         <component :is="titleTag" class="title">{{ app.title }}</component>
         <p v-if="app.subtitle !== ''" class="subtitle">{{ app.subtitle }}</p>
       </header>
-      <div v-if="app.pages.length > 1 || variants.length > 0" class="bar">
-        <nav v-if="app.pages.length > 1" class="nav" aria-label="Pages">
+      <div class="bar">
+        <nav class="nav" part="nav" aria-label="Pages">
           <button
             v-for="one in app.pages"
             :key="one.id"
             type="button"
             class="tab"
             :data-label="one.title"
-            :aria-current="one.id === current.id ? 'page' : undefined"
+            :aria-current="one.id === current.id && !information ? 'page' : undefined"
             :disabled="switching"
             @click="show(one.id)"
           >
             {{ one.title }}
+          </button>
+          <button
+            type="button"
+            class="tab information-tab"
+            part="information-tab"
+            :data-label="INFORMATION_LABEL"
+            :aria-current="information ? 'page' : undefined"
+            :disabled="switching"
+            @click="show(INFORMATION_PAGE)"
+          >
+            {{ INFORMATION_LABEL }}
           </button>
         </nav>
         <div v-if="variants.length > 0" class="variant">
@@ -886,6 +1305,7 @@ onBeforeUnmount(() => {
       </div>
       <div
         v-if="sharedKnobs.length > 0"
+        v-show="!information"
         class="knobs"
         role="group"
         aria-label="Simulation settings of the page"
@@ -914,12 +1334,6 @@ onBeforeUnmount(() => {
             @input="moveShared(one.knob, $event)"
             @change="moveShared(one.knob, $event)"
           />
-          <!-- level with the first line of controls, the selects, and never below a slider -->
-          <div class="knobs-reset">
-            <div class="control-line">
-              <ResetButton :disabled="switching" :idle="sharedAtDefaults" @reset="resetShared()" />
-            </div>
-          </div>
           <!-- hidden, so a screen reader hears the text once, as the description of its
                control, and not again after the controls; aria-describedby reads it -->
           <p v-for="one of sharedKnobs" :id="drivesId(one.knob)" :key="one.knob.id" hidden>
@@ -934,54 +1348,142 @@ onBeforeUnmount(() => {
         {{ FAILURE_MESSAGES[switchFailure] }} {{ SWITCH_MESSAGE }}
       </p>
       <section
-        ref="grid"
-        :key="current.id"
-        class="grid"
-        :class="{
-          switching: switching,
-          failed: switchFailure !== null,
-          small: current.size === 'small',
-        }"
-        :aria-busy="switchCaption !== '' ? 'true' : 'false'"
-        :aria-label="current.title"
-        @sbmlsim-result="collect"
-        @sbmlsim-error="dropFailed"
+        v-if="information"
+        class="information"
+        part="information"
+        :aria-label="INFORMATION_LABEL"
       >
-        <div v-for="one in current.panels" :key="one" class="cell">
-          <component
-            :is="panelTag"
-            auto
-            :endpoint="props.endpoint"
-            :model="props.model"
-            :panel="one"
-            :theme="props.theme"
-            :timeout="props.timeout"
-            :draws="props.draws"
-            :heading-level="panelLevel"
-            :size="current.size === 'small' ? 'small' : 'regular'"
-            :variant="variantOfPanels"
-            :values.attr="valuesOf(one)"
-            :head.attr="headOf(one)"
-            :inert="switching"
-            :aria-hidden.attr="switching ? 'true' : undefined"
-          ></component>
-          <div class="reserve" aria-hidden="true">
-            <div
-              v-if="(heads.get(one)?.title ?? '') !== '' || (heads.get(one)?.subtitle ?? '') !== ''"
-              class="reserve-head"
+        <component
+          :is="`h${String(panelLevel)}`"
+          class="information-title"
+          part="information-title"
+          >{{ app.title }}</component
+        >
+        <p v-if="app.subtitle !== ''" class="information-subtitle" part="information-subtitle">
+          {{ app.subtitle }}
+        </p>
+        <p v-if="app.citation !== ''" class="citation" part="information-citation">
+          {{ app.citation }}
+        </p>
+        <p v-if="doiLink !== null" class="facts" part="information-doi">
+          DOI <a :href="doiLink" target="_blank" rel="noopener">{{ doiText }}</a>
+        </p>
+        <p v-if="app.licenses.length > 0" class="facts" part="information-licenses">
+          License {{ app.licenses.join(', ') }}
+        </p>
+        <template v-if="variants.length > 0">
+          <p class="facts">Variants</p>
+          <ul class="information-variants" part="information-variants">
+            <li v-for="one in variants" :key="one.id">
+              {{ one.label }}<template v-if="one.id === shownVariant"> (shown)</template>
+            </li>
+          </ul>
+        </template>
+        <p v-if="simulatedShown !== ''" class="simulated">{{ simulatedShown }}</p>
+        <p v-if="runLine !== ''" class="information-run" part="information-run">{{ runLine }}</p>
+      </section>
+      <div v-show="!information" class="stage" :class="{ figured: figure !== null }">
+        <component
+          :is="figureTag"
+          v-if="figure !== null"
+          class="figure"
+          :figure.prop="figureOnPage"
+          :marked.prop="marked"
+          :labels.prop="labels"
+          @sbmlsim-figure-select="pick"
+        ></component>
+        <div class="main">
+          <div class="settings" part="settings" role="group" aria-label="Settings of every plot">
+            <label class="setting" part="settings-log">
+              <input
+                type="checkbox"
+                :checked="logState === 'all'"
+                :indeterminate.prop="logState === 'mixed'"
+                @change="onLogAll($event)"
+              />
+              <span>logarithmic y</span>
+            </label>
+            <label
+              v-show="drawsKnown"
+              class="setting"
+              part="settings-draws"
+              :class="{ unread: drawsShown === '' }"
             >
-              <div v-if="(heads.get(one)?.title ?? '') !== ''" class="reserve-title">
-                {{ heads.get(one)?.title }}
-              </div>
-              <div v-if="(heads.get(one)?.subtitle ?? '') !== ''" class="reserve-subtitle">
-                {{ heads.get(one)?.subtitle }}
+              <span>draws</span>
+              <input
+                ref="drawsField"
+                type="number"
+                min="0"
+                step="1"
+                inputmode="numeric"
+                class="draws"
+                part="settings-draws-input"
+                title="The draws of the uncertainty of every plot, 0 is no band; empty goes back to the attribute"
+                :value="drawsShown"
+                :disabled="switching"
+                @change="onDrawsAll($event)"
+              />
+            </label>
+            <span class="setting-reset" part="settings-reset">
+              <ResetButton :disabled="switching" :idle="false" @reset="resetPage()" />
+            </span>
+            <p class="run" part="settings-run" :class="{ held: simulatedHeld }">{{ runLine }}</p>
+          </div>
+          <section
+            ref="grid"
+            :key="current.id"
+            class="grid"
+            :class="{
+              switching: switching,
+              failed: switchFailure !== null,
+              small: current.size === 'small',
+            }"
+            :aria-busy="switchCaption !== '' ? 'true' : 'false'"
+            :aria-label="current.title"
+            @sbmlsim-result="collect"
+            @sbmlsim-scale="collectScale"
+            @sbmlsim-error="dropFailed"
+          >
+            <div v-for="one in placed" :key="one" class="cell">
+              <component
+                :is="panelTag"
+                auto
+                :endpoint="props.endpoint"
+                :model="props.model"
+                :panel="one"
+                :theme="props.theme"
+                :timeout="props.timeout"
+                :draws="drawsOfPanels"
+                :log.attr="logOfPanels"
+                :heading-level="panelLevel"
+                :size="current.size === 'small' ? 'small' : 'regular'"
+                :variant="variantOfPanels"
+                :values.attr="valuesOf(one)"
+                :head.attr="headOf(one)"
+                :inert="switching"
+                :aria-hidden.attr="switching ? 'true' : undefined"
+              ></component>
+              <div class="reserve" aria-hidden="true">
+                <div
+                  v-if="
+                    (heads.get(one)?.title ?? '') !== '' || (heads.get(one)?.subtitle ?? '') !== ''
+                  "
+                  class="reserve-head"
+                >
+                  <div v-if="(heads.get(one)?.title ?? '') !== ''" class="reserve-title">
+                    {{ heads.get(one)?.title }}
+                  </div>
+                  <div v-if="(heads.get(one)?.subtitle ?? '') !== ''" class="reserve-subtitle">
+                    {{ heads.get(one)?.subtitle }}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
         </div>
-      </section>
+      </div>
       <p class="live" aria-live="polite">{{ announced }}</p>
-      <footer class="footer">
+      <footer v-show="!information" class="footer" part="footer">
         <p v-if="app.citation !== ''" class="citation">{{ app.citation }}</p>
         <p class="facts">
           <template v-if="doiLink !== null">
@@ -1283,17 +1785,6 @@ onBeforeUnmount(() => {
   grid-column-start: 1;
 }
 
-/* where the card holds two columns, the Reset takes the second column of the
- * line of the examples, beside their select and level with it, on a line which
- * has the room and uses it otherwise for nothing; in one column it follows the
- * knobs on a line of its own */
-@container knobs (width >= 416px) {
-  .knobs-grid > .scenario ~ .knobs-reset {
-    grid-row: 1 / span 2;
-    grid-column: 2;
-  }
-}
-
 /*
  * The rows a card spans are reserved before its panel has read anything, so a
  * card does not grow under the reader when the declaration and the first run
@@ -1481,6 +1972,130 @@ onBeforeUnmount(() => {
   --_card-pad: 12px;
 
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+/*
+ * The figure of a model is above the grid, centred and at most 900px wide. A model drawing is
+ * dense and wide: its labels are unreadable in a thumbnail and a reader cannot aim at an organ
+ * he cannot read, so the figure takes the side column only where the column is at least 560px
+ * wide. No viewport unit: the app is embedded in a frame whose height is set from its content.
+ */
+.stage.figured {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* the settings every plot of the page shares, a card of one line which wraps; the run line
+   keeps its height empty, so the grid below does not move when the first answer arrives */
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 8px 16px;
+  border: 1px solid var(--_line);
+  border-radius: var(--_radius);
+  background: var(--_bg-card);
+  box-shadow: var(--_shadow);
+  font-size: var(--_font-size-small);
+}
+
+/* the line of the controls is as tall as the tallest of them whether or not the draws field is
+   drawn, so hiding it moves nothing */
+.settings > :not(.run) {
+  box-sizing: border-box;
+  min-height: 24px;
+}
+
+.setting.unread {
+  visibility: hidden;
+}
+
+.setting {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--_fg-soft);
+}
+
+.settings .draws {
+  box-sizing: border-box;
+  /* four digits, a number input's spin buttons, the padding and the border: the value is never clipped */
+  width: calc(4ch + 28px);
+  /* the line of the settings is a flex row, which must not squeeze the field below its width */
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--_line);
+  border-radius: 6px;
+  background: var(--_bg-card);
+  color: var(--_fg);
+  font: inherit;
+}
+
+.run {
+  /* a line of its own at every width, so the answer of the first run adds no line to the card */
+  flex: 1 0 100%;
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--_fg-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.information-run {
+  color: var(--_fg-soft);
+}
+
+.run.held {
+  opacity: 0.5;
+}
+
+.information {
+  padding: 16px;
+  border: 1px solid var(--_line);
+  border-radius: var(--_radius);
+  background: var(--_bg-card);
+  box-shadow: var(--_shadow);
+}
+
+.information > * {
+  margin: 0 0 8px;
+}
+
+.information-variants {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.figure {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 900px;
+  min-width: 0;
+  margin: 0 auto;
+}
+
+/* a column of 560px, the grid beside it keeps the room of one card of 480px: 560 + 16 + 480
+   in the content of a shell of 16px padding */
+@container (min-width: 1088px) {
+  .stage.figured {
+    grid-template-columns: 560px minmax(0, 1fr);
+  }
+
+  .figure {
+    position: sticky;
+    top: 16px;
+    margin: 0;
+  }
 }
 
 /* a figure keeps the room on a phone, where the card is nearly the screen */

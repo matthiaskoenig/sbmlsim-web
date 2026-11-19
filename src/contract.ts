@@ -557,6 +557,76 @@ export interface AppPage {
    * by side; absent, as from a service before sbmlsim 0.28, is `regular`.
    */
   size?: PanelSize
+  /**
+   * Whether the page shows the figure of the app next to its panels; absent, as from a service
+   * before the figure, is `false`.
+   */
+  figure?: boolean
+  /**
+   * The ids of the panels of the page a reader sees before any click on the figure; absent is
+   * empty.
+   */
+  shown?: string[]
+}
+
+/**
+ * The figure of an app, the drawing of its model a reader clicks to open panels.
+ *
+ * The `svg` is trusted markup of the model package which assembles the app, the same origin as
+ * the declarations of the panels, and is not sanitized. Both ends refuse a blank drawing and a
+ * blank title: a figure which draws nothing cannot be told from a broken render. The client
+ * reads them as the service does, which was tightened in sbmlsim to match.
+ */
+export interface AppFigure {
+  /** The drawing as svg markup. */
+  svg: string
+  /** The figure as it is shown. */
+  title: string
+  /** The credit of the drawing, empty for none. */
+  credit: string
+  /**
+   * The panels a click opens, by the key path of the clicked element: the `data-k` attributes of
+   * the drawing joined from the outside in with `/`, `li` or `li/sub:gli`. A key may open several
+   * panels, a group of units is split into one panel per unit. An empty record is legitimate, a
+   * drawing of decoration alone: it is shown and selects nothing.
+   *
+   * The ids need not be ids of the panels of a page, and neither does `AppPage.shown`: the client
+   * reads them as they come and does not cross-validate. The service does, against the compiled
+   * model, and refuses an app whose figure names a panel no page lists, so a consumer may rely on
+   * the ids but treats one it cannot find as nothing to open.
+   */
+  panels: Record<string, string[]>
+}
+
+/**
+ * Get the figure of an app.
+ *
+ * @param app the app
+ * @returns its figure, `null` for an app without one, whether the payload spells `figure` as
+ *   `null` or lacks the key as one before the figure does
+ */
+export function figureOf(app: AppDeclaration): AppFigure | null {
+  return app.figure ?? null
+}
+
+/**
+ * Get whether a page shows the figure of the app.
+ *
+ * @param page the page
+ * @returns `false` for a page which says so or does not say
+ */
+export function showsFigure(page: AppPage): boolean {
+  return page.figure ?? false
+}
+
+/**
+ * Get the ids of the panels a page shows before any click on the figure.
+ *
+ * @param page the page
+ * @returns the ids, empty for a page which names none or does not say
+ */
+export function shownPanels(page: AppPage): string[] {
+  return page.shown ?? []
 }
 
 /** The size of the panels of a page, see `AppPage.size`. */
@@ -626,6 +696,11 @@ export interface AppDeclaration {
    * variant.
    */
   variant: string
+  /**
+   * The figure of the app: `null` for an app without, and absent, as from a service before the
+   * figure, is the same.
+   */
+  figure?: AppFigure | null
 }
 
 /** A model the endpoint serves, as it is listed. */

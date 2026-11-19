@@ -9,6 +9,7 @@ import {
   registerEndpoint,
 } from './client'
 import type { EndpointFetch, FailureKind } from './client'
+import { figureOf, shownPanels, showsFigure } from './contract'
 import type { PanelDeclaration, SimulateResponse } from './contract'
 
 // Every id below is a neutral one: a model, a panel, a knob, a curve and a
@@ -73,6 +74,13 @@ function run(): SimulateResponse {
 /** Serve every request with one answer, or with one failure. */
 function serve(answer: (url: string, init: RequestInit | undefined) => Promise<Response>): void {
   globalThis.fetch = vi.fn(answer) as unknown as typeof fetch
+}
+
+/** Get the one item of a list, which the test knows has one. */
+function only<T>(items: T[]): T {
+  const [item] = items
+  if (item === undefined) throw new Error('the list has no item, the test expects one')
+  return item
 }
 
 /** Get the kind of the failure a call ends in. */
@@ -187,6 +195,83 @@ describe('the client of an endpoint', () => {
       { ...app, heads: undefined },
       { ...app, heads: [] },
       { ...app, heads: { pageA: [{ id: 'panelA', title: 'Panel A' }] } },
+    ]) {
+      body = broken
+      expect(await kindOf(client.app('modelA'))).toBe('body')
+    }
+  })
+
+  it('reads the figure of an app, which an older payload lacks and a service may spell null', async () => {
+    const app = {
+      contract: 'app/1',
+      title: 'Model A',
+      subtitle: '',
+      pages: [{ id: 'pageA', title: 'Page A', panels: ['li_gli'], scenarios: [] }],
+      variants: [],
+      variant: '',
+      citation: '',
+      doi: '',
+      licenses: [],
+      shared: {},
+      heads: {},
+    }
+    const figure = {
+      svg: '<svg/>',
+      title: 'The model',
+      credit: '',
+      panels: { 'li/sub:gli': ['li_gli'] },
+    }
+    let body: unknown = app
+    serve(() => Promise.resolve(json(body)))
+    const client = new PanelClient(ENDPOINT, DEFAULT_TIMEOUT)
+    // no key at all and null are the same, no figure
+    expect((await client.app('modelA')).figure).toBeUndefined()
+    body = { ...app, figure: null }
+    expect((await client.app('modelA')).figure).toBeNull()
+    body = {
+      ...app,
+      pages: [{ ...app.pages[0], figure: true, shown: ['li_gli'] }],
+      figure,
+    }
+    const read = await client.app('modelA')
+    expect(read.figure?.panels['li/sub:gli']).toEqual(['li_gli'])
+    expect(read.pages[0]?.figure).toBe(true)
+    expect(read.pages[0]?.shown).toEqual(['li_gli'])
+    // a drawing of decoration alone selects nothing and is still a figure
+    body = { ...app, figure: { ...figure, panels: {} } }
+    expect((await client.app('modelA')).figure?.panels).toEqual({})
+    // the client reads the ids as they come: the service checks them against the model
+    body = {
+      ...app,
+      pages: [{ ...app.pages[0], figure: true, shown: ['nowhere'] }],
+      figure: { ...figure, panels: { li: ['nowhere_else'] } },
+    }
+    const unchecked = await client.app('modelA')
+    expect(shownPanels(only(unchecked.pages))).toEqual(['nowhere'])
+    expect(figureOf(unchecked)?.panels.li).toEqual(['nowhere_else'])
+    // the accessors give two states where the payload has three
+    const plain = { ...app, pages: [{ ...app.pages[0] }] }
+    body = plain
+    const older = await client.app('modelA')
+    expect(figureOf(older)).toBeNull()
+    expect(showsFigure(only(older.pages))).toBe(false)
+    expect(shownPanels(only(older.pages))).toEqual([])
+    expect(figureOf(read)?.title).toBe('The model')
+    expect(showsFigure(only(read.pages))).toBe(true)
+    for (const broken of [
+      { ...app, figure: [] },
+      { ...app, figure: { ...figure, panels: [] } },
+      { ...app, figure: { ...figure, svg: '' } },
+      { ...app, figure: { ...figure, svg: '  \n' } },
+      { ...app, figure: { ...figure, title: undefined } },
+      { ...app, figure: { ...figure, title: '' } },
+      { ...app, figure: { ...figure, title: ' \t\n' } },
+      { ...app, figure: { ...figure, credit: undefined } },
+      { ...app, figure: { ...figure, panels: { li: [1] } } },
+      { ...app, figure: { ...figure, svg: 1 } },
+      { ...app, figure: { ...figure, panels: { li: 'li_gli' } } },
+      { ...app, pages: [{ ...app.pages[0], figure: 'yes' }] },
+      { ...app, pages: [{ ...app.pages[0], shown: 'li_gli' }] },
     ]) {
       body = broken
       expect(await kindOf(client.app('modelA'))).toBe('body')

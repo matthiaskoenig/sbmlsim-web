@@ -1,8 +1,8 @@
 /**
  * sbmlsim-web: the renderer of the interactive panels of an SBML model.
  *
- * Importing this module registers the custom elements `<sbmlsim-panel>` and `<sbmlsim-app>`, so a
- * page loads one script and writes one tag. The registration is a no-op where
+ * Importing this module registers the custom elements `<sbmlsim-panel>`, `<sbmlsim-app>` and
+ * `<sbmlsim-figure>`, so a page loads one script and writes one tag. The registration is a no-op where
  * the tag name is taken already, which is what a page which loads the library
  * twice does, and it does nothing at all where there is no `customElements` at
  * all, which is what node and a server side render are; `register(tagName)` is
@@ -21,15 +21,24 @@
 
 import { defineCustomElement } from 'vue'
 
-import type { SimulateResponse } from './contract'
+import type { AppFigure, SimulateResponse } from './contract'
 import type { DrawnFigure } from './interpolate'
 import SbmlsimApp from './SbmlsimApp.ce.vue'
+import SbmlsimFigure from './SbmlsimFigure.ce.vue'
 import SbmlsimPanel from './SbmlsimPanel.ce.vue'
-import { APP_TAG, PANEL_TAG, placePanelTag } from './tags'
+import { APP_TAG, FIGURE_TAG, PANEL_TAG, placeFigureTag, placePanelTag } from './tags'
 
-export { CONTRACTS, ContractError, checkContract } from './contract'
+export {
+  CONTRACTS,
+  ContractError,
+  checkContract,
+  figureOf,
+  shownPanels,
+  showsFigure,
+} from './contract'
 export type {
   AppDeclaration,
+  AppFigure,
   AppPage,
   AppVariant,
   Band,
@@ -90,10 +99,10 @@ export type {
   TextMeasure,
 } from './plot'
 
-export { APP_TAG, PANEL_TAG }
+export { APP_TAG, FIGURE_TAG, PANEL_TAG }
 
 /**
- * `<sbmlsim-panel>` as a page sees it: an element with its three methods, which
+ * `<sbmlsim-panel>` as a page sees it: an element with its methods, which
  * `document.querySelector('sbmlsim-panel')` gives a TypeScript host.
  */
 export interface SbmlsimPanelHTMLElement extends HTMLElement {
@@ -103,6 +112,13 @@ export interface SbmlsimPanelHTMLElement extends HTMLElement {
   freeze(): void
   /** Put every knob back to the value its declaration states. */
   reset(): void
+  /**
+   * Set the scale of the y axis as a click on the switch of the panel does, where its curves
+   * share one scale.
+   *
+   * @param on whether the axis is logarithmic
+   */
+  setLog(on: boolean): void
   /**
    * The answer of the last simulation of this panel, a copy, or `null`.
    *
@@ -122,6 +138,19 @@ export interface SbmlsimPanelHTMLElement extends HTMLElement {
 
 /** `<sbmlsim-app>` as a page sees it, an element which is driven by its attributes alone. */
 export type SbmlsimAppHTMLElement = HTMLElement
+
+/**
+ * `<sbmlsim-figure>` as a page sees it: the drawing of a model, which is driven by its two
+ * properties and reports a click as `sbmlsim-figure-select`, `detail: { key }`.
+ */
+export interface SbmlsimFigureHTMLElement extends HTMLElement {
+  /** The figure of the app, `null` for none. */
+  figure: AppFigure | null
+  /** The key paths whose readouts are on screen, drawn marked. */
+  marked: string[]
+  /** The names of the key paths, the accessible names of the controls; the key path without one. */
+  labels: Record<string, string>
+}
 
 /**
  * The class of a custom element of the package, which the browser builds an
@@ -150,6 +179,7 @@ declare global {
   interface HTMLElementTagNameMap {
     'sbmlsim-panel': SbmlsimPanelHTMLElement
     'sbmlsim-app': SbmlsimAppHTMLElement
+    'sbmlsim-figure': SbmlsimFigureHTMLElement
   }
 }
 
@@ -158,7 +188,8 @@ declare global {
  *
  * It carries the attributes `endpoint`, `model`, `panel`, `layout`, `theme`,
  * `hover`, `data`, `fallback`, `timeout`, `heading-level`, `variant`, `values`,
- * `draws` and `auto` and the methods `activate()`, `freeze()` and `reset()`. It dispatches
+ * `draws`, `auto`, `log`, `head` and `size` and the methods `activate()`, `freeze()`,
+ * `reset()` and `setLog()`. It dispatches
  * `sbmlsim-error` when a request failed and `sbmlsim-result`, with the
  * `provenance` and the `spec_hash` of the answer, when a simulation succeeded:
  * never for a failure and never for a stored fallback, which is no simulation.
@@ -170,14 +201,24 @@ export const SbmlsimPanelElement = elementClass<SbmlsimPanelHTMLElement>(
 /**
  * The class of `<sbmlsim-app>`, the shell of the app of a model.
  *
- * It carries the attributes `endpoint`, `model`, `page`, `theme`, `timeout`,
+ * It carries the attributes `endpoint`, `model`, `page`, `selection`, `theme`, `timeout`,
  * `draws` and `heading-level`, and it dispatches `sbmlsim-error` when the app could not be
- * read and `sbmlsim-page`, with the id of the page, when a reader switches the
- * page. It places the panels under the tag `register` was called with, so the
+ * read, `sbmlsim-page`, with the id of the page, when a reader switches the
+ * page, and `sbmlsim-selection`, with the ids of the panels shown, when the selection changes. It places the panels under the tag `register` was called with, so the
  * panel has to be registered under it where the shell is used.
  */
 export const SbmlsimAppElement = elementClass<SbmlsimAppHTMLElement>(
   defineCustomElement(SbmlsimApp),
+)
+
+/**
+ * The class of `<sbmlsim-figure>`, the drawing of a model as the control of its app.
+ *
+ * It carries the properties `figure`, `marked` and `labels` and dispatches `sbmlsim-figure-select` with
+ * the `key` path of the element a reader clicked, where that opens a panel.
+ */
+export const SbmlsimFigureElement = elementClass<SbmlsimFigureHTMLElement>(
+  defineCustomElement(SbmlsimFigure),
 )
 
 /**
@@ -206,19 +247,28 @@ function define(tagName: string, build: () => CustomElementConstructor): boolean
  *   their panels under `tagName`, which a shell reads when it is created, so a
  *   second call changes what the shells built after it place and leaves the
  *   ones already on the page as they are
- * @returns whether this call registered either of them; `false` for tags which
+ * @param figureTagName the tag to register the figure of a model under, `FIGURE_TAG` without
+ * @returns whether this call registered any of them; `false` for tags which
  *   are taken already and for an environment without custom elements, in both
  *   of which the call changes nothing
  */
-export function register(tagName: string = PANEL_TAG, appTagName: string = APP_TAG): boolean {
+export function register(
+  tagName: string = PANEL_TAG,
+  appTagName: string = APP_TAG,
+  figureTagName: string = FIGURE_TAG,
+): boolean {
   placePanelTag(tagName)
+  placeFigureTag(figureTagName)
   const panel = define(tagName, () =>
     tagName === PANEL_TAG ? SbmlsimPanelElement : defineCustomElement(SbmlsimPanel),
   )
   const shell = define(appTagName, () =>
     appTagName === APP_TAG ? SbmlsimAppElement : defineCustomElement(SbmlsimApp),
   )
-  return panel || shell
+  const figure = define(figureTagName, () =>
+    figureTagName === FIGURE_TAG ? SbmlsimFigureElement : defineCustomElement(SbmlsimFigure),
+  )
+  return panel || shell || figure
 }
 
 register()

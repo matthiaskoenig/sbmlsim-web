@@ -15,6 +15,8 @@ repo_name = "matthiaskoenig/sbmlsim-web"
 edit_uri = "edit/main/docs/"
 
 docs_dir = "docs"
+# the plans and the design specs of the development stay in the repository and out of the site
+exclude_docs = "superpowers/"
 site_dir = "site"
 
 # The examples section takes a page per example, e.g. `examples/glimepiride.md`

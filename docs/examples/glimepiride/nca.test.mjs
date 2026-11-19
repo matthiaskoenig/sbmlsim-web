@@ -9,7 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { createRuntime } from './pkpdutils-core/loader.mjs'
 
@@ -123,6 +123,27 @@ function noteText() {
   return document.querySelector('#pk-parameters .pk-note').textContent
 }
 
+/** The answers of one number of draws the stub holds back until a promise settles, or `null`. */
+let hold = null
+
+/**
+ * Answers of one number of draws to hold back.
+ *
+ * @param {number} draws the number of draws whose answers wait
+ * @param {string | null} panel the one analyte whose answers wait, `null` for all of them
+ * @returns {{draws: number, until: Promise<void>, release: () => void}} the hold
+ */
+function heldAt(draws, panel = null) {
+  let release
+  const until = new Promise((resolve) => {
+    release = resolve
+  })
+  return { draws, panel, until, release }
+}
+
+/** The error the stub throws for the answers of one number of draws, or `null`. */
+let failing = null
+
 /** The draws every request of the stub asked for, in the order they were sent. */
 const asked = []
 
@@ -177,6 +198,17 @@ class StubClient {
 
   async simulate(model, panel, body) {
     asked.push({ panel, draws: body.draws })
+    // a test holds the answers of one number of draws back to force the order they come in
+    if (
+      hold !== null &&
+      body.draws === hold.draws &&
+      (hold.panel === null || hold.panel === panel)
+    ) {
+      await hold.until
+    }
+    if (failing !== null && body.draws === failing.draws) {
+      throw new Error(failing.message)
+    }
     return answerOf(panel, body)
   }
 }
@@ -190,7 +222,6 @@ beforeAll(async () => {
   document.body.innerHTML =
     '<sbmlsim-app></sbmlsim-app>' +
     '<section id="pk-parameters">' +
-    '<label class="pk-draws" id="pk-draws" hidden><select></select></label>' +
     '<table></table><p class="pk-note"></p></section>'
   globalThis.sbmlsimWeb = { PanelClient: StubClient }
   // the path of the file and not `import.meta.url`, which is no file url under vitest
@@ -205,10 +236,6 @@ beforeAll(async () => {
     })
   kernel = await createRuntime({ module: wasm })
   page = await import('./nca.mjs')
-  // the module reads the declaration of the panel, which fills the control of the draws
-  await vi.waitFor(() => {
-    expect(document.querySelector('#pk-draws select').options.length).toBeGreaterThan(0)
-  })
 })
 
 describe('the numbers of the table', () => {
@@ -256,6 +283,39 @@ describe('the numbers of the table', () => {
     expect(document.querySelector('#pk-parameters .pk-note').textContent).toContain('8.00 mg')
   })
 
+  /** Tell the page the panels the reader has on screen, as the app does. */
+  function select(panels) {
+    document.dispatchEvent(new CustomEvent('sbmlsim-selection', { detail: { panels } }))
+  }
+
+  /** The headers of the table. */
+  function headers() {
+    return [...document.querySelectorAll('#pk-parameters thead th')].map((one) => one.textContent)
+  }
+
+  it('drops the column of a panel the reader removed and takes it back with the panel', async () => {
+    try {
+      await showAll(DOSE)
+      expect(Number(row('Cmax')[3])).toBeGreaterThan(0)
+      select(['glimepiride', 'm2'])
+      // the column of the panel which left is at its placeholder again, the others stay
+      expect(headers()).toEqual(['Parameter', 'Unit', 'Glimepiride', 'M2'])
+      expect(row('Cmax')).toHaveLength(4)
+      expect(Number(row('Cmax')[2])).toBeGreaterThan(0)
+      expect(Number(row('Cmax')[3])).toBeGreaterThan(0)
+      // a late answer of the panel which left does not bring the column back
+      await show('m1', figureOf(DOSE))
+      expect(headers()).not.toContain('M1')
+      // and the panel which is selected again fills it when it draws
+      select(['glimepiride', 'm1', 'm2'])
+      await show('m1', figureOf(DOSE))
+      expect(headers()).toEqual(['Parameter', 'Unit', 'Glimepiride', 'M1', 'M2'])
+      expect(Number(row('Cmax')[3])).toBeGreaterThan(0)
+    } finally {
+      select(['glimepiride', 'm1', 'm2'])
+    }
+  })
+
   it('leaves the table of a page which carries none', async () => {
     // the module is already started; a second start on a page without the table is what a page
     // which only embeds the app does, and it writes nothing and throws nothing
@@ -264,34 +324,56 @@ describe('the numbers of the table', () => {
 })
 
 describe('the draws of the uncertainty', () => {
-  /** The select of the draws of the page. */
-  function select() {
-    return document.querySelector('#pk-draws select')
+  // a test which fails before it releases the answers it held back must not hang the next ones
+  afterEach(() => {
+    hold?.release()
+    hold = null
+    failing = null
+  })
+
+  /**
+   * The panels of the app run with a number of draws, as the draws field of its settings card
+   * makes them: every panel announces the run it answered with the draws it asked for.
+   *
+   * @param {number} draws the draws of the runs
+   */
+  function ran(draws) {
+    const element = document.createElement('div')
+    document.body.append(element)
+    for (const panel of ['glimepiride', 'm1', 'm2']) {
+      element.dispatchEvent(
+        new CustomEvent('sbmlsim-result', {
+          detail: { panel, draws },
+          bubbles: true,
+          composed: true,
+        }),
+      )
+    }
+    element.remove()
   }
 
   /** Wait for the draws of the position which is shown to be back in the table. */
   async function settle(name = 'Cmax') {
     await vi.waitFor(
       () => {
-        expect(cell(name, 2).querySelector('.pk-spread')).not.toBeNull()
+        // the draws come analyte after analyte: wait for the last one, the third column
+        expect(cell(name, 4).querySelector('.pk-spread')).not.toBeNull()
       },
       { timeout: 5000 },
     )
   }
 
-  it('offers what the panel declares and starts at the draws of its declaration', () => {
-    expect(document.querySelector('#pk-draws').hidden).toBe(false)
-    expect([...select().options].map((one) => one.value)).toEqual(['0', '8', '16'])
-    expect(select().value).toBe('8')
+  it('has no control of its own: the draws field of the app is the one', () => {
+    expect(document.querySelector('#pk-draws')).toBeNull()
   })
 
-  it('fills the spread and the box of a cell with the draws of that position', async () => {
+  it('starts at the draws of the declaration and fills a cell with the draws of that position', async () => {
     asked.length = 0
     await showAll(DOSE)
     // the value of the cell is there before the draws are asked for at all
     expect(Number(cell('Cmax', 2).querySelector('.pk-point').textContent)).toBeGreaterThan(0)
     await settle()
-    // one request per analyte, each for the draws of the control
+    // one request per analyte, each for the draws of the declaration
     expect(asked).toEqual([
       { panel: 'glimepiride', draws: 8 },
       { panel: 'm1', draws: 8 },
@@ -303,10 +385,28 @@ describe('the draws of the uncertainty', () => {
     // the marks of the box: the range of the draws, their middle half and the value
     expect(peak.querySelectorAll('svg.pk-box rect').length).toBe(4)
     expect(peak.title).toContain('8 draws: median')
+    expect(peak.title).toContain('coefficient of variation')
+    // the coefficient of variation is the standard deviation over the mean of the draws
+    // the draws of the stub are the curve times 1 + 0.1 sin(draw + 1), so the peak of the draws
+    // varies as those factors do: the sample standard deviation over the mean, in percent
+    const factors = Array.from({ length: 8 }, (_, draw) => 1 + 0.1 * Math.sin(draw + 1))
+    const mean = factors.reduce((sum, one) => sum + one, 0) / factors.length
+    const sd = Math.sqrt(
+      factors.reduce((sum, one) => sum + (one - mean) ** 2, 0) / (factors.length - 1),
+    )
+    expect(peak.querySelector('.pk-cv').textContent).toBe(`CV ${page.format(100 * (sd / mean))} %`)
     // the time of the peak is the same in every draw of a scaled curve, so its spread is 0
     expect(cell('tmax', 2).querySelector('.pk-spread').textContent).toBe('± 0.00')
     // the metabolites carry no clearance of the dose, so that cell carries no box either
     expect(cell('CL/F', 3).querySelector('.pk-spread')).toBeNull()
+    expect(cell('CL/F', 3).querySelector('.pk-cv')).toBeNull()
+    // the metabolite columns got their spread, their CV and their box too, not only the first
+    for (const column of [3, 4]) {
+      const one = cell('Cmax', column)
+      expect(one.querySelector('.pk-spread').textContent).toMatch(/^± \d/)
+      expect(one.querySelector('.pk-cv').textContent).toMatch(/^CV \d/)
+      expect(one.querySelector('svg.pk-box')).not.toBeNull()
+    }
     const note = noteText()
     expect(note).toContain('standard deviation of 8 draws')
     expect(note).toContain('fit test')
@@ -314,12 +414,113 @@ describe('the draws of the uncertainty', () => {
     expect(note).toMatch(/axis of ± \d/)
   })
 
-  it('asks for the draws a reader picks and holds the panels of the app to them', async () => {
+  it('says it is computing while the draws are in flight and states them once back', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    ran(16)
+    // the draws are asked for and not yet back: the note must not say there are none
+    expect(noteText()).toContain('Computing the 16 draws')
+    expect(noteText()).not.toContain('set the draws')
+    await settle()
+    expect(noteText()).toContain('standard deviation of 16 draws')
+  })
+
+  /** Tell the page the panels the reader has on screen, as the app does. */
+  function selectIn(panels) {
+    document.dispatchEvent(new CustomEvent('sbmlsim-selection', { detail: { panels } }))
+  }
+
+  it('says there is nothing to show once the reader removed every panel, and drops the draws note', async () => {
+    try {
+      ran(8)
+      await showAll(DOSE)
+      await settle()
+      expect(noteText()).toContain('standard deviation of 8 draws')
+      selectIn([])
+      expect(document.querySelectorAll('#pk-parameters tr')).toHaveLength(0)
+      expect(noteText()).toBe('Nothing to show: none of the plasma curves is on screen.')
+    } finally {
+      selectIn(['glimepiride', 'm1', 'm2'])
+    }
+  })
+
+  it('keeps saying it is computing until the draws of every analyte are back', async () => {
     asked.length = 0
-    select().value = '16'
-    select().dispatchEvent(new Event('change'))
-    // the figures of the app shade the draws of the reader
-    expect(document.querySelector('sbmlsim-app').draws).toBe(16)
+    ran(8)
+    hold = heldAt(8, 'm2')
+    // a position of its own, so no spread of an earlier test is left in the rows
+    await showAll(7 * DOSE)
+    // the first analyte is back with its spread while the last one is still on its way
+    await vi.waitFor(() => {
+      expect(cell('Cmax', 2).querySelector('.pk-spread')?.textContent).toMatch(/^± \d/)
+    })
+    await vi.waitFor(() => {
+      expect(asked.some((one) => one.panel === 'm2')).toBe(true)
+    })
+    expect(cell('Cmax', 4).querySelector('.pk-spread')?.textContent ?? '').toBe('')
+    expect(noteText()).toContain('Computing the 8 draws')
+    expect(noteText()).not.toContain('standard deviation of')
+    hold.release()
+    await settle()
+    expect(noteText()).toContain('standard deviation of 8 draws')
+    expect(cell('Cmax', 4).querySelector('.pk-spread')).not.toBeNull()
+  })
+
+  it('drops the loop of draws a new number superseded, even when it answers last', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    asked.length = 0
+    hold = heldAt(16)
+    ran(16)
+    // the loop of 16 is in flight, its first answer held back, when the number moves again
+    await vi.waitFor(() => {
+      expect(asked.some((one) => one.draws === 16)).toBe(true)
+    })
+    ran(8)
+    await settle()
+    await vi.waitFor(() => {
+      expect(noteText()).toContain('standard deviation of 8 draws')
+    })
+    // now the superseded loop answers, after the one which replaced it
+    hold.release()
+    hold = null
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    // it writes nothing: the table states the draws of the last number only
+    expect(noteText()).toContain('standard deviation of 8 draws')
+    expect(cell('Cmax', 2).title).toContain('8 draws: median')
+    expect(cell('Cmax', 3).title).toContain('8 draws: median')
+    expect(cell('Cmax', 4).title).toContain('8 draws: median')
+  })
+
+  it('drops the failure of a superseded loop and keeps the table of the loop which won', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    asked.length = 0
+    // the answer of 16 draws is held back and then fails, as a request which times out does
+    hold = heldAt(16)
+    failing = { draws: 16, message: 'the endpoint timed out' }
+    ran(16)
+    await vi.waitFor(() => {
+      expect(asked.some((one) => one.draws === 16)).toBe(true)
+    })
+    ran(8)
+    await settle()
+    await vi.waitFor(() => {
+      expect(noteText()).toContain('standard deviation of 8 draws')
+    })
+    hold.release()
+    hold = null
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(noteText()).not.toContain('could not be computed')
+    expect(noteText()).toContain('standard deviation of 8 draws')
+  })
+
+  it('asks for the draws the panels ran with', async () => {
+    asked.length = 0
+    ran(16)
     // the spread of the draws before is gone until the new ones are back
     expect(cell('Cmax', 2).querySelector('.pk-spread')).toBeNull()
     await settle()
@@ -327,22 +528,77 @@ describe('the draws of the uncertainty', () => {
     expect(noteText()).toContain('standard deviation of 16 draws')
   })
 
-  it('asks for nothing and states nothing when a reader turns them off', async () => {
+  it('holds the draws to what the endpoint can answer', async () => {
+    ran(8)
+    await settle()
     asked.length = 0
-    select().value = '0'
-    select().dispatchEvent(new Event('change'))
-    expect(document.querySelector('sbmlsim-app').draws).toBe(0)
+    // more than the sample holds is the sample, as the panels of the app run it
+    ran(64)
+    await settle()
+    expect(asked.map((one) => one.draws)).toEqual([16, 16, 16])
+  })
+
+  it('asks for nothing and states nothing when the panels ran without draws', async () => {
+    asked.length = 0
+    ran(0)
     await showAll(DOSE)
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(asked).toEqual([])
     expect(cell('Cmax', 2).querySelector('.pk-spread')).toBeNull()
     expect(cell('Cmax', 2).querySelector('svg.pk-box')).toBeNull()
-    expect(noteText()).toContain('pick the draws above')
+    expect(noteText()).toContain('set the draws in the settings above the panels')
     // and back on again, so the table of a reader who changed their mind is the same table
-    select().value = '8'
-    select().dispatchEvent(new Event('change'))
+    ran(8)
     await settle()
     expect(asked.map((one) => one.draws)).toEqual([8, 8, 8])
+  })
+
+  it('shows the failure of the loop which counts', async () => {
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+    failing = { draws: 16, message: 'the endpoint timed out' }
+    ran(16)
+    await vi.waitFor(() => {
+      expect(noteText()).toContain('could not be computed: the endpoint timed out')
+    })
+    // the next analysis of a position clears the failure, so the tests after this one start clean
+    failing = null
+    ran(8)
+    await showAll(DOSE)
+    await settle()
+  })
+})
+
+describe('the information view of the app', () => {
+  /** Announce the page the reader switched to, as the app does. */
+  function openPage(page) {
+    document
+      .querySelector('sbmlsim-app')
+      .dispatchEvent(
+        new CustomEvent('sbmlsim-page', { detail: { page }, bubbles: true, composed: true }),
+      )
+  }
+
+  it('takes the table away and brings it back with the next page', () => {
+    const section = document.querySelector('#pk-parameters')
+    openPage('information')
+    expect(section.hidden).toBe(true)
+    openPage('overview')
+    expect(section.hidden).toBe(false)
+  })
+
+  it('follows the page attribute a deployment sets from outside', async () => {
+    const section = document.querySelector('#pk-parameters')
+    const app = document.querySelector('sbmlsim-app')
+    app.setAttribute('page', 'information')
+    await vi.waitFor(() => {
+      expect(section.hidden).toBe(true)
+    })
+    app.setAttribute('page', 'overview')
+    await vi.waitFor(() => {
+      expect(section.hidden).toBe(false)
+    })
   })
 })
 
@@ -422,10 +678,32 @@ describe('the statistics of the draws', () => {
     expect(statistics.tmax.sd).toBeCloseTo(0, 10)
   })
 
+  it('reports the coefficient of variation of every parameter', () => {
+    const statistics = page.statisticsOf(kernel.summarize(page.summaryRequestOf(answerOf())))
+    // a fraction: the standard deviation over the mean of the draws, here of 1, 1.1 and 0.9
+    // times one curve, so the peak and the area vary by a tenth and the time of the peak by none
+    expect(page.STATISTICS).toContain('cv')
+    expect(statistics.cmax.cv).toBeCloseTo(0.1, 6)
+    expect(statistics.auc_inf_obs.cv).toBeCloseTo(0.1, 2)
+    expect(statistics.tmax.cv).toBeCloseTo(0, 10)
+  })
+
   it('leaves a parameter the kernel has none of as a missing number', () => {
     const statistics = page.statisticsOf({ header: { statistics: ['sd'], width: 0 }, values: [] })
     expect(statistics.cmax.median).toBeNaN()
     expect(statistics.cmax.sd).toBeNaN()
+  })
+})
+
+describe('the coefficient of variation of a cell', () => {
+  it('is a percentage of the fraction the kernel answers', () => {
+    expect(page.variationText(0.1)).toBe('CV 10.0 %')
+    expect(page.variationText(0.0123)).toBe('CV 1.23 %')
+  })
+
+  it('is a dash and no dangling percent sign where there is none', () => {
+    expect(page.variationText(Number.NaN)).toBe('CV –')
+    expect(page.variationText(Number.POSITIVE_INFINITY)).toBe('CV –')
   })
 })
 
@@ -462,15 +740,6 @@ describe('the box of a cell', () => {
     expect(page.boxScale([box(-0.2, 0.4)])).toBe(1)
     expect(page.boxScale([])).toBe(0)
     expect(page.boxScale([null])).toBe(0)
-  })
-})
-
-describe('the control of the draws', () => {
-  it('offers the powers of two the sample of the endpoint holds, and none', () => {
-    expect(page.drawChoices(64)).toEqual([0, 8, 16, 32, 64])
-    expect(page.drawChoices(16)).toEqual([0, 8, 16])
-    expect(page.drawChoices(24)).toEqual([0, 8, 16, 24])
-    expect(page.drawChoices(0)).toEqual([0])
   })
 })
 

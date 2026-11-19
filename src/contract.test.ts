@@ -7,6 +7,7 @@ import { PanelClient } from './client'
 import { CONTRACTS, ContractError, checkContract } from './contract'
 import type {
   AppDeclaration,
+  AppFigure,
   PanelDataResponse,
   PanelDeclaration,
   SimulateRequest,
@@ -148,7 +149,17 @@ const app: AppDeclaration = {
   contract: 'app/1',
   title: 'Model A',
   subtitle: 'what the model is',
-  pages: [{ id: 'pageA', title: 'Page A', panels: ['panelA', 'panelB'], scenarios: [] }],
+  pages: [
+    {
+      id: 'pageA',
+      title: 'Page A',
+      panels: ['panelA', 'panelB'],
+      scenarios: [],
+      size: 'regular',
+      figure: false,
+      shown: [],
+    },
+  ],
   variants: [],
   citation: 'Author et al. (2026)',
   doi: '10.0000/zenodo.0000000',
@@ -185,6 +196,14 @@ const app: AppDeclaration = {
     ],
   },
   variant: 'default',
+  figure: null,
+}
+
+const figure: AppFigure = {
+  svg: '<svg/>',
+  title: 'The model',
+  credit: '',
+  panels: { 'li/sub:gli': ['li_gli'] },
 }
 
 describe('the contracts', () => {
@@ -348,5 +367,10 @@ describe('the payloads of the service', () => {
     expect(keys(served.data)).toEqual(keys(data))
     expect(keys((served.data.series as unknown[])[0])).toEqual(keys(data.series[0]))
     expect(keys(served.app)).toEqual(keys(app))
+    for (const page of served.app.pages as unknown[]) {
+      expect(keys(page)).toEqual(keys(app.pages[0]))
+    }
+    // the fixture is the app of a model without a figure, so the keys of one are pinned here
+    expect(keys(figure)).toEqual(['credit', 'panels', 'svg', 'title'])
   })
 })
