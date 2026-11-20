@@ -212,6 +212,8 @@ const SCENARIO_LABEL = 'Example'
 const INFORMATION_PAGE = 'information'
 /** The label of the information tab, the last entry of the tab row. */
 const INFORMATION_LABEL = 'Information'
+/** What the button which undoes the panels a reader picked from the drawing says it does. */
+const CLEAR_TITLE = 'Show the panels the page starts with'
 
 const props = defineProps({
   /** The endpoint of the service, empty is the origin of the page. */
@@ -591,6 +593,45 @@ function tellSelection(panels: string[]): void {
     new CustomEvent('sbmlsim-selection', { detail: { panels }, bubbles: true, composed: true }),
   )
 }
+
+/**
+ * Whether a reader picked the panels of the page from the drawing.
+ *
+ * It is the state the clear of the selection undoes: the panels shown are not the ones the page
+ * declares as shown, in its order.
+ */
+const picked = computed<boolean>(() => {
+  const page = current.value
+  if (page === undefined || page === null || figure.value === null) {
+    return false
+  }
+  const base = defaultPanels(page)
+  const now = placed.value
+  return now.length !== base.length || now.some((id, index) => id !== base[index])
+})
+
+/**
+ * Show the panels the page declares again, which is what a reader picked undone.
+ *
+ * The attribute goes with them: a page which was given no selection is where this leaves the
+ * shell, so the next page starts from its own panels as it does on a first visit.
+ */
+function clearSelection(): void {
+  const page = current.value
+  if (page === undefined || page === null) {
+    return
+  }
+  host?.removeAttribute('selection')
+  tellSelection(defaultPanels(page))
+}
+
+/**
+ * Whether the panels of the page are drawn as a wall of readouts.
+ *
+ * A page which draws the figure of its model carries the switch of the axis, the reset and the
+ * line of the run above its grid, so its panels show their head and their figure alone.
+ */
+const compactPanels = computed<boolean>(() => figure.value !== null)
 
 /**
  * Get the attribute `values` of a panel of the page.
@@ -1424,6 +1465,18 @@ onBeforeUnmount(() => {
                 @change="onDrawsAll($event)"
               />
             </label>
+            <button
+              v-if="figure !== null"
+              type="button"
+              class="action"
+              part="settings-clear"
+              :disabled="switching"
+              :aria-disabled="picked ? undefined : 'true'"
+              :title="CLEAR_TITLE"
+              @click="picked && clearSelection()"
+            >
+              Clear selection
+            </button>
             <span class="setting-reset" part="settings-reset">
               <ResetButton :disabled="switching" :idle="false" @reset="resetPage()" />
             </span>
@@ -1457,6 +1510,7 @@ onBeforeUnmount(() => {
                 :log.attr="logOfPanels"
                 :heading-level="panelLevel"
                 :size="current.size === 'small' ? 'small' : 'regular'"
+                :compact.prop="compactPanels"
                 :variant="variantOfPanels"
                 :values.attr="valuesOf(one)"
                 :head.attr="headOf(one)"
@@ -2033,6 +2087,32 @@ onBeforeUnmount(() => {
 
 .setting.unread {
   visibility: hidden;
+}
+
+/* a button of the settings card which is no reset, drawn as the reset is */
+.action {
+  padding: 3px 10px;
+  border: 1px solid var(--_line);
+  border-radius: 6px;
+  background: var(--_bg-card);
+  color: var(--_fg);
+  font-family: inherit;
+  font-size: var(--_font-size-small);
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled, [aria-disabled='true']) {
+  border-color: var(--_accent);
+  color: var(--_accent);
+}
+
+/* a button with nothing to do is drawn as one which does nothing and keeps its focus, as the
+   reset of the card does */
+.action:disabled,
+.action[aria-disabled='true'] {
+  color: var(--_fg-soft);
+  cursor: default;
+  opacity: 0.6;
 }
 
 .setting {

@@ -477,6 +477,18 @@ const props = defineProps({
    */
   size: { type: String as PropType<PanelSize>, default: 'regular' },
   /**
+   * Whether the panel is drawn as one card of a wall of readouts: its head and
+   * its figure, without the switch of the axis, the reset and the line of the
+   * run, and with its own controls only where it has knobs of its own.
+   *
+   * It is for a page which carries those itself, the shell of an app whose page
+   * draws the figure of its model: a reader picks the readouts from the drawing
+   * and reads them side by side, and one switch, one reset and one line of the
+   * run above the grid say for every panel what three controls in every card
+   * would say over and over. A panel still shows its errors.
+   */
+  compact: { type: Boolean, default: false },
+  /**
    * Which values of the tokens are used: `auto` (the default), `light` or
    * `dark`. It is read by the style of the element and not by its script: the
    * attribute stays on the host, where `theme.css` matches it.
@@ -1612,6 +1624,12 @@ const footer = computed<string>(() => {
   }
   return parts.join(FOOTER_SEPARATOR)
 })
+
+/** The line of the run a reader sees, which a compact panel leaves to its page. */
+const shownFooter = computed<string>(() => (props.compact ? '' : footer.value))
+
+/** The line of the run of the variant before a switch, as `shownFooter`. */
+const shownHeldFoot = computed<string>(() => (props.compact ? '' : heldFoot.value))
 
 /**
  * Get the index of the grid nearest to a pixel of the x axis, by scanning it.
@@ -3106,7 +3124,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
     ref="root"
     part="panel"
     class="panel"
-    :class="[`layout-${drawnLayout}`, { frozen: frozen }]"
+    :class="[`layout-${drawnLayout}`, { frozen: frozen, compact: props.compact }]"
   >
     <header v-if="title !== '' || subtitle !== ''" class="head">
       <component :is="headingTag" v-if="title !== ''" :id="TITLE_ID" class="title">{{
@@ -3116,6 +3134,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
     </header>
     <div class="body">
       <div
+        v-if="!props.compact || drawnAxes.length > 0"
         class="controls"
         :class="{ 'control-row': drawnLayout !== 'sidebar' }"
         role="group"
@@ -3135,7 +3154,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
         <!-- disabled with the knobs while no declaration is read, the first one or
              the one of a variant a reader switched to: a toggle made then would be
              undone by the declaration, which sets the axis it declares -->
-        <div class="options">
+        <div v-if="!props.compact" class="options">
           <div class="control-line">
             <label class="toggle">
               <input
@@ -3246,12 +3265,18 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
         </p>
       </div>
     </div>
-    <div v-if="errorMessage !== '' || footer !== '' || heldFoot !== ''" part="foot" class="foot">
+    <div
+      v-if="errorMessage !== '' || shownFooter !== '' || shownHeldFoot !== ''"
+      part="foot"
+      class="foot"
+    >
       <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
-      <p v-if="footer !== ''" class="provenance">{{ footer }}</p>
+      <p v-if="shownFooter !== ''" class="provenance">{{ shownFooter }}</p>
       <!-- the provenance of the figure of the variant before a switch, which the
            panel holds, dimmed and hidden from a reader as that figure is -->
-      <p v-else-if="heldFoot !== ''" class="provenance held" aria-hidden="true">{{ heldFoot }}</p>
+      <p v-else-if="shownHeldFoot !== ''" class="provenance held" aria-hidden="true">
+        {{ shownHeldFoot }}
+      </p>
     </div>
   </div>
 </template>
@@ -3310,6 +3335,19 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
   text-align: left;
   text-transform: none;
   letter-spacing: normal;
+}
+
+/* one card of a wall of readouts: its head and its figure, nothing between them */
+.panel.compact {
+  gap: 4px;
+}
+
+.panel.compact .title {
+  font-size: 14px;
+}
+
+.panel.compact .body {
+  gap: 8px;
 }
 
 .head {

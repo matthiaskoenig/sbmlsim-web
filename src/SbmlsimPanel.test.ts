@@ -656,6 +656,23 @@ describe('the declaration and the controls', () => {
     expect(footer).toContain('0.079 s')
   })
 
+  it('shows no options and no line of the run when it is compact', async () => {
+    const element = await started({ compact: '' })
+    expect(shadow(element).querySelector('.options')).toBeNull()
+    expect(shadow(element).querySelector('.provenance')).toBeNull()
+    // the head and the figure are what is left of the card
+    expect(textOf(element, '.title')).not.toBe('')
+    expect(figure(element)).not.toBe('')
+  })
+
+  it('shows its own knobs but no empty control group when it is compact', async () => {
+    const element = await started({ compact: '' })
+    expect(shadow(element).querySelectorAll('.knob').length).toBeGreaterThan(0)
+    const hidden = await started({ compact: '', values: JSON.stringify({ knobA: 1, knobB: 1 }) })
+    expect(shadow(hidden).querySelectorAll('.knob')).toHaveLength(0)
+    expect(shadow(hidden).querySelector('.controls')).toBeNull()
+  })
+
   it('draws the title at the level of heading the page asks for', async () => {
     expect(shadow(await started()).querySelector('h2.title')).not.toBeNull()
     expect(shadow(await started({ 'heading-level': '3' })).querySelector('h3.title')).not.toBeNull()
