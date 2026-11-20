@@ -23,7 +23,7 @@ sbmlsim-web needs an endpoint of **sbmlsim >= 0.24.0**, the first release whose 
 **Install.** A page loads one script, from a CDN or from the package:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.5.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-panel
   endpoint="https://models.example.org"
   model="MODEL"
@@ -40,7 +40,7 @@ npm install sbmlsim-web
 import 'sbmlsim-web' // registers <sbmlsim-panel>, <sbmlsim-app> and <sbmlsim-figure>
 ```
 
-The script is pinned to a release (`@0.5.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.5.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()`, `reset()`, `result()` and `drawn()` in TypeScript.
+The script is pinned to a release (`@0.6.0`), so a page does not change under its readers when a new one is published; `https://unpkg.com/sbmlsim-web@0.6.0` serves the same file. Vue is inlined in every bundle, so a page needs nothing else, and the types (`dist/types`) give `document.querySelector('sbmlsim-panel')` its `activate()`, `freeze()`, `reset()`, `result()` and `drawn()` in TypeScript.
 
 **The endpoint.** A page of another origin than the service is answered only when the service allows its origin, once per origin of the pages which embed it:
 
@@ -55,7 +55,7 @@ A page served by the service itself (`--static DIR`, `endpoint=""`) is one origi
 ```toml
 # zensical.toml
 [project]
-extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.5.0/dist/sbmlsim-web.iife.js"]
+extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"]
 # optional: the panels take the background of the palette as their surface
 extra_css = ["sbmlsim.css"]
 ```
@@ -84,7 +84,7 @@ The palettes of the theme declare their colour scheme (`slate` is dark), and a p
     data-prevent-swipe
   ></sbmlsim-panel>
 </section>
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.5.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"></script>
 <script>
   const deck = new Reveal()
   const start = (slide) => {
@@ -219,7 +219,7 @@ A panel dispatches `sbmlsim-result` for every successful simulation, never for a
 An `endpoint` which starts with `local:` is no server: it is answered by a function of the page itself, which the page registers under that exact name with `registerEndpoint(endpoint, fetcher)`. This is how a static page (GitHub Pages, a course, a file share) runs the panels of a model without a service: the function answers the routes of `python -m sbmlsim.serve` inside the page, e.g. on a simulator which runs in Web Workers in the browser of the reader ([sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function, `createPanelEndpoint` of its `js/panels.mjs`, which answers the routes from a bundle the service exports).
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.5.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
 <script type="module">
   import { createPanelEndpoint } from 'https://cdn.jsdelivr.net/npm/sbmlsim-core@0.6.0/panels.mjs'
