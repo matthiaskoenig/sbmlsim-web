@@ -9,7 +9,7 @@ The script is loaded once for the whole site and the element is a raw HTML block
 ```toml
 # zensical.toml
 [project]
-extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"]
+extra_javascript = ["https://cdn.jsdelivr.net/npm/sbmlsim-web@0.7.0/dist/sbmlsim-web.iife.js"]
 # optional: the panels take the colours of the palette
 extra_css = ["stylesheets/sbmlsim.css"]
 ```
@@ -44,7 +44,7 @@ A deck has every slide in the page, so it starts a panel when its slide is shown
     data-prevent-swipe
   ></sbmlsim-panel>
 </section>
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.7.0/dist/sbmlsim-web.iife.js"></script>
 <script>
   const deck = new Reveal()
   const start = (slide) => {
@@ -80,7 +80,7 @@ A plain page is one script tag and one element tag:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hydrochlorothiazide in renal impairment</title>
-    <script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.7.0/dist/sbmlsim-web.iife.js"></script>
   </head>
   <body>
     <sbmlsim-panel
