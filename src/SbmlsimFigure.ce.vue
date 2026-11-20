@@ -24,6 +24,18 @@
  * `aria-pressed`, which is how the figure shows the state of the dashboard; the
  * element only draws what it is told and the app decides what a click does, so
  * a click on a marked path is reported like any other one.
+ *
+ * A model drawing is dense and wide, and in the column of a page its labels are
+ * small, so the element shows it at the size of the window in a dialog: the
+ * button in the corner of the figure opens it, and so does a click on the
+ * drawing which opens no panel, which is every place of it that is not a
+ * control. A click on a control of the enlarged drawing reports its path and
+ * closes the dialog, so a reader aims at an organ in the large drawing and
+ * lands back on the panels it opened; a click beside the drawing, the close
+ * button and Escape close it as well. The drawing is not copied into the
+ * dialog, it moves there and back (`Teleport`), so the ids inside the svg stay
+ * unique, the controls and the marks are the ones the page decorated, and one
+ * listener serves both places.
  */
 import { computed, onMounted, ref, useHost, watch } from 'vue'
 import type { PropType } from 'vue'
@@ -58,6 +70,27 @@ const host = useHost()
 
 /** The wrapper the drawing is inserted into. */
 const drawing = ref<HTMLElement | null>(null)
+
+/** The dialog which holds the drawing while it is enlarged. */
+const overlay = ref<HTMLDialogElement | null>(null)
+
+/** The box inside the dialog the drawing moves into. */
+const stage = ref<HTMLElement | null>(null)
+
+/** The box of the figure the drawing leaves while it is enlarged. */
+const frame = ref<HTMLElement | null>(null)
+
+/** The height the frame held when the drawing left it, in px. */
+const held = ref(0)
+
+/** Whether the drawing is shown at the size of the window. */
+const enlarged = ref(false)
+
+/** The name of the button which enlarges the drawing. */
+const ENLARGE = 'Enlarge the figure'
+
+/** The name of the button which closes the enlarged drawing. */
+const CLOSE = 'Close the figure'
 
 /** The key paths which open at least one panel. */
 const opening = computed<Set<string>>(
@@ -119,14 +152,54 @@ function select(key: string): void {
 }
 
 /**
- * Take a click anywhere in the drawing.
+ * Show the drawing at the size of the window.
+ *
+ * The figure keeps the height the drawing had while it is away, so the page
+ * behind the dialog does not jump and the caption stays where it was.
+ */
+function enlarge(): void {
+  if (props.figure !== null) {
+    held.value = frame.value?.getBoundingClientRect().height ?? 0
+    enlarged.value = true
+  }
+}
+
+/** Put the drawing back into the figure of the page. */
+function shrink(): void {
+  enlarged.value = false
+}
+
+/**
+ * Take a click anywhere in the drawing, enlarged or in the page.
+ *
+ * A click which opens no panel enlarges the drawing, and closes it where it is
+ * enlarged already; a click on a control reports its path and leaves the
+ * drawing in the figure of the page.
  *
  * @param event the click
  */
 function click(event: MouseEvent): void {
   const key = opened(event.target instanceof Element ? event.target : null)
-  if (key !== null) {
-    select(key)
+  if (key === null) {
+    if (enlarged.value) {
+      shrink()
+    } else {
+      enlarge()
+    }
+    return
+  }
+  select(key)
+  shrink()
+}
+
+/**
+ * Take a click of the dialog itself, which is the room beside the drawing.
+ *
+ * @param event the click
+ */
+function beside(event: MouseEvent): void {
+  if (event.target === overlay.value) {
+    shrink()
   }
 }
 
@@ -144,6 +217,7 @@ function press(event: KeyboardEvent): void {
   if (key !== null) {
     event.preventDefault()
     select(key)
+    shrink()
   }
 }
 
@@ -175,23 +249,90 @@ function decorate(): void {
 // shallow: the app replaces the three, and a deep watch would walk the whole svg string
 watch(() => [props.figure, props.marked, props.labels] as const, decorate, { flush: 'post' })
 
+// after the drawing moved, so the dialog is shown with the drawing already in it
+watch(
+  enlarged,
+  (open) => {
+    const dialog = overlay.value
+    if (dialog === null) {
+      return
+    }
+    if (open && !dialog.open) {
+      dialog.showModal()
+    } else if (!open && dialog.open) {
+      dialog.close()
+    }
+  },
+  { flush: 'post' },
+)
+
+// a figure which is taken away leaves no dialog open
+watch(
+  () => props.figure,
+  (figure) => {
+    if (figure === null) {
+      shrink()
+    }
+  },
+)
+
 onMounted(decorate)
 </script>
 
 <template>
   <figure v-if="props.figure" class="figure" part="figure">
-    <!-- eslint-disable vue/no-v-html -- trusted markup of the model package, see the comment above -->
-    <div
-      ref="drawing"
-      class="drawing"
-      part="drawing"
-      role="group"
+    <!-- before the drawing, so its box is there when the drawing moves into it -->
+    <dialog
+      ref="overlay"
+      class="overlay"
+      part="overlay"
       :aria-label="props.figure.title"
-      @click="click"
-      @keydown="press"
-      v-html="props.figure.svg"
-    ></div>
-    <!-- eslint-enable vue/no-v-html -->
+      @close="shrink"
+      @click="beside"
+    >
+      <div ref="stage" class="stage" part="stage"></div>
+      <button
+        type="button"
+        class="button close"
+        part="close"
+        :aria-label="CLOSE"
+        :title="CLOSE"
+        @click="shrink"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+        </svg>
+      </button>
+    </dialog>
+    <div ref="frame" class="frame" :style="enlarged ? { minHeight: `${held}px` } : undefined">
+      <Teleport :to="stage" :disabled="!enlarged">
+        <!-- eslint-disable vue/no-v-html -- trusted markup of the model package, see the comment above -->
+        <div
+          ref="drawing"
+          class="drawing"
+          part="drawing"
+          role="group"
+          :aria-label="props.figure.title"
+          @click="click"
+          @keydown="press"
+          v-html="props.figure.svg"
+        ></div>
+        <!-- eslint-enable vue/no-v-html -->
+      </Teleport>
+      <button
+        type="button"
+        class="button zoom"
+        part="zoom"
+        :aria-label="ENLARGE"
+        :title="ENLARGE"
+        @click="enlarge"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <circle cx="7" cy="7" r="4.5" />
+          <path d="M10.4 10.4l4 4M7 5v4M5 7h4" />
+        </svg>
+      </button>
+    </div>
     <figcaption class="caption">
       <span class="title">{{ props.figure.title }}</span>
       <span v-if="props.figure.credit" class="credit">{{ props.figure.credit }}</span>
@@ -269,5 +410,100 @@ onMounted(decorate)
 
 .credit {
   color: var(--_fg-soft);
+}
+
+/* the drawing and the button which enlarges it, which sits in the corner of the figure */
+.frame {
+  position: relative;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--_line);
+  border-radius: var(--_radius);
+  background: var(--_bg-card);
+  color: var(--_fg-soft);
+  cursor: pointer;
+}
+
+.button:hover,
+.button:focus-visible {
+  color: var(--_fg);
+  border-color: var(--_accent);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--_accent);
+  outline-offset: 2px;
+}
+
+.button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.zoom {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
+  opacity: 0.7;
+}
+
+.zoom:hover,
+.zoom:focus-visible {
+  opacity: 1;
+}
+
+/*
+ * The enlarged drawing: a dialog of the window, with the drawing fitted into it
+ * so that no part of it is cut off and the labels are read at the size the
+ * model package drew them. No viewport unit of the width of the page is used
+ * elsewhere in the element, but the dialog is the window and not the column it
+ * sits in, so it is measured in them.
+ */
+.overlay {
+  box-sizing: border-box;
+  width: min(96vw, 1800px);
+  max-width: 96vw;
+  max-height: 94vh;
+  padding: 12px;
+  border: 1px solid var(--_line);
+  border-radius: var(--_radius);
+  background: var(--_bg-card);
+  color: var(--_fg);
+  overflow: auto;
+}
+
+.overlay::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+
+.close {
+  position: absolute;
+  inset-block-start: 12px;
+  inset-inline-end: 12px;
+}
+
+.stage {
+  min-width: 0;
+}
+
+/* in the dialog the drawing fits the window, where in the page it fills its column */
+.overlay .drawing svg {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 86vh;
+  margin: 0 auto;
 }
 </style>

@@ -70,6 +70,31 @@ function marked(element: SbmlsimFigureHTMLElement): string[] {
   )
 }
 
+/** The overlay of the element, the dialog the enlarged drawing moves into. */
+function overlay(element: SbmlsimFigureHTMLElement): HTMLDialogElement {
+  const dialog = root(element).querySelector('dialog')
+  if (dialog === null) {
+    throw new Error('the element has no overlay')
+  }
+  return dialog
+}
+
+/** Whether the drawing sits inside what the selector finds. */
+function inside(element: SbmlsimFigureHTMLElement, selector: string): boolean {
+  const box = root(element).querySelector(selector)
+  const drawing = root(element).querySelector('.drawing')
+  return box !== null && drawing !== null && box.contains(drawing)
+}
+
+/** Press what the selector finds in the element's own tree. */
+function press(element: SbmlsimFigureHTMLElement, selector: string): void {
+  const target = root(element).querySelector(selector)
+  if (target === null) {
+    throw new Error(`no '${selector}' in the element`)
+  }
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+
 afterEach(() => {
   selections.length = 0
   document.body.replaceChildren()
@@ -207,6 +232,88 @@ describe('the figure element', () => {
     expect(marked(element)).toEqual(['li'])
     click(element, '#group')
     expect(selections).toEqual(['li'])
+  })
+
+  it('enlarges the drawing when it is clicked beside its controls', async () => {
+    const element = await figureElement({ 'li/sub:gli': ['li_gli'] })
+    click(element, '#bare')
+    await settled()
+    expect(selections).toEqual([])
+    expect(overlay(element).open).toBe(true)
+    expect(inside(element, 'dialog')).toBe(true)
+  })
+
+  it('keeps the height of the figure while the drawing is away', async () => {
+    const element = await figureElement({ 'li/sub:gli': ['li_gli'] })
+    const frame = root(element).querySelector<HTMLElement>('.frame')
+    if (frame === null) {
+      throw new Error("no '.frame' in the element")
+    }
+    expect(frame.style.minHeight).toBe('')
+    click(element, '#bare')
+    await settled()
+    expect(frame.style.minHeight).not.toBe('')
+    press(element, '.close')
+    await settled()
+    expect(frame.style.minHeight).toBe('')
+  })
+
+  it('keeps one drawing when it is enlarged', async () => {
+    const element = await figureElement({ 'li/sub:gli': ['li_gli'] })
+    click(element, '#bare')
+    await settled()
+    expect(root(element).querySelectorAll('.drawing')).toHaveLength(1)
+    expect(root(element).querySelectorAll('.drawing svg')).toHaveLength(1)
+  })
+
+  it('enlarges the drawing from the button of the figure', async () => {
+    const element = await figureElement({ li: ['li_all'] })
+    press(element, '.zoom')
+    await settled()
+    expect(overlay(element).open).toBe(true)
+    expect(selections).toEqual([])
+  })
+
+  it('does not enlarge the drawing when a control is clicked', async () => {
+    const element = await figureElement({ 'li/sub:gli': ['li_gli'] })
+    click(element, '[data-k="sub:gli"]')
+    await settled()
+    expect(selections).toEqual(['li/sub:gli'])
+    expect(overlay(element).open).toBe(false)
+  })
+
+  it('reports the key of a control of the enlarged drawing and closes the overlay', async () => {
+    const element = await figureElement({ 'li/sub:gli': ['li_gli'] })
+    click(element, '#bare')
+    await settled()
+    click(element, '[data-k="sub:gli"]')
+    await settled()
+    expect(selections).toEqual(['li/sub:gli'])
+    expect(overlay(element).open).toBe(false)
+    expect(inside(element, 'dialog')).toBe(false)
+  })
+
+  it('closes the overlay from its button and from a click beside the drawing', async () => {
+    const element = await figureElement({ li: ['li_all'] })
+    press(element, '.zoom')
+    await settled()
+    press(element, '.close')
+    await settled()
+    expect(overlay(element).open).toBe(false)
+    press(element, '.zoom')
+    await settled()
+    press(element, 'dialog')
+    await settled()
+    expect(overlay(element).open).toBe(false)
+    expect(selections).toEqual([])
+  })
+
+  it('has no overlay and no button without a figure', async () => {
+    const element = document.createElement(FIGURE_TAG)
+    document.body.append(element)
+    await settled()
+    expect(root(element).querySelector('dialog')).toBeNull()
+    expect(root(element).querySelector('.zoom')).toBeNull()
   })
 
   it('draws a figure which is given before the element is in the page', async () => {
