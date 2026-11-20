@@ -1251,7 +1251,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ figured: figure !== null }">
     <p v-if="failure !== null" class="error" role="alert">{{ FAILURE_MESSAGES[failure] }}</p>
     <p v-else-if="app === null" class="pending">Loading the app</p>
     <template v-else-if="current !== null">
@@ -1547,6 +1547,17 @@ onBeforeUnmount(() => {
   text-align: left;
   text-transform: none;
   letter-spacing: normal;
+}
+
+/*
+ * A page which draws the figure of its model is wider than the reading width of a page of
+ * panels: the drawing takes a column of its own beside the grid, so the shell is given the
+ * room of a screen and the figure and the panels each keep half of it. A page without a
+ * figure, and an app in a column of a page, are unchanged: the shell is as wide as its room
+ * and at most the reading width.
+ */
+.shell.figured {
+  max-width: 1920px;
 }
 
 .head {
@@ -1978,7 +1989,11 @@ onBeforeUnmount(() => {
  * The figure of a model is above the grid, centred and at most 900px wide. A model drawing is
  * dense and wide: its labels are unreadable in a thumbnail and a reader cannot aim at an organ
  * he cannot read, so the figure takes the side column only where the column is at least 560px
- * wide. No viewport unit: the app is embedded in a frame whose height is set from its content.
+ * wide, and the column grows with the shell from there (`clamp`, half of its width up to
+ * 1100px), so a wide window spends its room on the drawing and not on the panels alone. The
+ * grid beside it keeps a card of 480px at every width the column is given. Whatever the width,
+ * the drawing is read at the size its package drew it by enlarging it (`<sbmlsim-figure>`).
+ * No viewport unit: the app is embedded in a frame whose height is set from its content.
  */
 .stage.figured {
   display: grid;
@@ -2084,16 +2099,20 @@ onBeforeUnmount(() => {
   margin: 0 auto;
 }
 
-/* a column of 560px, the grid beside it keeps the room of one card of 480px: 560 + 16 + 480
-   in the content of a shell of 16px padding */
+/* from a column of 560px, where the grid beside it keeps the room of one card of 480px:
+   560 + 16 + 480 in the content of a shell of 16px padding. Half of the shell above it, which
+   is the floor of 560px until the shell is 1120px wide and leaves the grid 480px at every
+   width above it, and 1100px at most, beyond which a drawing gains nothing a reader of a panel
+   does not lose */
 @container (min-width: 1088px) {
   .stage.figured {
-    grid-template-columns: 560px minmax(0, 1fr);
+    grid-template-columns: clamp(560px, 50%, 1100px) minmax(0, 1fr);
   }
 
   .figure {
     position: sticky;
     top: 16px;
+    max-width: none;
     margin: 0;
   }
 }
