@@ -338,6 +338,18 @@ export interface PanelTexts {
    * `null` for the end of the simulation; nothing beyond it is drawn.
    */
   x_max: number | null
+  /**
+   * Whether the panel states the pharmacokinetic parameters of its curves,
+   * absent from a service before sbmlsim 0.35.
+   *
+   * A renderer reads them off the curves it draws (`pkOf`, the peak, its time,
+   * the area under the curve and the half-life of the terminal phase) and
+   * states them in a table under the figure, so a reader of a concentration
+   * has the numbers of the exposure beside its shape. It is a declaration of
+   * the panel and not of its model: a panel whose curves are no concentration
+   * - an amount in the urine, a pressure - declares none.
+   */
+  pk?: boolean
 }
 
 /** The declaration of a panel, the `panel/1` payload a renderer draws from. */

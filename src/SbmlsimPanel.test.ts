@@ -3568,3 +3568,89 @@ describe('the uncertainty of a panel', () => {
     expect(simulations().at(-1)?.draws).toBe(8)
   })
 })
+
+describe('the pharmacokinetic parameters of a panel', () => {
+  /** A declaration which states the parameters of its curves. */
+  function withPk(): PanelDeclaration {
+    const declared = declaration()
+    return { ...declared, panel: { ...declared.panel, pk: true } }
+  }
+
+  /** An answer whose curve falls from a peak, so it carries a terminal phase. */
+  function decaying(): SimulateResponse {
+    const answer = run()
+    const times = [0, 1, 2, 3, 4, 5, 6]
+    const curve = times.map((t) => 10 * (Math.exp(-0.2 * t) - Math.exp(-2 * t)))
+    return {
+      ...answer,
+      x: times,
+      curves: {
+        curveA: AXIS_VALUES.map((value) => curve.map((one) => value * one)),
+        curveB: AXIS_VALUES.map((value) => curve.map((one) => 10 * value * one)),
+      },
+      status: { ok: true, points: AXIS_VALUES.length, failed: [] },
+    }
+  }
+
+  /** The cells of the table of the panel, row by row. */
+  function table(element: PanelElement): string[][] {
+    const rows = shadow(element).querySelectorAll('table.pk tbody tr')
+    return [...rows].map((row) =>
+      [...row.querySelectorAll('th, td')].map((cell) => cell.textContent.trim()),
+    )
+  }
+
+  it('states the parameters of every curve it draws', async () => {
+    served.panel = () => Promise.resolve(withPk())
+    served.simulate = () => Promise.resolve(decaying())
+    const element = await started()
+    await settled()
+    const rows = table(element)
+    expect(rows.length).toBe(2)
+    const [first] = rows
+    expect(first?.[0]).toContain('curve A')
+    // the peak of the curve of the knob at its default, and the time of it
+    expect(first?.[1]).toContain('uM')
+    expect(first?.[2]).toContain('h')
+    // the area carries the unit of the curve times the time
+    expect(first?.[3]).toContain('uM·h')
+    // the half-life of a curve which falls by exp(-0.2 t) is ln2/0.2
+    expect(Number.parseFloat(first?.[4] ?? '')).toBeCloseTo(Math.LN2 / 0.2, 1)
+  })
+
+  it('states none for a panel which declares none', async () => {
+    served.panel = () => Promise.resolve(declaration())
+    served.simulate = () => Promise.resolve(decaying())
+    const element = await started()
+    await settled()
+    expect(shadow(element).querySelector('table.pk')).toBeNull()
+  })
+
+  it('leaves out a curve which no analysis describes', async () => {
+    served.panel = () => Promise.resolve(withPk())
+    const answer = decaying()
+    served.simulate = () =>
+      Promise.resolve({
+        ...answer,
+        curves: { ...answer.curves, curveB: AXIS_VALUES.map(() => answer.x.map(() => 0)) },
+      })
+    const element = await started()
+    await settled()
+    const rows = table(element)
+    expect(rows.length).toBe(1)
+    expect(rows[0]?.[0]).toContain('curve A')
+  })
+
+  it('moves with the knob a reader turns', async () => {
+    served.panel = () => Promise.resolve(withPk())
+    served.simulate = () => Promise.resolve(decaying())
+    const element = await started()
+    await settled()
+    const before = table(element)[0]?.[1]
+    const slider = part(element, 'input[type="range"]') as HTMLInputElement
+    slider.value = String(AXIS_VALUES[0])
+    slider.dispatchEvent(new Event('input', { bubbles: true }))
+    await settled()
+    expect(table(element)[0]?.[1]).not.toBe(before)
+  })
+})
