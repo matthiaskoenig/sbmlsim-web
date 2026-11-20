@@ -12,6 +12,7 @@ import type {
   SimulateResponse,
 } from './contract'
 import { APP_TAG, register } from './index'
+import { FROZEN_RUNS } from './plot'
 
 // The shell runs in a dom, which is `happy-dom` for this file alone. Nothing
 // here reaches the network: `fetch` is a stub which answers the routes of an
@@ -2270,6 +2271,88 @@ describe('the settings and the information of an app', () => {
     const plain = (placed(element)[0] as unknown as AppElement).shadowRoot
     expect(plain.querySelector('.options')).not.toBeNull()
     expect(plain.querySelector('.provenance')).not.toBeNull()
+  })
+
+  it('freezes the curves of every panel of the page and says what it kept', async () => {
+    declared = figured()
+    const element = await shell()
+    const freeze = part(element, 'button[part="settings-freeze"]') as HTMLButtonElement
+    freeze.click()
+    await settled()
+    const chips = [...element.shadowRoot.querySelectorAll('.frozen .chip')]
+    expect(chips).toHaveLength(1)
+    // the chip is the state of the shared knobs the run was frozen at, each in its unit
+    expect(chips[0]?.textContent).toContain('knob A [mg] 1')
+    expect(chips[0]?.querySelector('.chip-dash line')?.getAttribute('stroke-dasharray')).toBe('5 3')
+    // every panel of the page draws it, dashed and under its live curves
+    const shadows = placed(element).map((one) => (one as unknown as AppElement).shadowRoot)
+    expect(shadows).toHaveLength(2)
+    expect(shadows.every((one) => one.innerHTML.includes('class="curve frozen"'))).toBe(true)
+  })
+
+  it('drops one run a reader froze and all of them', async () => {
+    declared = figured()
+    const element = await shell()
+    const freeze = part(element, 'button[part="settings-freeze"]') as HTMLButtonElement
+    freeze.click()
+    await settled()
+    freeze.click()
+    await settled()
+    const dashes = [...element.shadowRoot.querySelectorAll('.chip-dash line')].map((one) =>
+      one.getAttribute('stroke-dasharray'),
+    )
+    expect(dashes).toEqual(['5 3', '1.5 2.5'])
+    const drop = element.shadowRoot.querySelectorAll<HTMLButtonElement>('.chip-drop')
+    drop[0]?.click()
+    await settled()
+    expect([...element.shadowRoot.querySelectorAll('.chip-dash line')]).toHaveLength(1)
+    const shadow = (placed(element)[0] as unknown as AppElement).shadowRoot
+    expect(shadow.innerHTML.match(/class="curve frozen"/g) ?? []).toHaveLength(1)
+    ;(part(element, '.chip-all') as HTMLButtonElement).click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.frozen')).toBeNull()
+    expect(shadow.innerHTML).not.toContain('class="curve frozen"')
+  })
+
+  it('freezes no more runs than a plot keeps apart', async () => {
+    declared = figured()
+    const element = await shell()
+    const freeze = part(element, 'button[part="settings-freeze"]') as HTMLButtonElement
+    for (let round = 0; round < FROZEN_RUNS + 2; round += 1) {
+      freeze.click()
+      await settled()
+    }
+    expect([...element.shadowRoot.querySelectorAll('.chip-dash')]).toHaveLength(FROZEN_RUNS)
+    expect(freeze.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('drops the runs of a page when another page is shown', async () => {
+    declared = figured()
+    const element = await shell()
+    ;(part(element, 'button[part="settings-freeze"]') as HTMLButtonElement).click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.chip')).not.toBeNull()
+    tabs(element)[1]?.click()
+    await settled()
+    tabs(element)[0]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.chip')).toBeNull()
+    const shadows = placed(element).map((one) => (one as unknown as AppElement).shadowRoot)
+    expect(shadows.every((one) => !one.innerHTML.includes('class="curve frozen"'))).toBe(true)
+  })
+
+  it('shows in its information what the page slots into it', async () => {
+    declared = figured()
+    const element = await shell()
+    const notices = document.createElement('div')
+    notices.setAttribute('slot', 'licenses')
+    notices.textContent = 'Third-party notices'
+    element.append(notices)
+    ;(part(element, '.information-tab') as HTMLButtonElement).click()
+    await settled()
+    const slot = part(element, '.information-host slot') as HTMLSlotElement
+    expect(slot.getAttribute('name')).toBe('licenses')
+    expect(slot.assignedNodes()).toEqual([notices])
   })
 
   it('clears the panels a reader picked from the drawing', async () => {

@@ -701,6 +701,74 @@ describe('plotSvg', () => {
   })
 })
 
+describe('the runs a reader froze', () => {
+  it('draws a frozen curve under the live ones, in its colour and with its dash', () => {
+    const svg = plotSvg(
+      spec(2, {
+        frozen: [{ rank: 1, label: 'dose 4 mg', values: { curve1: [2, 2, 2, 2] } }],
+      }),
+    )
+    const frozen = /<path class="curve frozen" data-series="curve1"[^>]*style="([^"]*)"/.exec(svg)
+    const live = /<path class="curve" data-series="curve1"[^>]*style="([^"]*)"/.exec(svg)
+    expect(frozen).not.toBeNull()
+    // the colour of the series it was frozen from, so the pair is read together
+    expect(frozen?.[1]).toContain('ramp-1')
+    expect(live?.[1]).toContain('ramp-1')
+    expect(frozen?.[1]).toContain('stroke-dasharray:5 3')
+    expect(live?.[1]).not.toContain('stroke-dasharray')
+    // under the live curves: every frozen path comes before every live one
+    expect(svg.indexOf('class="curve frozen"')).toBeLessThan(svg.indexOf('class="curve" '))
+    // the series the run does not carry has no frozen curve
+    expect(svg.match(/class="curve frozen"/g)).toHaveLength(1)
+  })
+
+  it('gives every frozen run its own dash and keeps them apart in the legend', () => {
+    const svg = plotSvg(
+      spec(1, {
+        frozen: [
+          { rank: 1, label: 'dose 4 mg', values: { curve1: [2, 2, 2, 2] } },
+          { rank: 2, label: 'dose 8 mg', values: { curve1: [3, 3, 3, 3] } },
+        ],
+      }),
+    )
+    const dashes = [...svg.matchAll(/class="curve frozen"[^>]*stroke-dasharray:([^";]*)/g)].map(
+      (one) => one[1],
+    )
+    expect(dashes).toEqual(['5 3', '1.5 2.5'])
+    // one entry per run and not one per curve of it, drawn as the dashed line it is
+    expect(svg).toContain('data-series="frozen-1"')
+    expect(svg).toContain('data-series="frozen-2"')
+    expect(svg).toContain('dose 4 mg')
+    expect(svg).toContain('dose 8 mg')
+    const entry =
+      /<g class="legend-entry" data-series="frozen-1"><line class="swatch" style="([^"]*)"/.exec(
+        svg,
+      )
+    expect(entry?.[1]).toContain('stroke-dasharray:5 3')
+  })
+
+  it('holds the frozen values in the axis of the figure', () => {
+    const plain = plotGeometry(spec(1))
+    const kept = plotGeometry(
+      spec(1, { frozen: [{ rank: 1, label: 'run', values: { curve1: [40, 40, 40, 40] } }] }),
+    )
+    // the live curve ends at 4 and the frozen one at 40, so the axis holds ten times as much
+    // and the top of the live curve is drawn far below where it was
+    expect(kept.yAt(4) - kept.box.y0).toBeGreaterThan((plain.yAt(4) - plain.box.y0) * 5)
+    // the frozen value itself is inside the plot box
+    expect(kept.yAt(40)).toBeGreaterThanOrEqual(kept.box.y0 - 1)
+  })
+
+  it('keeps the legend of a lone curve while a run of it is frozen', () => {
+    expect(plotSvg(spec(1))).not.toContain('legend-entry')
+    const svg = plotSvg(
+      spec(1, { frozen: [{ rank: 1, label: 'dose 8 mg', values: { curve1: [2, 2, 2, 2] } }] }),
+    )
+    expect(svg).toContain('data-series="curve1"')
+    expect(svg).toContain('dose 8 mg')
+  })
+})
+
 describe('the room the legend keeps', () => {
   /** The labels of a figure whose second entry is drawn under a condition. */
   const CONDITIONED = ['urine', 'Beermann 1976 (5 mg, oral)']

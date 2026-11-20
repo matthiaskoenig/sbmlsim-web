@@ -96,6 +96,25 @@ export interface Series {
   band?: SeriesBand
 }
 
+/**
+ * One run a reader froze, drawn under the curves in their colours and dashed.
+ *
+ * It is the figure as it was at a state of the knobs, kept while the knobs move on, so two
+ * states are read against each other in one plot. It carries the values alone: the colour of a
+ * frozen curve is the colour of the series it was frozen from, which is what makes the pair of a
+ * curve and its frozen self readable, and the dash says which run it is. A series of the run
+ * which the spec no longer draws is not drawn either, and a series the spec draws and the run
+ * has not simply has no frozen curve.
+ */
+export interface FrozenRun {
+  /** Its place in the order the runs were frozen in, from 1, which picks its dash. */
+  rank: number
+  /** Its entry in the legend, e.g. the state of the knobs it was frozen at. */
+  label: string
+  /** The values of the series it was frozen from, by series id, over `PlotSpec.x`. */
+  values: Record<string, number[]>
+}
+
 /** One series of study data, drawn as markers under the curve it belongs to. */
 export interface Points {
   /** The id of the series, which it carries into the output as `data-series`. */
@@ -144,6 +163,8 @@ export interface PlotSpec {
   yLabel: string
   /** The curves in the order they are drawn, which is the order of their colours. */
   series: Series[]
+  /** The runs a reader froze, drawn under the curves, absent for none. */
+  frozen?: FrozenRun[]
   /** The study data drawn under the curves, none without. */
   points?: Points[]
   /**
@@ -588,6 +609,31 @@ interface Axis {
 /** One of the shapes a series of study data is drawn with. */
 type MarkerShape = (typeof MARKER_SHAPES)[number]
 
+/**
+ * The dashes of the frozen runs, by their rank, which repeat past the last one.
+ *
+ * They are read apart at the width of a curve and at the size of a small panel, and no run is
+ * drawn solid, which is the live curve alone.
+ */
+const FROZEN_DASHES = ['5 3', '1.5 2.5', '9 3 1.5 3', '4 2 1 2'] as const
+
+/** How opaque a frozen curve is drawn against the live one over it. */
+const FROZEN_OPACITY = '0.85'
+
+/** How many frozen runs are drawn apart before the dashes repeat. */
+export const FROZEN_RUNS = FROZEN_DASHES.length
+
+/**
+ * Get the dash of a frozen run.
+ *
+ * @param rank its place in the order the runs were frozen in, from 1
+ * @returns the dash array of its curves
+ */
+export function frozenDash(rank: number): string {
+  const index = (Math.max(1, Math.trunc(rank)) - 1) % FROZEN_DASHES.length
+  return FROZEN_DASHES[index] ?? FROZEN_DASHES[0]
+}
+
 /** One entry of a legend: a curve or a series of study data. */
 interface Entry {
   /** The id of the curve or the series. */
@@ -598,6 +644,8 @@ interface Entry {
   colour: string
   /** The shape of its marker, `null` for a curve, which is drawn as a line. */
   shape: MarkerShape | null
+  /** The dash of its line, absent for a solid one; a frozen run is drawn with it. */
+  dash?: string
 }
 
 /**
@@ -1958,7 +2006,9 @@ function legendEntry(entry: Entry, x: number, y: number, lines: string[], type: 
     ? markerTag(entry.shape, entry.colour, x + SWATCH / 2, y, 'swatch')
     : tag('line', {
         class: 'swatch',
-        style: `stroke:${entry.colour};stroke-width:${token('curve-width')}`,
+        style:
+          `stroke:${entry.colour};stroke-width:${token('curve-width')}` +
+          (entry.dash === undefined ? '' : `;stroke-dasharray:${entry.dash}`),
         x1: coord(x),
         y1: coord(y),
         x2: coord(x + SWATCH),
@@ -2718,6 +2768,9 @@ function loneCurve(spec: PlotSpec): boolean {
   return (
     spec.series.length === 1 &&
     (spec.points ?? []).length === 0 &&
+    // a frozen run of that one curve is a second line in the plot, so the legend says which of
+    // them is the live one and which is the run it is read against
+    (spec.frozen ?? []).length === 0 &&
     (spec.declaredLegends ?? []).every((labels) => labels.length === 0)
   )
 }
@@ -2763,7 +2816,17 @@ function layoutFor(spec: PlotSpec): Layout {
     colour: colourOf(one.curve ?? one.id),
     shape: shapes[index] ?? 'circle',
   }))
-  const entries: Entry[] = [...curveEntries, ...pointEntries]
+  // one entry per frozen run and not one per curve of it: the colours of the curves are the
+  // colours of the live ones, which the legend names already, and the dash is what tells the
+  // runs apart
+  const frozenEntries: Entry[] = (spec.frozen ?? []).map((run) => ({
+    id: `frozen-${String(run.rank)}`,
+    label: run.label,
+    colour: token('fg-soft'),
+    shape: null,
+    dash: frozenDash(run.rank),
+  }))
+  const entries: Entry[] = [...curveEntries, ...pointEntries, ...frozenEntries]
 
   const barLabels = hasColourbar
     ? tickPositions(series.length).map((position) => series[position]?.label ?? '')
@@ -2815,6 +2878,17 @@ function layoutFor(spec: PlotSpec): Layout {
       for (const ends of one.band === undefined ? [] : [one.band.low, one.band.high]) {
         for (let index = 0; index < Math.min(spec.x.length, ends.length); index += 1) {
           const value = ends[index]
+          if (value !== undefined) {
+            yValues.push(value)
+          }
+        }
+      }
+      // a frozen run is drawn, so the axis holds it as well: the point of freezing a run is to
+      // read it against the live one, which an axis of the live one alone would cut off
+      for (const run of spec.frozen ?? []) {
+        const kept = run.values[one.id] ?? []
+        for (let index = 0; index < Math.min(spec.x.length, kept.length); index += 1) {
+          const value = kept[index]
           if (value !== undefined) {
             yValues.push(value)
           }
@@ -3095,18 +3169,42 @@ export function plotSvg(spec: PlotSpec): string {
     })
     .join('')
 
-  const drawnSeries = series
-    .map((one, index) =>
-      tag('path', {
-        class: 'curve',
-        'data-series': one.id,
-        style:
-          `stroke:${colours[index] ?? token('fg-soft')};` +
-          `stroke-width:${token('curve-width')};fill:none`,
-        d: pathOf(spec.x, one.values, x, y),
+  // the frozen runs go under the live curves, so the one a reader is moving is never hidden by
+  // the ones it is read against; each takes the colour of the series it was frozen from
+  const drawnFrozen = (spec.frozen ?? [])
+    .flatMap((run) =>
+      series.map((one, index) => {
+        const kept = run.values[one.id]
+        return kept === undefined
+          ? ''
+          : tag('path', {
+              class: 'curve frozen',
+              'data-series': one.id,
+              'data-frozen': String(run.rank),
+              style:
+                `stroke:${colours[index] ?? token('fg-soft')};` +
+                `stroke-width:${token('curve-width')};fill:none;` +
+                `stroke-dasharray:${frozenDash(run.rank)};opacity:${FROZEN_OPACITY}`,
+              d: pathOf(spec.x, kept, x, y),
+            })
       }),
     )
     .join('')
+
+  const drawnSeries =
+    drawnFrozen +
+    series
+      .map((one, index) =>
+        tag('path', {
+          class: 'curve',
+          'data-series': one.id,
+          style:
+            `stroke:${colours[index] ?? token('fg-soft')};` +
+            `stroke-width:${token('curve-width')};fill:none`,
+          d: pathOf(spec.x, one.values, x, y),
+        }),
+      )
+      .join('')
 
   const underneath = belowRows.length > 0
   // a figure gets wrapped labels when the wrapped legend fits the room it has

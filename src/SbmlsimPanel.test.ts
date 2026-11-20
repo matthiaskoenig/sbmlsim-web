@@ -341,6 +341,13 @@ function move(target: HTMLInputElement | HTMLSelectElement, value: string, kind:
 }
 
 /** Put an element of the library in the page, with the attributes a host writes. */
+/** The methods of a panel a page freezes its runs with. */
+interface PanelFreezing {
+  keep: (id: number, rank: number, label: string) => boolean
+  drop: (id: number) => void
+  clearKept: () => void
+}
+
 async function mount(
   attributes: Record<string, string> = {},
   parent: HTMLElement = document.body,
@@ -654,6 +661,44 @@ describe('the declaration and the controls', () => {
     expect(footer).toContain(`run ${HASH.slice(0, 8)}`)
     expect(footer).not.toContain(HASH.slice(0, 9))
     expect(footer).toContain('0.079 s')
+  })
+
+  it('keeps a run a reader froze and draws it under the live curves', async () => {
+    const element = await started()
+    const kept = (element as unknown as PanelFreezing).keep(1, 1, 'dose 4 mg')
+    await nextTick()
+    expect(kept).toBe(true)
+    const drawn = figure(element)
+    expect(drawn).toContain('class="curve frozen"')
+    expect(drawn).toContain('stroke-dasharray:5 3')
+    expect(drawn).toContain('dose 4 mg')
+    // the run is the curves as they were: the live ones are drawn over it, solid
+    const frozenPaths = drawn.match(/class="curve frozen"/g) ?? []
+    const livePaths = drawn.match(/class="curve" /g) ?? []
+    expect(frozenPaths.length).toBe(livePaths.length)
+  })
+
+  it('drops the runs it was told to drop and the ones of another variant', async () => {
+    const element = await started()
+    const freezing = element as unknown as PanelFreezing
+    freezing.keep(1, 1, 'first')
+    freezing.keep(2, 2, 'second')
+    await nextTick()
+    expect(figure(element)).toContain('first')
+    expect(figure(element)).toContain('second')
+    freezing.drop(1)
+    await nextTick()
+    expect(figure(element)).not.toContain('first')
+    expect(figure(element)).toContain('second')
+    freezing.clearKept()
+    await nextTick()
+    expect(figure(element)).not.toContain('second')
+    expect(figure(element)).not.toContain('class="curve frozen"')
+  })
+
+  it('keeps nothing while it has drawn nothing', async () => {
+    const element = await mount({ endpoint: '/api-root', model: 'modelA', panel: 'panelA' })
+    expect((element as unknown as PanelFreezing).keep(1, 1, 'run')).toBe(false)
   })
 
   it('shows no options and no line of the run when it is compact', async () => {

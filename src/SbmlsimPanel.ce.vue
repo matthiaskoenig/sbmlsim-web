@@ -190,6 +190,7 @@ import { figureTitle, plotGeometry, plotSvg, seriesColour, tableMeasure } from '
 import type {
   AxisEnds,
   FontSizes,
+  FrozenRun,
   Limits,
   PlotGeometry,
   PlotSpec,
@@ -1485,6 +1486,49 @@ const frame = computed<Limits | null>(() => {
 })
 
 /** The figure as it is drawn now, `null` while there is nothing to draw. */
+/**
+ * One run a reader froze: the curves as they were drawn at a state of the knobs.
+ *
+ * The panel keeps the values and the x of that moment, not a figure: the run is drawn into the
+ * plot of the live curves, which the axis of the figure then holds as well, and a page which
+ * freezes every panel at once gives them all the same `id` and `rank`, so the dash of a run is
+ * the same dash in every plot of the page and in the chip the page shows for it.
+ */
+interface KeptRun {
+  /** The id the page gave the run, which is how it is dropped again. */
+  id: number
+  /** Its place in the order of the runs on the page, from 1, which picks its dash. */
+  rank: number
+  /** Its entry in the legend, the state of the knobs the page read at that moment. */
+  label: string
+  /** The output times it was frozen over. */
+  x: number[]
+  /** The values of every curve which was drawn, by its id. */
+  values: Record<string, number[]>
+}
+
+/**
+ * The runs a reader froze, in the order they were frozen in.
+ *
+ * Not to be confused with `frozen`, which is the panel stopped while its page is away.
+ */
+const keptRuns = shallowRef<KeptRun[]>([])
+
+/**
+ * Whether a frozen run is drawn over the same output times as the figure now.
+ *
+ * A run of another grid is not drawn: its values belong to other times, and a curve of them
+ * against this x would be a lie rather than a comparison. It happens where the variant was
+ * switched under the frozen runs, which the page clears, and nowhere else.
+ *
+ * @param run the frozen run
+ * @param x the output times of the figure now
+ * @returns whether the run is drawn
+ */
+function overSameTimes(run: KeptRun, x: number[]): boolean {
+  return run.x.length === x.length && run.x.every((one, index) => one === x[index])
+}
+
 const plot = computed<PlotSpec | null>(() => {
   const answer = grid.value
   if (answer === null) {
@@ -1520,9 +1564,15 @@ const plot = computed<PlotSpec | null>(() => {
     ...(measure.value === null ? {} : { measure: measure.value }),
     ...(fontSizes.value === null ? {} : { fontSizes: fontSizes.value }),
   }
+  const kept: FrozenRun[] = keptRuns.value
+    .filter((run) => overSameTimes(run, answer.x))
+    .map((run) => ({ rank: run.rank, label: run.label, values: run.values }))
+  const withFrozen = kept.length > 0 ? { ...spec, frozen: kept } : spec
   const points = drawnData.value
   const legends = declaredLegends.value
-  const whole = legends.some((one) => one.length > 0) ? { ...spec, declaredLegends: legends } : spec
+  const whole = legends.some((one) => one.length > 0)
+    ? { ...withFrozen, declaredLegends: legends }
+    : withFrozen
   return points.length > 0 ? { ...whole, points } : whole
 })
 
@@ -3115,7 +3165,49 @@ watch(
   { flush: 'post' },
 )
 
-defineExpose({ activate, freeze, reset, result, drawn, setLog })
+/**
+ * Keep the curves as they are drawn now, to read the ones which come against them.
+ *
+ * The run is kept with the output times it was drawn over, so a figure of other times, which is
+ * a variant switched under it, does not draw it. A panel which has drawn nothing keeps nothing
+ * and says so, which is how a page learns that there was no run to freeze.
+ *
+ * @param id the id of the run, which the page gives every panel it freezes at once
+ * @param rank its place in the order of the runs of the page, from 1, which picks its dash
+ * @param label its entry in the legend, the state of the knobs the page read
+ * @returns whether a run was kept
+ */
+function keep(id: number, rank: number, label: string): boolean {
+  const spec = plot.value
+  if (spec === null || spec.series.length === 0) {
+    return false
+  }
+  const values: Record<string, number[]> = {}
+  for (const one of spec.series) {
+    values[one.id] = [...one.values]
+  }
+  keptRuns.value = [
+    ...keptRuns.value.filter((run) => run.id !== id),
+    { id, rank, label, x: [...spec.x], values },
+  ]
+  return true
+}
+
+/**
+ * Drop one run a reader froze.
+ *
+ * @param id the id of the run, which `keep` was given
+ */
+function drop(id: number): void {
+  keptRuns.value = keptRuns.value.filter((run) => run.id !== id)
+}
+
+/** Drop every run a reader froze, which a page does when it leaves or switches its variant. */
+function clearKept(): void {
+  keptRuns.value = []
+}
+
+defineExpose({ activate, freeze, reset, result, drawn, setLog, keep, drop, clearKept })
 </script>
 
 <template>
