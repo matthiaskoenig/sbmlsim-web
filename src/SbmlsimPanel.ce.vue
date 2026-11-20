@@ -186,6 +186,8 @@ import {
   validValue,
 } from './knob'
 import { canvasMeasure, fontOf, probeFont, whenFontArrives } from './measure'
+import { pkOf } from './pk'
+import type { PkParameters } from './pk'
 import { figureTitle, plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
 import type {
   AxisEnds,
@@ -1657,6 +1659,85 @@ const errorMessage = computed<string>(() => {
 })
 
 /** The provenance footer: the engine, the short hash of the run and its seconds. */
+/** The significant digits a parameter of the table is written with. */
+const PK_DIGITS = 3
+
+/** One row of the table of the parameters: a curve and what it reads. */
+interface PkRow {
+  /** The id of the curve, the key of the row. */
+  id: string
+  /** The label of the curve, as its legend carries it. */
+  label: string
+  /** The colour of the curve, as the figure draws it. */
+  colour: string
+  /** The peak of the curve with its unit. */
+  cmax: string
+  /** The time of the peak with the time unit of the panel. */
+  tmax: string
+  /** The area under the curve over the window, with its unit. */
+  auc: string
+  /** The half-life of the terminal phase, empty for a curve without one. */
+  thalf: string
+}
+
+/**
+ * The unit of an area under a curve: the unit of the curve times the time.
+ *
+ * A curve without a unit gives the time alone, and a panel which delivers its
+ * times without a unit gives the unit of the curve alone, so the column states
+ * what it has rather than a product of a unit and nothing.
+ */
+function areaUnit(unit: string | null): string {
+  const time = grid.value?.units.x ?? ''
+  if (unit === null || unit === '') {
+    return time === '' ? '' : time
+  }
+  return time === '' ? unit : `${unit}·${time}`
+}
+
+/** Write a parameter with its unit, empty for a parameter the curve has not. */
+function written(value: number | null, unit: string): string {
+  if (value === null) {
+    return ''
+  }
+  const number = shortNumber(value, PK_DIGITS)
+  return unit === '' ? number : `${number} ${unit}`
+}
+
+/**
+ * The parameters of every curve the panel draws, for the table under it.
+ *
+ * They are read off the curve of the position the knobs are at, the one a
+ * reader sees, so the table moves with the figure. A curve which no analysis
+ * describes - one which stays at zero, one of fewer than two points - leaves
+ * no row, and a panel whose curves leave none states no table at all.
+ */
+const pkRows = computed<PkRow[]>(() => {
+  const answer = grid.value
+  if (answer === null || stale.value || declaration.value?.panel.pk !== true) {
+    return []
+  }
+  const columns = interpolate(answer, knobValues.value)
+  const rows: PkRow[] = []
+  drawnCurves.value.forEach((one, index) => {
+    const parameters: PkParameters | null = pkOf(answer.x, columns[one.id] ?? [])
+    if (parameters === null) {
+      return
+    }
+    const unit = one.unit ?? ''
+    rows.push({
+      id: one.id,
+      label: one.label,
+      colour: seriesColour(index, drawnCurves.value.length),
+      cmax: written(parameters.cmax, unit),
+      tmax: written(parameters.tmax, grid.value?.units.x ?? ''),
+      auc: written(parameters.auc, areaUnit(one.unit)),
+      thalf: written(parameters.thalf, grid.value?.units.x ?? ''),
+    })
+  })
+  return rows
+})
+
 const footer = computed<string>(() => {
   const answer = grid.value
   // the footer names the run of the figure, and a stale figure is not drawn
@@ -3268,6 +3349,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog, keep, drop, clear
       <div
         part="figure"
         class="figure"
+        :class="{ 'with-pk': pkRows.length > 0 }"
         :style="{ minHeight: `${figureHeight}px` }"
         :aria-busy="pending ? 'true' : 'false'"
       >
@@ -3355,6 +3437,32 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog, keep, drop, clear
         <p v-if="svg !== '' && !stale" :id="SUMMARY_ID" hidden>
           {{ figureSummary }}
         </p>
+        <table v-if="pkRows.length > 0" part="pk" class="pk">
+          <caption>
+            Pharmacokinetic parameters of the curves shown
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">curve</th>
+              <th scope="col">C<sub>max</sub></th>
+              <th scope="col">t<sub>max</sub></th>
+              <th scope="col">AUC</th>
+              <th scope="col">t<sub>1/2</sub></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row of pkRows" :key="row.id">
+              <th scope="row">
+                <span class="pk-swatch" :style="{ background: row.colour }"></span>
+                <span>{{ row.label }}</span>
+              </th>
+              <td>{{ row.cmax }}</td>
+              <td>{{ row.tmax }}</td>
+              <td>{{ row.auc }}</td>
+              <td>{{ row.thalf }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
     <div
@@ -3474,6 +3582,70 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog, keep, drop, clear
   grid-row: 3;
   flex-direction: column;
   gap: 8px;
+}
+
+/* the figure holds the table of the parameters under the plot, which is why it
+ * is a column there: the panel is three rows of the subgrid of a card (the
+ * head, the body and the foot), so everything a panel draws under its plot
+ * belongs inside the body and never beside it */
+.figure.with-pk {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* the table of the pharmacokinetic parameters, under the figure: the numbers
+ * are read down a column, so they are right aligned and of the figures of the
+ * monospace of the page, and the row of a curve carries its colour */
+.pk {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--_font-size-small);
+}
+
+.pk caption {
+  padding-bottom: 4px;
+  color: var(--_fg-soft);
+  text-align: left;
+}
+
+.pk th,
+.pk td {
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid var(--_line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.pk thead th {
+  color: var(--_fg-soft);
+  font-weight: 400;
+}
+
+/* the column of the curves is read as text and is left aligned, head and all;
+ * the columns of the numbers are read down and are right aligned */
+.pk thead th:first-child {
+  text-align: left;
+}
+
+.pk tbody th {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.pk td {
+  font-family: var(--_font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pk-swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
 }
 
 .layout-sidebar .body {
