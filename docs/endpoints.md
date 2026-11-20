@@ -53,7 +53,7 @@ type EndpointFetch = (url: string, init: RequestInit) => Promise<Response>
 [sbmlsim-core](https://matthiaskoenig.github.io/sbmlsim-core/) has such a function: `createPanelEndpoint` of its npm package (`sbmlsim-core/panels`) answers the routes from a bundle of the panels of a model which sbmlsim exports (`python -m sbmlsim.serve --model id=module:attribute --export DIR`, sbmlsim >= 0.25.0), simulating the compiled model in WebAssembly on a pool of Web Workers. A page of an app on it is the script of the elements, the tag and a module script which registers the endpoint:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.6.0/dist/sbmlsim-web.iife.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sbmlsim-web@0.7.0/dist/sbmlsim-web.iife.js"></script>
 <sbmlsim-app endpoint="local:glimepiride" model="glimepiride"></sbmlsim-app>
 <script type="module">
   import { createPanelEndpoint } from 'https://cdn.jsdelivr.net/npm/sbmlsim-core@0.6.0/panels.mjs'
