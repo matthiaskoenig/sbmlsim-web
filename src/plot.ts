@@ -2838,9 +2838,13 @@ function layoutFor(spec: PlotSpec): Layout {
   // is. The legend drawn now is one of them, so the band never reserves fewer
   // rows than it draws, whatever a caller declares
   const drawnLabels = pointEntries.map((one) => one.label)
+  // the frozen runs are entries of every legend the figure may show: they are drawn whatever the
+  // study data under them is, so the rows they take are reserved in each of them and a run which
+  // is frozen never pushes an entry past the lower edge of the figure
   const held: Entry[][] = [...(spec.declaredLegends ?? []), drawnLabels].map((labels) => [
     ...curveEntries,
     ...labels.map((label) => ({ id: '', label, colour: '', shape: null })),
+    ...frozenEntries,
   ])
   const reservedLabels = held.flatMap((legend) => legend.map((one) => one.label))
   const legendRoom =

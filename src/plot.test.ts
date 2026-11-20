@@ -759,6 +759,29 @@ describe('the runs a reader froze', () => {
     expect(kept.yAt(40)).toBeGreaterThanOrEqual(kept.box.y0 - 1)
   })
 
+  it('keeps every entry of the legend inside the figure', () => {
+    // the figure of a panel is laid out at a height it is given, and the legend of a frozen run
+    // is one more row below the plot: the rows have to be reserved where the figure is laid out,
+    // or the last of them is drawn past the lower edge and cut (the panels of a page with a
+    // drawing, whose cards are 273 by 191)
+    const labels = ['glimepiride', 'hydroxy-glimepiride (M1)', 'carboxy-glimepiride (M2)']
+    const kept = plotSvg(
+      spec(3, {
+        width: 273,
+        height: 191,
+        series: labels.map((label, index) => ({ ...series(index + 1), label })),
+        frozen: [{ rank: 1, label: 'run 1', values: { curve1: [1, 1, 1, 1] } }],
+      }),
+    )
+    const ys = [
+      ...kept.matchAll(
+        /<g class="legend-entry"[^>]*>(?:(?!<\/g>)[\s\S])*?<text x="[^"]*" y="([^"]*)"/g,
+      ),
+    ].map((one) => Number(one[1]))
+    expect(ys.length).toBe(4)
+    expect(Math.max(...ys)).toBeLessThanOrEqual(191)
+  })
+
   it('keeps the legend of a lone curve while a run of it is frozen', () => {
     expect(plotSvg(spec(1))).not.toContain('legend-entry')
     const svg = plotSvg(

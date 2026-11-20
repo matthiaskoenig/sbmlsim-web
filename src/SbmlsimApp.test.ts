@@ -2282,7 +2282,7 @@ describe('the settings and the information of an app', () => {
     const chips = [...element.shadowRoot.querySelectorAll('.frozen .chip')]
     expect(chips).toHaveLength(1)
     // the chip is the state of the shared knobs the run was frozen at, each in its unit
-    expect(chips[0]?.textContent).toContain('knob A [mg] 1')
+    expect(chips[0]?.textContent).toContain('knob A 1 mg')
     expect(chips[0]?.querySelector('.chip-dash line')?.getAttribute('stroke-dasharray')).toBe('5 3')
     // every panel of the page draws it, dashed and under its live curves
     const shadows = placed(element).map((one) => (one as unknown as AppElement).shadowRoot)

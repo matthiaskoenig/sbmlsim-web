@@ -185,16 +185,12 @@ import { cardLevels } from './columns'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
 import {
-  KNOB_DIGITS,
-  choiceAt,
   drawableKnob,
   keepControlKeys,
-  knobLabel,
+  knobValueText,
   ownValue,
   sameValue,
-  shortNumber,
   snapValue,
-  stopsOf,
   validValue,
 } from './knob'
 import { FROZEN_RUNS, frozenDash } from './plot'
@@ -234,8 +230,8 @@ const FREEZE_TITLE =
   'Keep the curves as they are now, so the ones of the next state of the knobs are read against them'
 /** What the control which drops every frozen run says it does. */
 const THAW_TITLE = 'Drop the runs which are kept'
-/** The separator of the knobs in the text of a frozen run. */
-const STATE_SEPARATOR = ', '
+/** The separator of the knobs in the text of a frozen run, which no label of a stop carries. */
+const STATE_SEPARATOR = ' · '
 
 const props = defineProps({
   /** The endpoint of the service, empty is the origin of the page. */
@@ -839,23 +835,20 @@ const canFreeze = computed<boolean>(() => frozenRuns.value.length < FROZEN_RUNS)
 /**
  * The state of the shared knobs as a reader reads it, the text of the chip of a frozen run.
  *
- * A knob of the kind `choice`, and a range knob standing on one of its stops, is named by that
- * choice; every other range knob is its number in its unit. It is the state of the page and not
- * of a panel, since the chip belongs to the page: a knob a panel owns is in its own controls and
- * no part of what the page froze.
+ * The value of every shared knob is the one a reader reads (`knobValueText`: the label of the
+ * choice or of the stop it stands on, else its number and its unit). It is the state of the page
+ * and not of a panel, since the chip belongs to the page: a knob a panel owns is in its own
+ * controls and no part of what the page froze.
  *
  * @returns the knobs and their values, e.g. `dose 4 mg, renal function Normal`, empty for a page
  *   without a shared knob
  */
 function knobState(): string {
   return sharedKnobs.value
-    .map(({ knob }) => {
-      const value = ownValue(shared.value, knob.id) ?? knob.default
-      const choice = choiceAt(stopsOf(knob), value)
-      return choice === null
-        ? `${knobLabel(knob)} ${shortNumber(value, KNOB_DIGITS)}`
-        : `${knob.label} ${choice.label}`
-    })
+    .map(
+      ({ knob }) =>
+        `${knob.label} ${knobValueText(knob, ownValue(shared.value, knob.id) ?? knob.default)}`,
+    )
     .join(STATE_SEPARATOR)
 }
 
