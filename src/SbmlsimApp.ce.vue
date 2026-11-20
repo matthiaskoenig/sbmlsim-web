@@ -1589,60 +1589,62 @@ onBeforeUnmount(() => {
                 @change="onDrawsAll($event)"
               />
             </label>
-            <button
-              v-if="figure !== null"
-              type="button"
-              class="action"
-              part="settings-clear"
-              :disabled="switching"
-              :aria-disabled="picked ? undefined : 'true'"
-              :title="CLEAR_TITLE"
-              @click="picked && clearSelection()"
-            >
-              Clear selection
-            </button>
-            <button
-              type="button"
-              class="action"
-              part="settings-freeze"
-              :disabled="switching"
-              :aria-disabled="canFreeze ? undefined : 'true'"
-              :title="FREEZE_TITLE"
-              @click="canFreeze && freezeRun()"
-            >
-              {{ FREEZE_LABEL }}
-            </button>
-            <span v-if="frozenRuns.length > 0" class="frozen" part="settings-frozen">
-              <span v-for="run in frozenRuns" :key="run.id" class="chip" :title="run.state">
-                <svg class="chip-dash" viewBox="0 0 20 2" aria-hidden="true">
-                  <line
-                    x1="0"
-                    y1="1"
-                    x2="20"
-                    y2="1"
-                    :stroke-dasharray="frozenDash(run.rank)"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                  />
-                </svg>
-                <span class="chip-text">{{ run.state === '' ? run.label : run.state }}</span>
-                <button
-                  type="button"
-                  class="chip-drop"
-                  :aria-label="`Drop ${run.label}`"
-                  :title="`Drop ${run.label}`"
-                  @click="dropRun(run.id)"
-                >
-                  &#10005;
-                </button>
-              </span>
-              <button type="button" class="chip-all" :title="THAW_TITLE" @click="thawRuns()">
-                Drop all
-              </button>
-            </span>
             <span class="setting-reset" part="settings-reset">
               <ResetButton :disabled="switching" :idle="false" @reset="resetPage()" />
             </span>
+            <div class="compare" part="settings-compare">
+              <button
+                v-if="figure !== null"
+                type="button"
+                class="action"
+                part="settings-clear"
+                :disabled="switching"
+                :aria-disabled="picked ? undefined : 'true'"
+                :title="CLEAR_TITLE"
+                @click="picked && clearSelection()"
+              >
+                Clear selection
+              </button>
+              <button
+                type="button"
+                class="action"
+                part="settings-freeze"
+                :disabled="switching"
+                :aria-disabled="canFreeze ? undefined : 'true'"
+                :title="FREEZE_TITLE"
+                @click="canFreeze && freezeRun()"
+              >
+                {{ FREEZE_LABEL }}
+              </button>
+              <span v-if="frozenRuns.length > 0" class="frozen" part="settings-frozen">
+                <span v-for="run in frozenRuns" :key="run.id" class="chip" :title="run.state">
+                  <svg class="chip-dash" viewBox="0 0 20 2" aria-hidden="true">
+                    <line
+                      x1="0"
+                      y1="1"
+                      x2="20"
+                      y2="1"
+                      :stroke-dasharray="frozenDash(run.rank)"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    />
+                  </svg>
+                  <span class="chip-text">{{ run.state === '' ? run.label : run.state }}</span>
+                  <button
+                    type="button"
+                    class="chip-drop"
+                    :aria-label="`Drop ${run.label}`"
+                    :title="`Drop ${run.label}`"
+                    @click="dropRun(run.id)"
+                  >
+                    &#10005;
+                  </button>
+                </span>
+                <button type="button" class="chip-all" :title="THAW_TITLE" @click="thawRuns()">
+                  Drop all
+                </button>
+              </span>
+            </div>
             <p class="run" part="settings-run" :class="{ held: simulatedHeld }">{{ runLine }}</p>
           </div>
           <section
@@ -2281,6 +2283,17 @@ onBeforeUnmount(() => {
 /* the runs which are kept, each the dash its curves are drawn with and the state of the knobs it
    was frozen at, which is cut where it is longer than the room of the card: the whole state is
    the title of the chip */
+/* the comparison controls of the page: a line of its own at every width, as the line of the run
+   is, so the draws control which a model without uncertainty hides adds no line to the card and
+   nothing of the page moves while its panels load */
+.compare {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .frozen {
   display: inline-flex;
   flex-wrap: wrap;
