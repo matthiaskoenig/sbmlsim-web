@@ -124,6 +124,30 @@ export function knobLabel(axis: PanelAxis): string {
 }
 
 /**
+ * Get the value of a knob as a reader reads it, with its unit.
+ *
+ * It is the value as a chip or a line of text carries it, not as a control shows it: the choice
+ * of a choice knob and the named stop of a range knob are their labels, which carry their units
+ * themselves (`25 mg`, `normal`), and every other value is its number and the unit of its knob,
+ * which a dimensionless knob and one of no unit have none of.
+ *
+ * @param axis the knob
+ * @param value the value it carries
+ * @param digits the digits of a number which is no choice and no stop
+ * @returns the text of the value, without the label of the knob
+ */
+export function knobValueText(axis: PanelAxis, value: number, digits = KNOB_DIGITS): string {
+  const named = axis.kind === 'choice' ? axis.choices : stopsOf(axis)
+  const choice = choiceAt(named, value)
+  if (choice !== null) {
+    return choice.label
+  }
+  const unit = axis.unit
+  const written = shortNumber(value, digits)
+  return unit === null || NO_UNITS.has(unit.trim()) ? written : `${written} ${unit}`
+}
+
+/**
  * Get a step of the ladder 1, 2, 5 near a wanted one.
  *
  * @param wanted the step which is wanted, a positive number

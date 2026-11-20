@@ -86,9 +86,10 @@ export { interpolate, interpolateBands } from './interpolate'
 export type { DrawnBand, DrawnFigure } from './interpolate'
 export { canvasMeasure, fontOf } from './measure'
 export type { FigureFont } from './measure'
-export { plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
+export { FROZEN_RUNS, frozenDash, plotGeometry, plotSvg, seriesColour, tableMeasure } from './plot'
 export type {
   AxisEnds,
+  FrozenRun,
   Limits,
   PlotBox,
   PlotGeometry,

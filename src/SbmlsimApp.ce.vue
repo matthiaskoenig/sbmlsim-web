@@ -184,7 +184,16 @@ import KnobControl from './KnobControl.ce.vue'
 import { cardLevels } from './columns'
 import ResetButton from './ResetButton.ce.vue'
 import ScenarioControl from './ScenarioControl.ce.vue'
-import { drawableKnob, keepControlKeys, ownValue, sameValue, snapValue, validValue } from './knob'
+import {
+  drawableKnob,
+  keepControlKeys,
+  knobValueText,
+  ownValue,
+  sameValue,
+  snapValue,
+  validValue,
+} from './knob'
+import { FROZEN_RUNS, frozenDash } from './plot'
 import { placedFigureTag, placedPanelTag } from './tags'
 
 /** Which values of the design tokens the element asks for. */
@@ -212,6 +221,17 @@ const SCENARIO_LABEL = 'Example'
 const INFORMATION_PAGE = 'information'
 /** The label of the information tab, the last entry of the tab row. */
 const INFORMATION_LABEL = 'Information'
+/** What the button which undoes the panels a reader picked from the drawing says it does. */
+const CLEAR_TITLE = 'Show the panels the page starts with'
+/** What the control which freezes the curves of the page says. */
+const FREEZE_LABEL = 'Freeze'
+/** What it says it does. */
+const FREEZE_TITLE =
+  'Keep the curves as they are now, so the ones of the next state of the knobs are read against them'
+/** What the control which drops every frozen run says it does. */
+const THAW_TITLE = 'Drop the runs which are kept'
+/** The separator of the knobs in the text of a frozen run, which no label of a stop carries. */
+const STATE_SEPARATOR = ' · '
 
 const props = defineProps({
   /** The endpoint of the service, empty is the origin of the page. */
@@ -593,6 +613,45 @@ function tellSelection(panels: string[]): void {
 }
 
 /**
+ * Whether a reader picked the panels of the page from the drawing.
+ *
+ * It is the state the clear of the selection undoes: the panels shown are not the ones the page
+ * declares as shown, in its order.
+ */
+const picked = computed<boolean>(() => {
+  const page = current.value
+  if (page === null || figure.value === null) {
+    return false
+  }
+  const base = defaultPanels(page)
+  const now = placed.value
+  return now.length !== base.length || now.some((id, index) => id !== base[index])
+})
+
+/**
+ * Show the panels the page declares again, which is what a reader picked undone.
+ *
+ * The attribute goes with them: a page which was given no selection is where this leaves the
+ * shell, so the next page starts from its own panels as it does on a first visit.
+ */
+function clearSelection(): void {
+  const page = current.value
+  if (page === null) {
+    return
+  }
+  host?.removeAttribute('selection')
+  tellSelection(defaultPanels(page))
+}
+
+/**
+ * Whether the panels of the page are drawn as a wall of readouts.
+ *
+ * A page which draws the figure of its model carries the switch of the axis, the reset and the
+ * line of the run above its grid, so its panels show their head and their figure alone.
+ */
+const compactPanels = computed<boolean>(() => figure.value !== null)
+
+/**
  * Get the attribute `values` of a panel of the page.
  *
  * @param id the id of the panel
@@ -751,6 +810,99 @@ function onDrawsAll(event: Event): void {
   drawsAll.value = Number.isFinite(asked) ? Math.max(0, Math.trunc(asked)) : undefined
   // the field shows what is asked until the runs say what they used (`syncDraws`)
   event.target.value = String(drawsOfPanels.value ?? drawsShown.value)
+}
+
+/** One run the page froze: what every panel of it kept and what the reader is shown of it. */
+interface FrozenState {
+  /** The id the page gave it, which every panel of the page kept it under. */
+  id: number
+  /** Its place in the order of the runs, from 1, which picks its dash in every plot. */
+  rank: number
+  /** Its entry in the legends, which is its rank. */
+  label: string
+  /** The state of the shared knobs it was frozen at, the text of its chip. */
+  state: string
+}
+
+/** The runs the page froze, in the order they were frozen in. */
+const frozenRuns = ref<FrozenState[]>([])
+/** The id of the next run, which never repeats, so a chip and the runs of the panels agree. */
+let nextRun = 1
+
+/** Whether another run can be frozen: the dashes of the renderer are what bounds them. */
+const canFreeze = computed<boolean>(() => frozenRuns.value.length < FROZEN_RUNS)
+
+/**
+ * The state of the shared knobs as a reader reads it, the text of the chip of a frozen run.
+ *
+ * The value of every shared knob is the one a reader reads (`knobValueText`: the label of the
+ * choice or of the stop it stands on, else its number and its unit). It is the state of the page
+ * and not of a panel, since the chip belongs to the page: a knob a panel owns is in its own
+ * controls and no part of what the page froze.
+ *
+ * @returns the knobs and their values, e.g. `dose 4 mg, renal function Normal`, empty for a page
+ *   without a shared knob
+ */
+function knobState(): string {
+  return sharedKnobs.value
+    .map(
+      ({ knob }) =>
+        `${knob.label} ${knobValueText(knob, ownValue(shared.value, knob.id) ?? knob.default)}`,
+    )
+    .join(STATE_SEPARATOR)
+}
+
+/**
+ * Keep the curves of every panel of the page as they are drawn now.
+ *
+ * Every panel keeps the run under the same id and rank, so one dash is one state of the knobs
+ * across the page and the chip of the run stands for the dashed curves in every plot. A run is
+ * kept only where a panel had something to keep, and the page shows it as soon as one panel did:
+ * a panel which is still waiting for its first answer simply has no dashed curve.
+ */
+function freezeRun(): void {
+  if (!canFreeze.value) {
+    return
+  }
+  const taken = new Set(frozenRuns.value.map((run) => run.rank))
+  const rank = [...Array(FROZEN_RUNS).keys()].map((one) => one + 1).find((one) => !taken.has(one))
+  if (rank === undefined) {
+    return
+  }
+  const id = nextRun
+  nextRun += 1
+  const label = `run ${String(rank)}`
+  const kept = shownPanels().map((one) =>
+    (one as HTMLElement & { keep?: (id: number, rank: number, label: string) => boolean }).keep?.(
+      id,
+      rank,
+      label,
+    ),
+  )
+  if (!kept.includes(true)) {
+    return
+  }
+  frozenRuns.value = [...frozenRuns.value, { id, rank, label, state: knobState() }]
+}
+
+/**
+ * Drop one run the page froze, in every panel of it.
+ *
+ * @param id the id of the run
+ */
+function dropRun(id: number): void {
+  for (const one of shownPanels()) {
+    ;(one as HTMLElement & { drop?: (id: number) => void }).drop?.(id)
+  }
+  frozenRuns.value = frozenRuns.value.filter((run) => run.id !== id)
+}
+
+/** Drop every run the page froze, which a switch of the page or of the variant does as well. */
+function thawRuns(): void {
+  for (const one of shownPanels()) {
+    ;(one as HTMLElement & { clearKept?: () => void }).clearKept?.()
+  }
+  frozenRuns.value = []
 }
 
 /**
@@ -1114,6 +1266,9 @@ function show(id: string): void {
   if (id !== INFORMATION_PAGE && id !== current.value?.id) {
     // the clicks of the page which is left mean nothing on the one which is shown
     host?.removeAttribute('selection')
+    // and neither do the runs it froze: they are the curves of its panels, which the panels of
+    // the page shown next do not draw
+    thawRuns()
   }
   host?.setAttribute('page', id)
   const title =
@@ -1228,6 +1383,9 @@ watch(placed, (now) => {
 })
 
 watch(chosen, (variant) => {
+  // the runs of the variant which is left are the values of another model, which the panels do
+  // not draw over the times of this one either
+  thawRuns()
   void switchTo(variant)
 })
 
@@ -1381,6 +1539,13 @@ onBeforeUnmount(() => {
         </template>
         <p v-if="simulatedShown !== ''" class="simulated">{{ simulatedShown }}</p>
         <p v-if="runLine !== ''" class="information-run" part="information-run">{{ runLine }}</p>
+        <!-- what the page which hosts the element adds to this view: the notices of the
+             components it is built of, which belong next to the licenses of the model and not
+             into a footer of its own. Nothing of the renderer styles it, so the page writes it as
+             the page writes the rest of itself -->
+        <div class="information-host" part="information-host">
+          <slot name="licenses"></slot>
+        </div>
       </section>
       <div v-show="!information" class="stage" :class="{ figured: figure !== null }">
         <component
@@ -1427,6 +1592,59 @@ onBeforeUnmount(() => {
             <span class="setting-reset" part="settings-reset">
               <ResetButton :disabled="switching" :idle="false" @reset="resetPage()" />
             </span>
+            <div class="compare" part="settings-compare">
+              <button
+                v-if="figure !== null"
+                type="button"
+                class="action"
+                part="settings-clear"
+                :disabled="switching"
+                :aria-disabled="picked ? undefined : 'true'"
+                :title="CLEAR_TITLE"
+                @click="picked && clearSelection()"
+              >
+                Clear selection
+              </button>
+              <button
+                type="button"
+                class="action"
+                part="settings-freeze"
+                :disabled="switching"
+                :aria-disabled="canFreeze ? undefined : 'true'"
+                :title="FREEZE_TITLE"
+                @click="canFreeze && freezeRun()"
+              >
+                {{ FREEZE_LABEL }}
+              </button>
+              <span v-if="frozenRuns.length > 0" class="frozen" part="settings-frozen">
+                <span v-for="run in frozenRuns" :key="run.id" class="chip" :title="run.state">
+                  <svg class="chip-dash" viewBox="0 0 20 2" aria-hidden="true">
+                    <line
+                      x1="0"
+                      y1="1"
+                      x2="20"
+                      y2="1"
+                      :stroke-dasharray="frozenDash(run.rank)"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    />
+                  </svg>
+                  <span class="chip-text">{{ run.state === '' ? run.label : run.state }}</span>
+                  <button
+                    type="button"
+                    class="chip-drop"
+                    :aria-label="`Drop ${run.label}`"
+                    :title="`Drop ${run.label}`"
+                    @click="dropRun(run.id)"
+                  >
+                    &#10005;
+                  </button>
+                </span>
+                <button type="button" class="chip-all" :title="THAW_TITLE" @click="thawRuns()">
+                  Drop all
+                </button>
+              </span>
+            </div>
             <p class="run" part="settings-run" :class="{ held: simulatedHeld }">{{ runLine }}</p>
           </div>
           <section
@@ -1457,6 +1675,7 @@ onBeforeUnmount(() => {
                 :log.attr="logOfPanels"
                 :heading-level="panelLevel"
                 :size="current.size === 'small' ? 'small' : 'regular'"
+                :compact.prop="compactPanels"
                 :variant="variantOfPanels"
                 :values.attr="valuesOf(one)"
                 :head.attr="headOf(one)"
@@ -2035,6 +2254,103 @@ onBeforeUnmount(() => {
   visibility: hidden;
 }
 
+/* a button of the settings card which is no reset, drawn as the reset is */
+.action {
+  padding: 3px 10px;
+  border: 1px solid var(--_line);
+  border-radius: 6px;
+  background: var(--_bg-card);
+  color: var(--_fg);
+  font-family: inherit;
+  font-size: var(--_font-size-small);
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled, [aria-disabled='true']) {
+  border-color: var(--_accent);
+  color: var(--_accent);
+}
+
+/* a button with nothing to do is drawn as one which does nothing and keeps its focus, as the
+   reset of the card does */
+.action:disabled,
+.action[aria-disabled='true'] {
+  color: var(--_fg-soft);
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* the runs which are kept, each the dash its curves are drawn with and the state of the knobs it
+   was frozen at, which is cut where it is longer than the room of the card: the whole state is
+   the title of the chip */
+/* the comparison controls of the page: a line of its own at every width, as the line of the run
+   is, so the draws control which a model without uncertainty hides adds no line to the card and
+   nothing of the page moves while its panels load */
+.compare {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.frozen {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 320px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--_line);
+  border-radius: 999px;
+  background: var(--_bg-card);
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
+}
+
+.chip-dash {
+  flex: none;
+  width: 20px;
+  height: 2px;
+  color: var(--_fg-soft);
+}
+
+.chip-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chip-drop,
+.chip-all {
+  padding: 0 4px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--_fg-soft);
+  font-family: inherit;
+  font-size: var(--_font-size-small);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.chip-all {
+  padding: 2px 8px;
+  border: 1px solid var(--_line);
+}
+
+.chip-drop:hover,
+.chip-all:hover {
+  color: var(--_accent);
+}
+
 .setting {
   display: inline-flex;
   gap: 6px;
@@ -2067,6 +2383,17 @@ onBeforeUnmount(() => {
 
 .information-run {
   color: var(--_fg-soft);
+}
+
+/* the block the page fills: it keeps the spacing of the view and leaves everything else to the
+   page, whose own styles reach what it slots in */
+.information-host {
+  color: var(--_fg-soft);
+  font-size: var(--_font-size-small);
+}
+
+.information-host:not(:has(*)) {
+  display: none;
 }
 
 .run.held {

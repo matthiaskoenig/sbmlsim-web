@@ -190,6 +190,7 @@ import { figureTitle, plotGeometry, plotSvg, seriesColour, tableMeasure } from '
 import type {
   AxisEnds,
   FontSizes,
+  FrozenRun,
   Limits,
   PlotGeometry,
   PlotSpec,
@@ -476,6 +477,18 @@ const props = defineProps({
    * an app writes the size of its page (`AppPage.size`).
    */
   size: { type: String as PropType<PanelSize>, default: 'regular' },
+  /**
+   * Whether the panel is drawn as one card of a wall of readouts: its head and
+   * its figure, without the switch of the axis, the reset and the line of the
+   * run, and with its own controls only where it has knobs of its own.
+   *
+   * It is for a page which carries those itself, the shell of an app whose page
+   * draws the figure of its model: a reader picks the readouts from the drawing
+   * and reads them side by side, and one switch, one reset and one line of the
+   * run above the grid say for every panel what three controls in every card
+   * would say over and over. A panel still shows its errors.
+   */
+  compact: { type: Boolean, default: false },
   /**
    * Which values of the tokens are used: `auto` (the default), `light` or
    * `dark`. It is read by the style of the element and not by its script: the
@@ -1473,6 +1486,49 @@ const frame = computed<Limits | null>(() => {
 })
 
 /** The figure as it is drawn now, `null` while there is nothing to draw. */
+/**
+ * One run a reader froze: the curves as they were drawn at a state of the knobs.
+ *
+ * The panel keeps the values and the x of that moment, not a figure: the run is drawn into the
+ * plot of the live curves, which the axis of the figure then holds as well, and a page which
+ * freezes every panel at once gives them all the same `id` and `rank`, so the dash of a run is
+ * the same dash in every plot of the page and in the chip the page shows for it.
+ */
+interface KeptRun {
+  /** The id the page gave the run, which is how it is dropped again. */
+  id: number
+  /** Its place in the order of the runs on the page, from 1, which picks its dash. */
+  rank: number
+  /** Its entry in the legend, the state of the knobs the page read at that moment. */
+  label: string
+  /** The output times it was frozen over. */
+  x: number[]
+  /** The values of every curve which was drawn, by its id. */
+  values: Record<string, number[]>
+}
+
+/**
+ * The runs a reader froze, in the order they were frozen in.
+ *
+ * Not to be confused with `frozen`, which is the panel stopped while its page is away.
+ */
+const keptRuns = shallowRef<KeptRun[]>([])
+
+/**
+ * Whether a frozen run is drawn over the same output times as the figure now.
+ *
+ * A run of another grid is not drawn: its values belong to other times, and a curve of them
+ * against this x would be a lie rather than a comparison. It happens where the variant was
+ * switched under the frozen runs, which the page clears, and nowhere else.
+ *
+ * @param run the frozen run
+ * @param x the output times of the figure now
+ * @returns whether the run is drawn
+ */
+function overSameTimes(run: KeptRun, x: number[]): boolean {
+  return run.x.length === x.length && run.x.every((one, index) => one === x[index])
+}
+
 const plot = computed<PlotSpec | null>(() => {
   const answer = grid.value
   if (answer === null) {
@@ -1508,9 +1564,15 @@ const plot = computed<PlotSpec | null>(() => {
     ...(measure.value === null ? {} : { measure: measure.value }),
     ...(fontSizes.value === null ? {} : { fontSizes: fontSizes.value }),
   }
+  const kept: FrozenRun[] = keptRuns.value
+    .filter((run) => overSameTimes(run, answer.x))
+    .map((run) => ({ rank: run.rank, label: run.label, values: run.values }))
+  const withFrozen = kept.length > 0 ? { ...spec, frozen: kept } : spec
   const points = drawnData.value
   const legends = declaredLegends.value
-  const whole = legends.some((one) => one.length > 0) ? { ...spec, declaredLegends: legends } : spec
+  const whole = legends.some((one) => one.length > 0)
+    ? { ...withFrozen, declaredLegends: legends }
+    : withFrozen
   return points.length > 0 ? { ...whole, points } : whole
 })
 
@@ -1612,6 +1674,12 @@ const footer = computed<string>(() => {
   }
   return parts.join(FOOTER_SEPARATOR)
 })
+
+/** The line of the run a reader sees, which a compact panel leaves to its page. */
+const shownFooter = computed<string>(() => (props.compact ? '' : footer.value))
+
+/** The line of the run of the variant before a switch, as `shownFooter`. */
+const shownHeldFoot = computed<string>(() => (props.compact ? '' : heldFoot.value))
 
 /**
  * Get the index of the grid nearest to a pixel of the x axis, by scanning it.
@@ -3097,7 +3165,49 @@ watch(
   { flush: 'post' },
 )
 
-defineExpose({ activate, freeze, reset, result, drawn, setLog })
+/**
+ * Keep the curves as they are drawn now, to read the ones which come against them.
+ *
+ * The run is kept with the output times it was drawn over, so a figure of other times, which is
+ * a variant switched under it, does not draw it. A panel which has drawn nothing keeps nothing
+ * and says so, which is how a page learns that there was no run to freeze.
+ *
+ * @param id the id of the run, which the page gives every panel it freezes at once
+ * @param rank its place in the order of the runs of the page, from 1, which picks its dash
+ * @param label its entry in the legend, the state of the knobs the page read
+ * @returns whether a run was kept
+ */
+function keep(id: number, rank: number, label: string): boolean {
+  const spec = plot.value
+  if (spec === null || spec.series.length === 0) {
+    return false
+  }
+  const values: Record<string, number[]> = {}
+  for (const one of spec.series) {
+    values[one.id] = [...one.values]
+  }
+  keptRuns.value = [
+    ...keptRuns.value.filter((run) => run.id !== id),
+    { id, rank, label, x: [...spec.x], values },
+  ]
+  return true
+}
+
+/**
+ * Drop one run a reader froze.
+ *
+ * @param id the id of the run, which `keep` was given
+ */
+function drop(id: number): void {
+  keptRuns.value = keptRuns.value.filter((run) => run.id !== id)
+}
+
+/** Drop every run a reader froze, which a page does when it leaves or switches its variant. */
+function clearKept(): void {
+  keptRuns.value = []
+}
+
+defineExpose({ activate, freeze, reset, result, drawn, setLog, keep, drop, clearKept })
 </script>
 
 <template>
@@ -3106,7 +3216,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
     ref="root"
     part="panel"
     class="panel"
-    :class="[`layout-${drawnLayout}`, { frozen: frozen }]"
+    :class="[`layout-${drawnLayout}`, { frozen: frozen, compact: props.compact }]"
   >
     <header v-if="title !== '' || subtitle !== ''" class="head">
       <component :is="headingTag" v-if="title !== ''" :id="TITLE_ID" class="title">{{
@@ -3116,6 +3226,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
     </header>
     <div class="body">
       <div
+        v-if="!props.compact || drawnAxes.length > 0"
         class="controls"
         :class="{ 'control-row': drawnLayout !== 'sidebar' }"
         role="group"
@@ -3135,7 +3246,7 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
         <!-- disabled with the knobs while no declaration is read, the first one or
              the one of a variant a reader switched to: a toggle made then would be
              undone by the declaration, which sets the axis it declares -->
-        <div class="options">
+        <div v-if="!props.compact" class="options">
           <div class="control-line">
             <label class="toggle">
               <input
@@ -3246,12 +3357,18 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
         </p>
       </div>
     </div>
-    <div v-if="errorMessage !== '' || footer !== '' || heldFoot !== ''" part="foot" class="foot">
+    <div
+      v-if="errorMessage !== '' || shownFooter !== '' || shownHeldFoot !== ''"
+      part="foot"
+      class="foot"
+    >
       <p v-if="errorMessage !== ''" class="error" role="alert">{{ errorMessage }}</p>
-      <p v-if="footer !== ''" class="provenance">{{ footer }}</p>
+      <p v-if="shownFooter !== ''" class="provenance">{{ shownFooter }}</p>
       <!-- the provenance of the figure of the variant before a switch, which the
            panel holds, dimmed and hidden from a reader as that figure is -->
-      <p v-else-if="heldFoot !== ''" class="provenance held" aria-hidden="true">{{ heldFoot }}</p>
+      <p v-else-if="shownHeldFoot !== ''" class="provenance held" aria-hidden="true">
+        {{ shownHeldFoot }}
+      </p>
     </div>
   </div>
 </template>
@@ -3310,6 +3427,19 @@ defineExpose({ activate, freeze, reset, result, drawn, setLog })
   text-align: left;
   text-transform: none;
   letter-spacing: normal;
+}
+
+/* one card of a wall of readouts: its head and its figure, nothing between them */
+.panel.compact {
+  gap: 4px;
+}
+
+.panel.compact .title {
+  font-size: 14px;
+}
+
+.panel.compact .body {
+  gap: 8px;
 }
 
 .head {

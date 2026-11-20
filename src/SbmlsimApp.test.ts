@@ -12,6 +12,7 @@ import type {
   SimulateResponse,
 } from './contract'
 import { APP_TAG, register } from './index'
+import { FROZEN_RUNS } from './plot'
 
 // The shell runs in a dom, which is `happy-dom` for this file alone. Nothing
 // here reaches the network: `fetch` is a stub which answers the routes of an
@@ -292,7 +293,18 @@ function tabs(element: AppElement): HTMLButtonElement[] {
   return [...element.shadowRoot.querySelectorAll<HTMLButtonElement>('.nav .tab')]
 }
 
+/** The axis every panel last reported, by its id, from its `sbmlsim-scale`. */
+const axes = new Map<string, boolean>()
+
+/** Record the axis a panel reports, which is the probe of the scale a panel drew. */
+function noteScale(event: Event): void {
+  const detail = (event as CustomEvent<{ panel: string; log: boolean }>).detail
+  axes.set(detail.panel, detail.log)
+}
+
 beforeEach(() => {
+  axes.clear()
+  document.addEventListener('sbmlsim-scale', noteScale)
   declared = app()
   knobsOf = {}
   scalesOf = {}
@@ -364,6 +376,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  document.removeEventListener('sbmlsim-scale', noteScale)
   vi.useRealTimers()
   document.body.innerHTML = ''
   vi.unstubAllGlobals()
@@ -1968,23 +1981,14 @@ describe('the figure of an app', () => {
       tabs(element)[0]?.click()
       await settled()
       expect(simulations().length).toBeGreaterThan(before)
-      // the page switch of the scale and the Reset reach the panels as well
-      const toggle = (id: string): HTMLInputElement => {
-        const panel = element.shadowRoot.querySelector(`w-panel[panel="${id}"]`)
-        const box = (panel as unknown as AppElement).shadowRoot.querySelector<HTMLInputElement>(
-          '.toggle input',
-        )
-        if (box === null) {
-          throw new Error('no switch')
-        }
-        return box
-      }
+      // the page switch of the scale and the Reset reach the panels as well, which the panels
+      // report as the axis they draw (they are compact under a figure and carry no switch)
       ;(part(element, '.settings input[type=checkbox]') as HTMLInputElement).click()
       await settled()
-      expect(toggle('glimepiride').checked).toBe(true)
+      expect(axes.get('glimepiride')).toBe(true)
       ;(part(element, '.settings button.reset') as HTMLButtonElement).click()
       await settled()
-      expect(toggle('glimepiride').checked).toBe(false)
+      expect(axes.get('glimepiride')).toBe(false)
     } finally {
       register()
     }
@@ -2059,21 +2063,32 @@ describe('the settings and the information of an app', () => {
     expect(placed(element).every((one) => one.getAttribute('log') === 'true')).toBe(true)
   })
 
-  /** Whether a placed panel draws its y axis logarithmic, from its own switch. */
+  /**
+   * Whether a placed panel draws its y axis logarithmic.
+   *
+   * The panels of a page which draws a figure are compact and carry no switch of their own, so
+   * the probe is the `sbmlsim-scale` every panel dispatches whenever its axis changes, which is
+   * what the shell reads too (`collectScale`).
+   */
   function logarithmic(element: AppElement, id: string): boolean {
-    const panel = placed(element).find((one) => one.getAttribute('panel') === id)
-    return ownToggle(panel).checked
+    if (placed(element).find((one) => one.getAttribute('panel') === id) === undefined) {
+      throw new Error(`no panel '${id}' is placed`)
+    }
+    const log = axes.get(id)
+    if (log === undefined) {
+      throw new Error(`the panel '${id}' reported no axis`)
+    }
+    return log
   }
 
-  /** The switch of a panel of its own scale. */
-  function ownToggle(panel: PlacedPanel | undefined): HTMLInputElement {
-    const found = (
-      panel as unknown as AppElement | undefined
-    )?.shadowRoot.querySelector<HTMLInputElement>('.toggle input')
-    if (found === null || found === undefined) {
-      throw new Error('the panel has no switch of its scale')
+  /** Set the axis of one panel as its own switch does, which a compact panel has not. */
+  async function ownLog(panel: PlacedPanel | undefined, on: boolean): Promise<void> {
+    const found = panel as unknown as { setLog?: (on: boolean) => void } | undefined
+    if (found?.setLog === undefined) {
+      throw new Error('the panel takes no scale')
     }
-    return found
+    found.setLog(on)
+    await settled()
   }
 
   /** The figure element of the shell. */
@@ -2100,11 +2115,8 @@ describe('the settings and the information of an app', () => {
     expect(box.checked).toBe(false)
     expect(logarithmic(element, 'glimepiride')).toBe(false)
     expect(logarithmic(element, 'm1')).toBe(false)
-    // a flip of the own switch of one panel is shown as a mixed page, and the click sets all
-    const own = ownToggle(placed(element)[0])
-    own.checked = true
-    own.dispatchEvent(new Event('change'))
-    await settled()
+    // a panel on an axis of its own is shown as a mixed page, and the click sets all
+    await ownLog(placed(element)[0], true)
     expect(box.indeterminate).toBe(true)
     await clickSwitch(element)
     expect(logarithmic(element, 'glimepiride')).toBe(true)
@@ -2238,14 +2250,147 @@ describe('the settings and the information of an app', () => {
     expect(placed(element)[0]?.hasAttribute('draws')).toBe(false)
     expect(draws.value).toBe('0')
     expect(box.checked).toBe(false)
-    const own = ownToggle(placed(element)[0])
-    own.checked = true
-    own.dispatchEvent(new Event('change'))
-    await settled()
+    await ownLog(placed(element)[0], true)
     expect(logarithmic(element, 'li_gli')).toBe(true)
     ;(part(element, '.settings button.reset') as HTMLButtonElement).click()
     await settled()
     expect(logarithmic(element, 'li_gli')).toBe(false)
+  })
+
+  it('draws the panels of a page which shows a figure as a wall of readouts', async () => {
+    declared = figured()
+    const element = await shell()
+    const shadows = placed(element).map((one) => (one as unknown as AppElement).shadowRoot)
+    expect(shadows).toHaveLength(2)
+    // the page carries the switch, the reset and the line of the run, so no card repeats them
+    expect(shadows.every((one) => one.querySelector('.options') === null)).toBe(true)
+    expect(shadows.every((one) => one.querySelector('.provenance') === null)).toBe(true)
+    // the page without the figure keeps the controls of every panel
+    tabs(element)[1]?.click()
+    await settled()
+    const plain = (placed(element)[0] as unknown as AppElement).shadowRoot
+    expect(plain.querySelector('.options')).not.toBeNull()
+    expect(plain.querySelector('.provenance')).not.toBeNull()
+  })
+
+  it('freezes the curves of every panel of the page and says what it kept', async () => {
+    declared = figured()
+    const element = await shell()
+    const freeze = part(element, 'button[part="settings-freeze"]') as HTMLButtonElement
+    freeze.click()
+    await settled()
+    const chips = [...element.shadowRoot.querySelectorAll('.frozen .chip')]
+    expect(chips).toHaveLength(1)
+    // the chip is the state of the shared knobs the run was frozen at, each in its unit
+    expect(chips[0]?.textContent).toContain('knob A 1 mg')
+    expect(chips[0]?.querySelector('.chip-dash line')?.getAttribute('stroke-dasharray')).toBe('5 3')
+    // every panel of the page draws it, dashed and under its live curves
+    const shadows = placed(element).map((one) => (one as unknown as AppElement).shadowRoot)
+    expect(shadows).toHaveLength(2)
+    expect(shadows.every((one) => one.innerHTML.includes('class="curve frozen"'))).toBe(true)
+  })
+
+  it('drops one run a reader froze and all of them', async () => {
+    declared = figured()
+    const element = await shell()
+    const freeze = part(element, 'button[part="settings-freeze"]') as HTMLButtonElement
+    freeze.click()
+    await settled()
+    freeze.click()
+    await settled()
+    const dashes = [...element.shadowRoot.querySelectorAll('.chip-dash line')].map((one) =>
+      one.getAttribute('stroke-dasharray'),
+    )
+    expect(dashes).toEqual(['5 3', '1.5 2.5'])
+    const drop = element.shadowRoot.querySelectorAll<HTMLButtonElement>('.chip-drop')
+    drop[0]?.click()
+    await settled()
+    expect([...element.shadowRoot.querySelectorAll('.chip-dash line')]).toHaveLength(1)
+    const shadow = (placed(element)[0] as unknown as AppElement).shadowRoot
+    expect(shadow.innerHTML.match(/class="curve frozen"/g) ?? []).toHaveLength(1)
+    ;(part(element, '.chip-all') as HTMLButtonElement).click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.frozen')).toBeNull()
+    expect(shadow.innerHTML).not.toContain('class="curve frozen"')
+  })
+
+  it('freezes no more runs than a plot keeps apart', async () => {
+    declared = figured()
+    const element = await shell()
+    const freeze = part(element, 'button[part="settings-freeze"]') as HTMLButtonElement
+    for (let round = 0; round < FROZEN_RUNS + 2; round += 1) {
+      freeze.click()
+      await settled()
+    }
+    expect([...element.shadowRoot.querySelectorAll('.chip-dash')]).toHaveLength(FROZEN_RUNS)
+    expect(freeze.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('drops the runs of a page when another page is shown', async () => {
+    declared = figured()
+    const element = await shell()
+    ;(part(element, 'button[part="settings-freeze"]') as HTMLButtonElement).click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.chip')).not.toBeNull()
+    tabs(element)[1]?.click()
+    await settled()
+    tabs(element)[0]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('.chip')).toBeNull()
+    const shadows = placed(element).map((one) => (one as unknown as AppElement).shadowRoot)
+    expect(shadows.every((one) => !one.innerHTML.includes('class="curve frozen"'))).toBe(true)
+  })
+
+  it('shows in its information what the page slots into it', async () => {
+    declared = figured()
+    const element = await shell()
+    const notices = document.createElement('div')
+    notices.setAttribute('slot', 'licenses')
+    notices.textContent = 'Third-party notices'
+    element.append(notices)
+    ;(part(element, '.information-tab') as HTMLButtonElement).click()
+    await settled()
+    const slot = part(element, '.information-host slot') as HTMLSlotElement
+    expect(slot.getAttribute('name')).toBe('licenses')
+    expect(slot.assignedNodes()).toEqual([notices])
+  })
+
+  it('clears the panels a reader picked from the drawing', async () => {
+    declared = figured()
+    const element = await shell()
+    const told: string[][] = []
+    element.addEventListener('sbmlsim-selection', (event) => {
+      told.push((event as CustomEvent<{ panels: string[] }>).detail.panels)
+    })
+    const clear = part(element, 'button[part="settings-clear"]') as HTMLButtonElement
+    // nothing was picked, so the button says it has nothing to do and keeps its focus
+    expect(clear.getAttribute('aria-disabled')).toBe('true')
+    clear.click()
+    await settled()
+    expect(told).toEqual([])
+    figureIn(element).dispatchEvent(
+      new CustomEvent('sbmlsim-figure-select', {
+        detail: { key: 'li/sub:gli' },
+        bubbles: true,
+        composed: true,
+      }),
+    )
+    await settled()
+    expect(panels(element)).toEqual(['glimepiride', 'm1', 'li_gli'])
+    expect(clear.getAttribute('aria-disabled')).toBeNull()
+    clear.click()
+    await settled()
+    expect(panels(element)).toEqual(['glimepiride', 'm1'])
+    expect(element.getAttribute('selection')).toBeNull()
+    expect(told.at(-1)).toEqual(['glimepiride', 'm1'])
+  })
+
+  it('has no clear of the selection on a page without a figure', async () => {
+    declared = figured()
+    const element = await shell()
+    tabs(element)[1]?.click()
+    await settled()
+    expect(element.shadowRoot.querySelector('button[part="settings-clear"]')).toBeNull()
   })
 
   it('reports the latest of two answers by their time', async () => {

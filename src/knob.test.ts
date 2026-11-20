@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PanelAxis } from './contract'
-import { choiceAt, knobLabel, rangeStep, snapValue, stopsOf, validValue } from './knob'
+import {
+  choiceAt,
+  knobLabel,
+  knobValueText,
+  rangeStep,
+  snapValue,
+  stopsOf,
+  validValue,
+} from './knob'
 
 /** A range knob of a clearance, with the stops of a renal impairment. */
 function clearance(more: Partial<PanelAxis> = {}): PanelAxis {
@@ -81,6 +89,38 @@ describe('the label of a knob', () => {
     for (const unit of ['dimensionless', '1', '', null]) {
       expect(knobLabel(clearance({ label: 'cirrhosis degree', unit }))).toBe('cirrhosis degree')
     }
+  })
+})
+
+describe('the value of a knob as a reader reads it', () => {
+  it('is the stop of a range knob it stands on, else its number and its unit', () => {
+    expect(knobValueText(clearance(), 110)).toBe('normal')
+    expect(knobValueText(clearance(), 75.00000000000001)).toBe('mild impairment')
+    expect(knobValueText(clearance(), 52.25)).toBe('52.25 ml/min')
+    for (const unit of ['dimensionless', '1', '', null]) {
+      expect(knobValueText(clearance({ unit }), 52.25)).toBe('52.25')
+    }
+  })
+
+  it('is the choice of a choice knob, which carries its unit itself', () => {
+    const dose: PanelAxis = {
+      id: 'dose',
+      label: 'dose',
+      target: 'PODOSE',
+      unit: 'mg',
+      kind: 'choice',
+      min: null,
+      max: null,
+      steps: 0,
+      choices: [
+        { label: '12.5 mg', value: 12.5 },
+        { label: '25 mg', value: 25 },
+      ],
+      default: 25,
+    }
+    expect(knobValueText(dose, 25)).toBe('25 mg')
+    // a value which is none of its choices is its number, which a page refuses to simulate
+    expect(knobValueText(dose, 30)).toBe('30 mg')
   })
 })
 
